@@ -1,0 +1,381 @@
+from datetime import datetime
+from sqlalchemy import (
+    Column, Integer, String, Boolean, DateTime, Float,
+    ForeignKey, Text, Enum, JSON, Date, Time
+)
+from sqlalchemy.orm import relationship
+import enum
+from .database import Base
+
+
+class UserRole(str, enum.Enum):
+    superadmin = "superadmin"
+    manager = "manager"
+    editor = "editor"
+    staff = "staff"
+    order = "order"
+    cast = "cast"
+    readonly = "readonly"
+
+
+class CastRank(str, enum.Enum):
+    S = "S"
+    A = "A"
+    B_PLUS = "B+"
+    B = "B"
+    C_PLUS = "C+"
+    C = "C"
+    D = "D"
+    E = "E"
+
+
+class PaymentMethod(str, enum.Enum):
+    cash = "cash"
+    card = "card"
+    mixed = "mixed"
+
+
+class AssignmentType(str, enum.Enum):
+    honshimei = "honshimei"
+    jounai = "jounai"
+    douhan = "douhan"
+    afutaa = "afutaa"
+    help = "help"
+
+
+class ShiftRequestStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
+class AIAdviceType(str, enum.Enum):
+    rotation = "rotation"
+    management = "management"
+    forecast = "forecast"
+    customer = "customer"
+
+
+# ─────────────────────────────────────────
+# 店舗
+# ─────────────────────────────────────────
+class Store(Base):
+    __tablename__ = "stores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    code = Column(String(50), unique=True, nullable=False)
+    set_price = Column(Integer, default=0)
+    extension_price = Column(Integer, default=0)
+    address = Column(String(200))
+    phone = Column(String(20))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    users = relationship("User", back_populates="store")
+    casts = relationship("Cast", back_populates="store")
+    tickets = relationship("Ticket", back_populates="store")
+    daily_reports = relationship("DailyReport", back_populates="store")
+
+
+# ─────────────────────────────────────────
+# ユーザー
+# ─────────────────────────────────────────
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(200), unique=True, nullable=False, index=True)
+    password_hash = Column(String(200), nullable=False)
+    name = Column(String(100), nullable=False)
+    role = Column(Enum(UserRole), default=UserRole.staff)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    is_active = Column(Boolean, default=True)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store", back_populates="users")
+    cast_profile = relationship("Cast", back_populates="user", uselist=False)
+
+
+# ─────────────────────────────────────────
+# キャスト
+# ─────────────────────────────────────────
+class Cast(Base):
+    __tablename__ = "casts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    stage_name = Column(String(50), nullable=False)
+    real_name = Column(String(100))
+    rank = Column(String(10), default="C")
+    hourly_rate = Column(Integer, default=1400)
+    help_hourly_rate = Column(Integer, default=1500)
+    alcohol_tolerance = Column(String(10), default="普通")
+    main_time_slot = Column(String(20))
+    transport_need = Column(Boolean, default=False)
+    nearest_station = Column(String(100))
+    notes = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store", back_populates="casts")
+    user = relationship("User", back_populates="cast_profile")
+    shift_requests = relationship("CastShiftRequest", back_populates="cast")
+    confirmed_shifts = relationship("ConfirmedShift", back_populates="cast")
+    assignments = relationship("CastAssignment", back_populates="cast")
+
+
+# ─────────────────────────────────────────
+# 顧客
+# ─────────────────────────────────────────
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    alias = Column(String(100))
+    phone = Column(String(20))
+    birthday = Column(Date, nullable=True)
+    first_visit_date = Column(Date, nullable=True)
+    last_visit_date = Column(Date, nullable=True)
+    total_visits = Column(Integer, default=0)
+    total_spend = Column(Integer, default=0)
+    ltv = Column(Integer, default=0)
+    point_balance = Column(Integer, default=0)
+    ai_summary = Column(Text)
+    preferences = Column(JSON, default={})
+    is_blacklisted = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tickets = relationship("Ticket", back_populates="customer")
+    bottles = relationship("Bottle", back_populates="customer")
+    visit_notes = relationship("CustomerVisitNote", back_populates="customer")
+    visits = relationship("CustomerVisit", back_populates="customer")
+
+
+# ─────────────────────────────────────────
+# 来店履歴（Excelインポート）
+# ─────────────────────────────────────────
+class CustomerVisit(Base):
+    __tablename__ = "customer_visits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+    store_name = Column(String(100))
+    is_repeat = Column(Boolean, default=True)
+    in_time = Column(Integer, nullable=True)
+    out_time = Column(Integer, nullable=True)
+    total_payment = Column(Integer, default=0)
+    raw_data = Column(JSON)        # {header: value} B〜AU列のデータ
+    imported_at = Column(DateTime, default=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="visits")
+
+
+# ─────────────────────────────────────────
+# ボトルキープ
+# ─────────────────────────────────────────
+class Bottle(Base):
+    __tablename__ = "bottles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    bottle_name = Column(String(100), nullable=False)
+    unique_code = Column(String(50), unique=True)
+    purchased_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    remaining_volume = Column(Integer, default=700)
+    price = Column(Integer, default=0)
+    is_expired = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    customer = relationship("Customer", back_populates="bottles")
+
+
+# ─────────────────────────────────────────
+# 伝票（POS）
+# ─────────────────────────────────────────
+class Ticket(Base):
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    table_no = Column(String(20))
+    started_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    is_closed = Column(Boolean, default=False)
+    set_count = Column(Integer, default=1)
+    extension_count = Column(Integer, default=0)
+    total_amount = Column(Integer, default=0)
+    discount_amount = Column(Integer, default=0)
+    payment_method = Column(Enum(PaymentMethod), nullable=True)
+    cash_amount = Column(Integer, default=0)
+    card_amount = Column(Integer, default=0)
+    staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store", back_populates="tickets")
+    customer = relationship("Customer", back_populates="tickets")
+    order_items = relationship("OrderItem", back_populates="ticket")
+    assignments = relationship("CastAssignment", back_populates="ticket")
+    visit_notes = relationship("CustomerVisitNote", back_populates="ticket")
+
+
+# ─────────────────────────────────────────
+# 注文明細
+# ─────────────────────────────────────────
+class OrderItem(Base):
+    __tablename__ = "order_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False)
+    item_type = Column(String(50), nullable=False)
+    item_name = Column(String(100))
+    quantity = Column(Integer, default=1)
+    unit_price = Column(Integer, default=0)
+    amount = Column(Integer, default=0)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)
+    canceled_at = Column(DateTime, nullable=True)
+    canceled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket", back_populates="order_items")
+
+
+# ─────────────────────────────────────────
+# 付け回し
+# ─────────────────────────────────────────
+class CastAssignment(Base):
+    __tablename__ = "cast_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=False)
+    assignment_type = Column(Enum(AssignmentType), nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    back_amount = Column(Integer, default=0)
+
+    ticket = relationship("Ticket", back_populates="assignments")
+    cast = relationship("Cast", back_populates="assignments")
+
+
+# ─────────────────────────────────────────
+# 接客メモ
+# ─────────────────────────────────────────
+class CustomerVisitNote(Base):
+    __tablename__ = "customer_visit_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+    staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    note = Column(Text, nullable=False)
+    ai_summary = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    customer = relationship("Customer", back_populates="visit_notes")
+    ticket = relationship("Ticket", back_populates="visit_notes")
+
+
+# ─────────────────────────────────────────
+# シフト申請・確定
+# ─────────────────────────────────────────
+class CastShiftRequest(Base):
+    __tablename__ = "cast_shift_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=False)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    desired_date = Column(Date, nullable=False)
+    desired_start = Column(String(10))
+    desired_end = Column(String(10))
+    status = Column(Enum(ShiftRequestStatus), default=ShiftRequestStatus.pending)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    cast = relationship("Cast", back_populates="shift_requests")
+
+
+class ConfirmedShift(Base):
+    __tablename__ = "confirmed_shifts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=False)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    planned_start = Column(String(10))
+    planned_end = Column(String(10))
+    actual_start = Column(DateTime, nullable=True)
+    actual_end = Column(DateTime, nullable=True)
+    is_late = Column(Boolean, default=False)
+    is_absent = Column(Boolean, default=False)
+    help_from_store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    notes = Column(Text)
+
+    cast = relationship("Cast", back_populates="confirmed_shifts")
+    daily_pay = relationship("CastDailyPay", back_populates="shift", uselist=False)
+
+
+class CastDailyPay(Base):
+    __tablename__ = "cast_daily_pays"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shift_id = Column(Integer, ForeignKey("confirmed_shifts.id"), nullable=False)
+    base_pay = Column(Integer, default=0)
+    drink_back = Column(Integer, default=0)
+    champagne_back = Column(Integer, default=0)
+    honshimei_back = Column(Integer, default=0)
+    douhan_back = Column(Integer, default=0)
+    transport_deduction = Column(Integer, default=0)
+    tax_deduction = Column(Integer, default=0)
+    total_pay = Column(Integer, default=0)
+    calculated_at = Column(DateTime, default=datetime.utcnow)
+
+    shift = relationship("ConfirmedShift", back_populates="daily_pay")
+
+
+# ─────────────────────────────────────────
+# 日報
+# ─────────────────────────────────────────
+class DailyReport(Base):
+    __tablename__ = "daily_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    new_customers = Column(Integer, default=0)
+    repeat_customers = Column(Integer, default=0)
+    total_sales = Column(Integer, default=0)
+    target_sales = Column(Integer, default=0)
+    champagne_count = Column(Integer, default=0)
+    champagne_sales = Column(Integer, default=0)
+    extension_count = Column(Integer, default=0)
+    visit_sources = Column(JSON, default={})
+    ai_analysis = Column(Text)
+    is_closed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store", back_populates="daily_reports")
+
+
+# ─────────────────────────────────────────
+# AIアドバイス
+# ─────────────────────────────────────────
+class AIAdvice(Base):
+    __tablename__ = "ai_advice"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    advice_type = Column(Enum(AIAdviceType), nullable=False)
+    context = Column(JSON, default={})
+    advice = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
