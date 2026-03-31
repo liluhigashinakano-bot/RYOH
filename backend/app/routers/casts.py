@@ -228,13 +228,14 @@ def get_cast_stats(
         models.ConfirmedShift.store_id == store_id,
     ).all()
 
-    total_shifts = len(shifts)
-    absent_shifts = sum(1 for s in shifts if s.is_absent)
-    late_shifts = sum(1 for s in shifts if s.is_late)
-
     total_minutes = 0.0
     weekday_minutes: dict[int, list[float]] = defaultdict(list)
     monthly_counts: dict[str, int] = defaultdict(int)
+    # 当欠率・遅刻率・日払い率用：月ごとに集計
+    monthly_total_rows: dict[str, int] = defaultdict(int)
+    monthly_absent_rows: dict[str, int] = defaultdict(int)
+    monthly_late_rows: dict[str, int] = defaultdict(int)
+    monthly_daily_pay_rows: dict[str, int] = defaultdict(int)
 
     # shift_data から集計（Excelインポート分）
     total_set_l = total_set_mg = total_set_shot = 0.0
@@ -243,12 +244,15 @@ def get_cast_stats(
     daily_pay_count = 0
 
     for s in shifts:
-        if s.is_absent:
-            continue
         month_key = s.date.strftime("%Y-%m")
-        monthly_counts[month_key] += 1
+        # キャスト名が入力されている行（=シフトレコード全件）をカウント
+        monthly_total_rows[month_key] += 1
+        if s.is_late:
+            monthly_late_rows[month_key] += 1
+        if s.is_absent:
+            monthly_absent_rows[month_key] += 1
+            continue
 
-        # 実働時間: shift_data.working_hours を優先、なければ actual_start/end
         sd = s.shift_data or {}
         wh = sd.get("working_hours", 0) or 0
         if wh > 0:
@@ -257,6 +261,10 @@ def get_cast_stats(
             mins = (s.actual_end - s.actual_start).total_seconds() / 60
         else:
             mins = 0
+
+        # 出勤/退勤の数値がある件数のみカウント（欠勤は既に除外済み）
+        if mins > 0:
+            monthly_counts[month_key] += 1
 
         if mins > 0:
             total_minutes += mins
@@ -273,6 +281,8 @@ def get_cast_stats(
         total_dist += sd.get("distribution_count", 0) or 0
         if sd.get("daily_payment", 0):
             daily_pay_count += 1
+            if mins > 0:
+                monthly_daily_pay_rows[month_key] += 1
 
     avg_monthly_shifts = (
         sum(monthly_counts.values()) / len(monthly_counts) if monthly_counts else 0
@@ -287,7 +297,40 @@ def get_cast_stats(
     # セット数（40分/セット）
     total_sets = total_minutes / 40 if total_minutes > 0 else 0
     total_hours = total_minutes / 60
+    # 実際に出勤した月（working_hours > 0 の記録がある月）のみカウント
+    active_months = set(monthly_counts.keys())
+    num_months = len(active_months) if active_months else 1
+    avg_monthly_hours = round(total_hours / num_months, 1)
+    total_shifts = sum(monthly_total_rows.values())
+    absent_shifts = sum(monthly_absent_rows.values())
     effective_shifts = total_shifts - absent_shifts
+
+    # 当欠率：出勤があった月のみ対象
+    monthly_absent_rates = []
+    for mk in active_months:
+        total_rows = monthly_total_rows.get(mk, 0)
+        absent_rows = monthly_absent_rows.get(mk, 0)
+        if total_rows > 0:
+            monthly_absent_rates.append(absent_rows / total_rows * 100)
+    avg_absent_rate = round(sum(monthly_absent_rates) / len(monthly_absent_rates), 1) if monthly_absent_rates else 0
+
+    # 遅刻率：出勤があった月のみ対象
+    monthly_late_rates = []
+    for mk in active_months:
+        total_rows = monthly_total_rows.get(mk, 0)
+        late_rows = monthly_late_rows.get(mk, 0)
+        if total_rows > 0:
+            monthly_late_rates.append(late_rows / total_rows * 100)
+    avg_late_rate = round(sum(monthly_late_rates) / len(monthly_late_rates), 1) if monthly_late_rates else 0
+
+    # 日払い率：月ごとに 日払い件数÷出勤退勤数値あり件数 を計算して平均
+    monthly_daily_pay_rates = []
+    for mk in monthly_counts:
+        worked = monthly_counts[mk]
+        paid = monthly_daily_pay_rows.get(mk, 0)
+        if worked > 0:
+            monthly_daily_pay_rates.append(paid / worked * 100)
+    avg_daily_pay_rate = round(sum(monthly_daily_pay_rates) / len(monthly_daily_pay_rates), 1) if monthly_daily_pay_rates else 0
 
     def per_set(total: float) -> float:
         return round(total / total_sets, 2) if total_sets > 0 else 0
@@ -295,9 +338,9 @@ def get_cast_stats(
     def per_shift(total: float) -> float:
         return round(total / effective_shifts, 2) if effective_shifts > 0 else 0
 
-    # 実質時給 = 基本時給 + Dバック/実労働時間
-    d_back_per_hour = round(total_drink_back / total_hours, 0) if total_hours > 0 else 0
-    real_hourly = cast.hourly_rate + int(d_back_per_hour)
+    # 実質時給 = 基本時給 + 1セット(40分)あたりDバック
+    d_back_per_set = round(total_drink_back / total_sets, 0) if total_sets > 0 else 0
+    real_hourly = cast.hourly_rate + int(d_back_per_set)
 
     return {
         "hourly_rate": cast.hourly_rate,
@@ -305,11 +348,11 @@ def get_cast_stats(
         "real_hourly_rate": real_hourly,
         "total_shifts": total_shifts,
         "avg_monthly_shifts": round(avg_monthly_shifts, 1),
-        "total_hours": round(total_hours, 1),
+        "avg_monthly_hours": avg_monthly_hours,
         "weekday_avg_hours": weekday_avg,
-        "absent_rate": round(absent_shifts / total_shifts * 100, 1) if total_shifts else 0,
-        "late_rate": round(late_shifts / total_shifts * 100, 1) if total_shifts else 0,
-        "per_set_drinks": per_set(total_drink_count),
+        "absent_rate": avg_absent_rate,
+        "late_rate": avg_late_rate,
+        "per_set_drinks": per_set(total_set_l),
         "per_set_mg": per_set(total_set_mg),
         "per_set_shots": per_set(total_set_shot),
         "per_set_champagne_back": per_set(total_champagne_back),
@@ -318,7 +361,7 @@ def get_cast_stats(
         "per_shift_nt": per_shift(total_nt),
         "per_shift_distribution": per_shift(total_dist),
         "daily_pay_count": daily_pay_count,
-        "daily_pay_ratio": round(daily_pay_count / total_shifts * 100, 1) if total_shifts else 0,
+        "daily_pay_ratio": avg_daily_pay_rate,
     }
 
 

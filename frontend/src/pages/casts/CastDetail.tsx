@@ -251,7 +251,7 @@ export default function CastDetail() {
             <p className="text-xs text-gray-500 mb-2">出勤</p>
             <div className="grid grid-cols-3 gap-2">
               <StatCard label="月間平均出勤" value={stats.avg_monthly_shifts} unit="回" />
-              <StatCard label="月間総労働時間" value={stats.total_hours} unit="h" />
+              <StatCard label="月間総労働時間" value={stats.avg_monthly_hours} unit="h" />
               <StatCard label="当欠率" value={stats.absent_rate} unit="%" />
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
