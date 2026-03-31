@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -36,6 +37,11 @@ app.include_router(customers.router)
 app.include_router(tickets.router)
 app.include_router(ai.router)
 app.include_router(excel_import.router)
+
+
+uploads_dir = os.path.join(os.path.dirname(__file__), "..", "data", "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 @app.get("/")

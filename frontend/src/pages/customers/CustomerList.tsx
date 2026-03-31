@@ -4,23 +4,26 @@ import { Search, Plus, X, User, Upload, Cake } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../../api/client'
 
-type SortKey = '50音' | '来店回数' | '平均会計額' | '平均延長' | '平均来店時間' | '月間平均来店'
+type SortKey = '50音' | '来店回数' | '累計会計金額' | '平均会計額' | '平均延長' | '平均来店時間' | '月間平均来店'
 
-function sortCustomers(customers: any[], key: SortKey): any[] {
+function sortCustomers(customers: any[], key: SortKey, asc: boolean): any[] {
   const arr = [...customers]
+  const dir = asc ? 1 : -1
   switch (key) {
     case '50音':
-      return arr.sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+      return arr.sort((a, b) => dir * a.name.localeCompare(b.name, 'ja'))
     case '来店回数':
-      return arr.sort((a, b) => (b.total_visits || 0) - (a.total_visits || 0))
+      return arr.sort((a, b) => dir * ((a.total_visits || 0) - (b.total_visits || 0)))
+    case '累計会計金額':
+      return arr.sort((a, b) => dir * ((a.total_spend || 0) - (b.total_spend || 0)))
     case '平均会計額':
-      return arr.sort((a, b) => (b.preferences?.avg_spend || 0) - (a.preferences?.avg_spend || 0))
+      return arr.sort((a, b) => dir * ((a.preferences?.avg_spend || 0) - (b.preferences?.avg_spend || 0)))
     case '平均延長':
-      return arr.sort((a, b) => (b.preferences?.avg_extensions || 0) - (a.preferences?.avg_extensions || 0))
+      return arr.sort((a, b) => dir * ((a.preferences?.avg_extensions || 0) - (b.preferences?.avg_extensions || 0)))
     case '平均来店時間':
-      return arr.sort((a, b) => (a.preferences?.avg_in_time || 9999) - (b.preferences?.avg_in_time || 9999))
+      return arr.sort((a, b) => dir * ((a.preferences?.avg_in_time || 9999) - (b.preferences?.avg_in_time || 9999)))
     case '月間平均来店':
-      return arr.sort((a, b) => (b.preferences?.monthly_avg_visits || 0) - (a.preferences?.monthly_avg_visits || 0))
+      return arr.sort((a, b) => dir * ((a.preferences?.monthly_avg_visits || 0) - (b.preferences?.monthly_avg_visits || 0)))
     default:
       return arr
   }
@@ -35,6 +38,7 @@ function formatInTime(t: number): string {
 export default function CustomerList() {
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('来店回数')
+  const [sortAsc, setSortAsc] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const navigate = useNavigate()
@@ -44,7 +48,7 @@ export default function CustomerList() {
     queryFn: () => apiClient.get('/api/customers', { params: q ? { q } : {} }).then(r => r.data),
   })
 
-  const customers = sortCustomers(rawCustomers, sortKey)
+  const customers = sortCustomers(rawCustomers, sortKey, sortAsc)
 
   const { data: birthdays = [] } = useQuery({
     queryKey: ['birthdays'],
@@ -52,7 +56,7 @@ export default function CustomerList() {
     staleTime: 1000 * 60 * 10,
   })
 
-  const sortOptions: SortKey[] = ['50音', '来店回数', '平均会計額', '平均延長', '平均来店時間', '月間平均来店']
+  const sortOptions: SortKey[] = ['50音', '来店回数', '累計会計金額', '平均会計額', '平均延長', '平均来店時間', '月間平均来店']
 
   return (
     <div className="space-y-4">
@@ -110,6 +114,13 @@ export default function CustomerList() {
         >
           {sortOptions.map(k => <option key={k}>{k}</option>)}
         </select>
+        <button
+          onClick={() => setSortAsc(v => !v)}
+          className="input-field text-sm px-3 flex-shrink-0"
+          title={sortAsc ? '昇順' : '降順'}
+        >
+          {sortAsc ? '↑' : '↓'}
+        </button>
       </div>
 
       {/* 顧客一覧 */}
@@ -117,22 +128,25 @@ export default function CustomerList() {
         {customers.map((c: any) => {
           const prefs = c.preferences || {}
           const dayPrefs: Record<string, number> = prefs.day_prefs || {}
-          const topDays = Object.entries(dayPrefs).sort((a, b) => b[1] - a[1]).slice(0, 3)
+          const allDays = Object.entries(dayPrefs).sort((a, b) => b[1] - a[1])
           return (
             <button
               key={c.id}
               onClick={() => navigate(`/customers/${c.id}`)}
               className="card w-full text-left flex items-start gap-3 hover:border-pink-700/50 transition-colors active:scale-[0.99]"
             >
-              <div className="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <User className="w-3.5 h-3.5 text-gray-500" />
+              <div className="w-7 h-7 rounded-full bg-gray-800 flex items-center justify-center flex-shrink-0 mt-0.5 overflow-hidden">
+                {c.photo_url
+                  ? <img src={c.photo_url} alt={c.name} className="w-full h-full object-cover" />
+                  : <User className="w-3.5 h-3.5 text-gray-500" />
+                }
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-medium text-white">
-                    {c.name}
-                    {c.alias && <span className="text-gray-400 text-sm ml-1.5">({c.alias})</span>}
-                  </p>
+                  <p className="font-medium text-white">{c.name}</p>
+                  {c.alias && <span className="text-gray-400 text-sm">{c.alias}</span>}
+                  {c.age_group && <span className="text-gray-500 text-xs">{c.age_group}</span>}
+                  {c.features && <span className="text-gray-500 text-xs truncate max-w-[160px]">{c.features}</span>}
                   {c.is_blacklisted && <span className="badge bg-red-900/40 text-red-400 text-xs">BL</span>}
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
@@ -151,14 +165,17 @@ export default function CustomerList() {
                     {prefs.set_shot != null && <span>SHOT<span className="text-pink-300 ml-0.5">{Number(prefs.set_shot).toFixed(1)}</span></span>}
                   </div>
                 )}
-                {topDays.length > 0 && (
+                {allDays.length > 0 && (
                   <div className="flex gap-1 mt-1 flex-wrap">
-                    {topDays.map(([day, cnt]) => (
+                    {allDays.map(([day, cnt]) => (
                       <span key={day} className="text-xs bg-pink-900/20 text-pink-400 px-1.5 py-0.5 rounded">
                         {day}({cnt})
                       </span>
                     ))}
                   </div>
+                )}
+                {c.ai_summary && (
+                  <p className="mt-1 text-xs text-gray-500 line-clamp-2">{c.ai_summary}</p>
                 )}
               </div>
               {!c.last_visit_date && <p className="text-xs text-gray-500 flex-shrink-0">未来店</p>}

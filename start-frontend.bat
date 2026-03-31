@@ -1,5 +1,4 @@
 @echo off
 cd /d C:\Users\lalal\trust\frontend
-npm install
-npm run dev
+"C:\Program Files\nodejs\npm.cmd" run dev
 pause

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import time
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from pydantic import BaseModel
@@ -8,6 +10,8 @@ from ..database import get_db
 from .. import models
 from ..auth import get_current_user
 
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "uploads", "customers")
+
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 
@@ -16,6 +20,8 @@ class CustomerCreate(BaseModel):
     alias: Optional[str] = None
     phone: Optional[str] = None
     birthday: Optional[date] = None
+    age_group: Optional[str] = None
+    features: Optional[str] = None
     preferences: dict = {}
 
 
@@ -24,6 +30,8 @@ class CustomerUpdate(BaseModel):
     alias: Optional[str] = None
     phone: Optional[str] = None
     birthday: Optional[date] = None
+    age_group: Optional[str] = None
+    features: Optional[str] = None
     preferences: Optional[dict] = None
     is_blacklisted: Optional[bool] = None
 
@@ -40,6 +48,9 @@ class CustomerResponse(BaseModel):
     total_spend: int
     point_balance: int
     ai_summary: Optional[str]
+    age_group: Optional[str]
+    features: Optional[str]
+    photo_url: Optional[str]
     preferences: dict
     is_blacklisted: bool
 
@@ -51,6 +62,7 @@ class CustomerResponse(BaseModel):
         phone_masked = None
         if customer.phone:
             phone_masked = "****-" + customer.phone[-4:] if len(customer.phone) >= 4 else "****"
+        photo_url = f"/uploads/customers/{customer.photo_path}" if customer.photo_path else None
         return cls(
             id=customer.id,
             name=customer.name,
@@ -63,6 +75,9 @@ class CustomerResponse(BaseModel):
             total_spend=customer.total_spend,
             point_balance=customer.point_balance,
             ai_summary=customer.ai_summary,
+            age_group=customer.age_group,
+            features=customer.features,
+            photo_url=photo_url,
             preferences=customer.preferences or {},
             is_blacklisted=customer.is_blacklisted,
         )
@@ -182,6 +197,30 @@ def delete_note(
     db.delete(note)
     db.commit()
     return {"message": "削除しました"}
+
+
+@router.post("/{customer_id}/photo")
+async def upload_customer_photo(
+    customer_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="顧客が見つかりません")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        raise HTTPException(status_code=400, detail="jpg/png/webp/gif のみ対応しています")
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    filename = f"{customer_id}_{int(time.time())}{ext}"
+    save_path = os.path.join(UPLOADS_DIR, filename)
+    content = await file.read()
+    with open(save_path, "wb") as f:
+        f.write(content)
+    customer.photo_path = filename
+    db.commit()
+    return {"photo_url": f"/uploads/customers/{filename}"}
 
 
 @router.get("/{customer_id}/visits")

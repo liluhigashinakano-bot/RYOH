@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle } from 'lucide-react'
+import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle, Camera, User } from 'lucide-react'
 import apiClient from '../../api/client'
 
 export default function CustomerDetail() {
@@ -13,6 +13,15 @@ export default function CustomerDetail() {
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'notes' | 'history'>('info')
+  const photoRef = useRef<HTMLInputElement>(null)
+
+  const uploadPhoto = async (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    await apiClient.post(`/api/customers/${id}/photo`, fd)
+    qc.invalidateQueries({ queryKey: ['customer', id] })
+    qc.invalidateQueries({ queryKey: ['customers'] })
+  }
 
   const { data: customer, isLoading } = useQuery({
     queryKey: ['customer', id],
@@ -90,9 +99,31 @@ export default function CustomerDetail() {
       {/* 顧客基本情報カード */}
       <div className="card space-y-3">
         <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-bold text-white">{customer.name}</h1>
-            {customer.alias && <p className="text-gray-400 text-sm">({customer.alias})</p>}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => photoRef.current?.click()}
+              className="relative group w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-gray-800 flex items-center justify-center"
+              title="画像をアップロード"
+            >
+              {customer.photo_url
+                ? <img src={customer.photo_url} alt={customer.name} className="w-full h-full object-cover" />
+                : <User className="w-7 h-7 text-gray-500" />
+              }
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Camera className="w-5 h-5 text-white" />
+              </div>
+            </button>
+            <input
+              ref={photoRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) uploadPhoto(f) }}
+            />
+            <div>
+              <h1 className="text-2xl font-bold text-white">{customer.name}</h1>
+              {customer.alias && <p className="text-gray-400 text-sm">({customer.alias})</p>}
+            </div>
           </div>
           <div className="flex gap-2 flex-wrap justify-end">
             {customer.is_blacklisted && (
@@ -157,8 +188,15 @@ export default function CustomerDetail() {
               <InfoRow label="最終来店" value={customer.last_visit_date
                 ? `${customer.last_visit_date}（${daysSinceLastVisit}日経過）`
                 : '—'} />
+              {customer.age_group && <InfoRow label="年齢層" value={customer.age_group} />}
               {prefs.anniversary_date && <InfoRow label="記念日" value={prefs.anniversary_date} />}
             </div>
+            {customer.features && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">特徴</p>
+                <p className="text-gray-300 text-sm whitespace-pre-wrap">{customer.features}</p>
+              </div>
+            )}
           </div>
 
           {/* セット種別 */}
@@ -344,6 +382,8 @@ function EditCustomerModal({ customer, onClose, onSaved }: {
     alias: customer.alias || '',
     phone: '',
     birthday: customer.birthday || '',
+    age_group: customer.age_group || '',
+    features: customer.features || '',
     is_blacklisted: customer.is_blacklisted || false,
     preferences: {
       anniversary_date: customer.preferences?.anniversary_date || '',
@@ -358,6 +398,8 @@ function EditCustomerModal({ customer, onClose, onSaved }: {
       alias: form.alias || null,
       phone: form.phone || null,
       birthday: form.birthday || null,
+      age_group: form.age_group || null,
+      features: form.features || null,
       is_blacklisted: form.is_blacklisted,
       preferences: {
         ...customer.preferences,
@@ -384,6 +426,17 @@ function EditCustomerModal({ customer, onClose, onSaved }: {
           </Field>
           <Field label="ニックネーム">
             <input value={form.alias} onChange={e => setForm({ ...form, alias: e.target.value })} className="input-field w-full" placeholder="やまちゃん" />
+          </Field>
+          <Field label="年齢">
+            <select value={form.age_group} onChange={e => setForm({ ...form, age_group: e.target.value })} className="input-field w-full">
+              <option value="">未設定</option>
+              {['20代', '30代', '40代', '50代', '60代', '70代', '80代', '90代'].map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="特徴">
+            <textarea value={form.features} onChange={e => setForm({ ...form, features: e.target.value })} className="input-field w-full h-20 resize-none" placeholder="外見・性格・好みなど" />
           </Field>
           <Field label="電話番号（更新する場合）">
             <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input-field w-full" placeholder="090-0000-0000" />
