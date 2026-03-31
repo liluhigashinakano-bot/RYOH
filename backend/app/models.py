@@ -117,6 +117,10 @@ class Cast(Base):
     transport_need = Column(Boolean, default=False)
     nearest_station = Column(String(100))
     notes = Column(Text)
+    photo_path = Column(String(500))
+    birthday = Column(Date, nullable=True)
+    employment_start_date = Column(Date, nullable=True)
+    last_rate_change_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -323,6 +327,7 @@ class ConfirmedShift(Base):
     is_absent = Column(Boolean, default=False)
     help_from_store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
     notes = Column(Text)
+    shift_data = Column(JSON)   # Excelインポート分の実績（set_l, mg, drink_back等）
 
     cast = relationship("Cast", back_populates="confirmed_shifts")
     daily_pay = relationship("CastDailyPay", back_populates="shift", uselist=False)

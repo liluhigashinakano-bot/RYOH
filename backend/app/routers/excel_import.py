@@ -5,7 +5,7 @@ import os
 import re
 import io
 import csv
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -192,9 +192,66 @@ def extract_section_visits(rows: list, start_row: int, end_row: int,
     return section_visits
 
 
-def parse_daily_sheets(wb, year: int, month: int) -> list[dict]:
-    """日別シート（1日〜31日）から来店データを抽出"""
+def _excel_time_to_dt(base_date: date, t: float) -> datetime:
+    """Excel時刻(20.0=20:00, 26.5=02:30翌日)をdatetimeに変換"""
+    hours = int(t)
+    minutes = round((t - hours) * 60)
+    return datetime.combine(base_date, datetime.min.time()) + timedelta(hours=hours, minutes=minutes)
+
+
+def parse_cast_daily_rows(rows: list, visit_date: date) -> list[dict]:
+    """日別シートの右半分からキャスト出勤データを抽出（col50〜）"""
+    cast_records = []
+    for row in rows:
+        if len(row) <= 50:
+            continue
+        row_no = row[50]
+        if row_no is None or not isinstance(row_no, (int, float)) or row_no <= 0:
+            continue
+        cast_name = row[53] if len(row) > 53 else None
+        if not cast_name or not str(cast_name).strip():
+            continue
+
+        def n(idx, default=0):
+            v = row[idx] if len(row) > idx else None
+            return float(_to_num(v, default))
+
+        in_t = n(56)
+        out_t = n(58)
+        actual_start = _excel_time_to_dt(visit_date, in_t) if in_t > 0 else None
+        actual_end = _excel_time_to_dt(visit_date, out_t) if out_t > 0 else None
+        working_hours = n(60)
+
+        cast_records.append({
+            "date": visit_date.isoformat(),
+            "stage_name": str(cast_name).strip(),
+            "is_late": bool(n(51)),
+            "is_absent": bool(n(52)),
+            "actual_start": actual_start.isoformat() if actual_start else None,
+            "actual_end": actual_end.isoformat() if actual_end else None,
+            "working_hours": working_hours,
+            "help_store": str(row[62]).strip() if len(row) > 62 and row[62] else None,
+            "set_shot": n(64),
+            "set_s": n(65),
+            "set_l": n(66),
+            "set_mg": n(68),
+            "champagne_count": n(69),
+            "champagne_back": int(n(71)),
+            "drink_count": int(n(73)),
+            "drink_back": int(n(75)),
+            "daily_payment": int(n(78)),
+            "rt_count": int(n(81)),
+            "nt_count": int(n(82)),
+            "distribution_count": int(n(83)),
+            "help_hourly_rate": int(n(85)) if n(85) > 0 else None,
+        })
+    return cast_records
+
+
+def parse_daily_sheets(wb, year: int, month: int) -> tuple[list[dict], list[dict]]:
+    """日別シート（1日〜31日）から来店データとキャストデータを抽出"""
     visits = []
+    cast_records = []
     for day in range(1, 32):
         sheet_name = f"{day}日"
         if sheet_name not in wb.sheetnames:
@@ -225,7 +282,10 @@ def parse_daily_sheets(wb, year: int, month: int) -> list[dict]:
         if new_section_start is not None:
             visits += extract_section_visits(rows, new_section_start + 2, len(rows), False, visit_date_str, col_headers)
 
-    return visits
+        # 右半分：キャスト出勤データ
+        cast_records += parse_cast_daily_rows(rows, visit_date)
+
+    return visits, cast_records
 
 
 # ─── 月別データから集計値を再計算 ────────────────────────────────────────────
@@ -304,6 +364,7 @@ class DailyImportResult(BaseModel):
     visits_extracted: int
     customers_created: int
     customers_updated: int
+    cast_shifts_saved: int
     csv_saved: str
     store_name: str
 
@@ -418,7 +479,7 @@ async def import_daily_sheets(
     except Exception:
         pass
 
-    visits = parse_daily_sheets(wb, year, month)
+    visits, cast_records = parse_daily_sheets(wb, year, month)
 
     # 店舗別フォルダにCSV保存
     store_dir = os.path.join(IMPORTS_DIR, store_name)
@@ -545,10 +606,112 @@ async def import_daily_sheets(
                 ))
 
     db.commit()
+
+    # ─── キャスト出勤データを登録 ────────────────────────────────────────────
+    # 店舗を名前で検索
+    store_obj = db.query(models.Store).filter(models.Store.name == store_name).first()
+    cast_shifts_saved = 0
+
+    if store_obj and cast_records:
+        # キャスト名→Cast オブジェクトのキャッシュ
+        cast_cache: dict[str, models.Cast | None] = {}
+
+        for rec in cast_records:
+            sname = rec["stage_name"]
+            if sname not in cast_cache:
+                found = db.query(models.Cast).filter(
+                    models.Cast.stage_name == sname,
+                    models.Cast.store_id == store_obj.id,
+                    models.Cast.is_active == True,
+                ).first()
+                if not found:
+                    # 未登録キャストは自動作成
+                    found = models.Cast(
+                        store_id=store_obj.id,
+                        stage_name=sname,
+                    )
+                    db.add(found)
+                    db.flush()
+                cast_cache[sname] = found
+            cast_obj = cast_cache[sname]
+            if not cast_obj:
+                continue
+
+            shift_date = date.fromisoformat(rec["date"])
+
+            # 同日のシフトがあれば上書き
+            existing_shift = db.query(models.ConfirmedShift).filter(
+                models.ConfirmedShift.cast_id == cast_obj.id,
+                models.ConfirmedShift.store_id == store_obj.id,
+                models.ConfirmedShift.date == shift_date,
+            ).first()
+
+            shift_data_payload = {
+                "set_l": rec["set_l"],
+                "set_mg": rec["set_mg"],
+                "set_shot": rec["set_shot"],
+                "set_s": rec["set_s"],
+                "champagne_count": rec["champagne_count"],
+                "champagne_back": rec["champagne_back"],
+                "drink_count": rec["drink_count"],
+                "drink_back": rec["drink_back"],
+                "daily_payment": rec["daily_payment"],
+                "rt_count": rec["rt_count"],
+                "nt_count": rec["nt_count"],
+                "distribution_count": rec["distribution_count"],
+                "help_store": rec["help_store"],
+                "help_hourly_rate": rec["help_hourly_rate"],
+                "working_hours": rec["working_hours"],
+            }
+
+            actual_start = datetime.fromisoformat(rec["actual_start"]) if rec["actual_start"] else None
+            actual_end = datetime.fromisoformat(rec["actual_end"]) if rec["actual_end"] else None
+
+            if existing_shift:
+                existing_shift.is_late = rec["is_late"]
+                existing_shift.is_absent = rec["is_absent"]
+                existing_shift.actual_start = actual_start
+                existing_shift.actual_end = actual_end
+                existing_shift.shift_data = shift_data_payload
+                shift = existing_shift
+            else:
+                shift = models.ConfirmedShift(
+                    cast_id=cast_obj.id,
+                    store_id=store_obj.id,
+                    date=shift_date,
+                    is_late=rec["is_late"],
+                    is_absent=rec["is_absent"],
+                    actual_start=actual_start,
+                    actual_end=actual_end,
+                    shift_data=shift_data_payload,
+                )
+                db.add(shift)
+                db.flush()
+
+            # CastDailyPay（日払い・バック）
+            existing_pay = db.query(models.CastDailyPay).filter(
+                models.CastDailyPay.shift_id == shift.id,
+            ).first() if shift.id else None
+
+            if existing_pay:
+                existing_pay.drink_back = rec["drink_back"]
+                existing_pay.champagne_back = rec["champagne_back"]
+                existing_pay.total_pay = rec["drink_back"] + rec["champagne_back"]
+            else:
+                db.add(models.CastDailyPay(
+                    shift_id=shift.id,
+                    drink_back=rec["drink_back"],
+                    champagne_back=rec["champagne_back"],
+                    total_pay=rec["drink_back"] + rec["champagne_back"],
+                ))
+            cast_shifts_saved += 1
+
+    db.commit()
     return DailyImportResult(
         visits_extracted=len(visits),
         customers_created=created,
         customers_updated=updated,
+        cast_shifts_saved=cast_shifts_saved,
         csv_saved=f"{store_name}/{csv_filename}",
         store_name=store_name,
     )

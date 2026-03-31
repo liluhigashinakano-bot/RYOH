@@ -9,6 +9,7 @@ import POS from './pages/pos/POS'
 import CustomerList from './pages/customers/CustomerList'
 import CustomerDetail from './pages/customers/CustomerDetail'
 import CastList from './pages/casts/CastList'
+import CastDetail from './pages/casts/CastDetail'
 import AdminPanel from './pages/admin/AdminPanel'
 
 const queryClient = new QueryClient({
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="customers" element={<CustomerList />} />
         <Route path="customers/:id" element={<CustomerDetail />} />
         <Route path="casts" element={<CastList />} />
+        <Route path="casts/:id" element={<CastDetail />} />
         <Route path="admin" element={<AdminPanel />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

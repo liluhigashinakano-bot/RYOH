@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, X } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, X, User } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -18,9 +19,9 @@ const RANK_COLORS: Record<string, string> = {
 
 export default function CastList() {
   const { stores } = useAuthStore()
+  const navigate = useNavigate()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? 0)
   const [showAdd, setShowAdd] = useState(false)
-  const [editCast, setEditCast] = useState<any>(null)
   const qc = useQueryClient()
 
   const { data: casts = [] } = useQuery({
@@ -62,17 +63,27 @@ export default function CastList() {
         {casts.map((cast: any) => (
           <button
             key={cast.id}
-            onClick={() => setEditCast(cast)}
+            onClick={() => navigate(`/casts/${cast.id}`)}
             className="card text-left space-y-3 hover:border-primary-600/50 transition-colors"
           >
-            <div className="flex justify-between items-start">
-              <h3 className="font-bold text-white">{cast.stage_name}</h3>
-              <span className={`badge ${RANK_COLORS[cast.rank] || RANK_COLORS['C']}`}>{cast.rank}</span>
-            </div>
-            <div className="text-sm space-y-1 text-gray-400">
-              <p>時給 ¥{cast.hourly_rate.toLocaleString()}</p>
-              {cast.main_time_slot && <p>{cast.main_time_slot}</p>}
-              {cast.alcohol_tolerance && <p>お酒: {cast.alcohol_tolerance}</p>}
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-night-700 border border-night-600 overflow-hidden flex items-center justify-center flex-shrink-0">
+                {cast.photo_url
+                  ? <img src={cast.photo_url} alt={cast.stage_name} className="w-full h-full object-cover" />
+                  : <User className="w-5 h-5 text-gray-600" />
+                }
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-start">
+                  <h3 className="font-bold text-white truncate">{cast.stage_name}</h3>
+                  <span className={`badge ${RANK_COLORS[cast.rank] || RANK_COLORS['C']} ml-2 flex-shrink-0`}>{cast.rank}</span>
+                </div>
+                <div className="text-sm space-y-0.5 text-gray-400 mt-1">
+                  <p>時給 ¥{cast.hourly_rate.toLocaleString()}</p>
+                  {cast.main_time_slot && <p>{cast.main_time_slot}</p>}
+                  {cast.alcohol_tolerance && <p>お酒: {cast.alcohol_tolerance}</p>}
+                </div>
+              </div>
             </div>
           </button>
         ))}
@@ -81,34 +92,31 @@ export default function CastList() {
         )}
       </div>
 
-      {(showAdd || editCast) && (
+      {showAdd && (
         <CastModal
           storeId={storeId}
-          cast={editCast}
-          onClose={() => { setShowAdd(false); setEditCast(null) }}
-          onSaved={() => { qc.invalidateQueries({ queryKey: ['casts', storeId] }); setShowAdd(false); setEditCast(null) }}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ['casts', storeId] }); setShowAdd(false) }}
         />
       )}
     </div>
   )
 }
 
-function CastModal({ storeId, cast, onClose, onSaved }: { storeId: number; cast?: any; onClose: () => void; onSaved: () => void }) {
+function CastModal({ storeId, onClose, onSaved }: { storeId: number; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({
-    stage_name: cast?.stage_name || '',
-    rank: cast?.rank || 'C',
-    hourly_rate: cast?.hourly_rate || 1400,
-    alcohol_tolerance: cast?.alcohol_tolerance || '普通',
-    main_time_slot: cast?.main_time_slot || '',
-    transport_need: cast?.transport_need || false,
-    nearest_station: cast?.nearest_station || '',
-    notes: cast?.notes || '',
+    stage_name: '',
+    rank: 'C',
+    hourly_rate: 1400,
+    alcohol_tolerance: '普通',
+    main_time_slot: '',
+    transport_need: false,
+    nearest_station: '',
+    notes: '',
   })
 
   const mutation = useMutation({
-    mutationFn: () => cast
-      ? apiClient.put(`/api/casts/${storeId}/${cast.id}`, form)
-      : apiClient.post(`/api/casts/${storeId}`, form),
+    mutationFn: () => apiClient.post(`/api/casts/${storeId}`, form),
     onSuccess: onSaved,
   })
 
@@ -116,7 +124,7 @@ function CastModal({ storeId, cast, onClose, onSaved }: { storeId: number; cast?
     <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div className="bg-night-800 border border-night-600 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-4 border-b border-night-600 sticky top-0 bg-night-800">
-          <h3 className="font-bold text-white">{cast ? 'キャスト編集' : 'キャスト追加'}</h3>
+          <h3 className="font-bold text-white">キャスト追加</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <div className="p-4 space-y-4">
