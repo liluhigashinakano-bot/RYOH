@@ -309,7 +309,7 @@ function CastModal({ storeId, onClose, onSaved }: { storeId: number; onClose: ()
             </div>
             <div>
               <label className="text-sm text-gray-400 block mb-1">時給</label>
-              <input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} className="input-field w-full" />
+              <input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} step={50} className="input-field w-full" />
             </div>
           </div>
           <div>

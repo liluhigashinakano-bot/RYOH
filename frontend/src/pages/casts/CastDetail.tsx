@@ -414,11 +414,11 @@ function EditCastModal({
             <div className="grid grid-cols-2 gap-3 p-3 bg-night-700 rounded-xl border border-night-600">
               <div>
                 <label className="text-xs text-yellow-400 block mb-1">基本時給（管理者）</label>
-                <input type="number" value={form.hourly_rate} onChange={f('hourly_rate')} className="input-field w-full" />
+                <input type="number" value={form.hourly_rate} onChange={f('hourly_rate')} step={50} className="input-field w-full" />
               </div>
               <div>
                 <label className="text-xs text-yellow-400 block mb-1">ヘルプ時給</label>
-                <input type="number" value={form.help_hourly_rate} onChange={f('help_hourly_rate')} className="input-field w-full" />
+                <input type="number" value={form.help_hourly_rate} onChange={f('help_hourly_rate')} step={50} className="input-field w-full" />
               </div>
             </div>
           )}
