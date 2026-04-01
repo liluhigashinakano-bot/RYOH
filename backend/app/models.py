@@ -138,6 +138,7 @@ class Customer(Base):
     __tablename__ = "customers"
 
     id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
     name = Column(String(100), nullable=False)
     alias = Column(String(100))
     phone = Column(String(20))

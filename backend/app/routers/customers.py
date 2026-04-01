@@ -38,6 +38,7 @@ class CustomerUpdate(BaseModel):
 
 class CustomerResponse(BaseModel):
     id: int
+    store_id: Optional[int]
     name: str
     alias: Optional[str]
     phone_masked: Optional[str]  # 下4桁のみ
@@ -65,6 +66,7 @@ class CustomerResponse(BaseModel):
         photo_url = f"/uploads/customers/{customer.photo_path}" if customer.photo_path else None
         return cls(
             id=customer.id,
+            store_id=customer.store_id,
             name=customer.name,
             alias=customer.alias,
             phone_masked=phone_masked,
@@ -91,10 +93,13 @@ class NoteCreate(BaseModel):
 @router.get("", response_model=list[CustomerResponse])
 def get_customers(
     q: Optional[str] = Query(None),
+    store_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     query = db.query(models.Customer).filter(models.Customer.is_active == True)
+    if store_id:
+        query = query.filter(models.Customer.store_id == store_id)
     if q:
         query = query.filter(
             or_(

@@ -2,13 +2,20 @@ import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Plus, X, User, Upload, Cake } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
-type SortKey = '50音' | '来店回数' | '累計会計金額' | '平均会計額' | '平均延長' | '平均来店時間' | '月間平均来店'
+type SortKey =
+  | '50音' | '来店回数' | '累計会計金額' | '平均会計額'
+  | '平均延長' | '平均来店時間' | '月間平均来店'
+  | 'L数' | 'MG数' | 'ショット数'
+  | '初回来店' | '最終来店'
+  | 'ポイント残高'
 
 function sortCustomers(customers: any[], key: SortKey, asc: boolean): any[] {
   const arr = [...customers]
   const dir = asc ? 1 : -1
+  const dateVal = (d: string | null) => d ? new Date(d).getTime() : 0
   switch (key) {
     case '50音':
       return arr.sort((a, b) => dir * a.name.localeCompare(b.name, 'ja'))
@@ -24,6 +31,18 @@ function sortCustomers(customers: any[], key: SortKey, asc: boolean): any[] {
       return arr.sort((a, b) => dir * ((a.preferences?.avg_in_time || 9999) - (b.preferences?.avg_in_time || 9999)))
     case '月間平均来店':
       return arr.sort((a, b) => dir * ((a.preferences?.monthly_avg_visits || 0) - (b.preferences?.monthly_avg_visits || 0)))
+    case 'L数':
+      return arr.sort((a, b) => dir * ((a.preferences?.set_l || 0) - (b.preferences?.set_l || 0)))
+    case 'MG数':
+      return arr.sort((a, b) => dir * ((a.preferences?.set_mg || 0) - (b.preferences?.set_mg || 0)))
+    case 'ショット数':
+      return arr.sort((a, b) => dir * ((a.preferences?.set_shot || 0) - (b.preferences?.set_shot || 0)))
+    case '初回来店':
+      return arr.sort((a, b) => dir * (dateVal(a.first_visit_date) - dateVal(b.first_visit_date)))
+    case '最終来店':
+      return arr.sort((a, b) => dir * (dateVal(a.last_visit_date) - dateVal(b.last_visit_date)))
+    case 'ポイント残高':
+      return arr.sort((a, b) => dir * ((a.point_balance || 0) - (b.point_balance || 0)))
     default:
       return arr
   }
@@ -36,16 +55,20 @@ function formatInTime(t: number): string {
 }
 
 export default function CustomerList() {
+  const { stores } = useAuthStore()
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('来店回数')
   const [sortAsc, setSortAsc] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [storeId, setStoreId] = useState<number | null>(null)
   const navigate = useNavigate()
 
   const { data: rawCustomers = [] } = useQuery({
-    queryKey: ['customers', q],
-    queryFn: () => apiClient.get('/api/customers', { params: q ? { q } : {} }).then(r => r.data),
+    queryKey: ['customers', q, storeId],
+    queryFn: () => apiClient.get('/api/customers', {
+      params: { ...(q ? { q } : {}), ...(storeId ? { store_id: storeId } : {}) }
+    }).then(r => r.data),
   })
 
   const customers = sortCustomers(rawCustomers, sortKey, sortAsc)
@@ -56,7 +79,12 @@ export default function CustomerList() {
     staleTime: 1000 * 60 * 10,
   })
 
-  const sortOptions: SortKey[] = ['50音', '来店回数', '累計会計金額', '平均会計額', '平均延長', '平均来店時間', '月間平均来店']
+  const sortOptions: SortKey[] = [
+    '50音', '来店回数', '累計会計金額', '平均会計額',
+    '平均延長', '平均来店時間', '月間平均来店',
+    'L数', 'MG数', 'ショット数',
+    '初回来店', '最終来店', 'ポイント残高',
+  ]
 
   return (
     <div className="space-y-4">
@@ -72,6 +100,29 @@ export default function CustomerList() {
             顧客追加
           </button>
         </div>
+      </div>
+
+      {/* 店舗タブ */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setStoreId(null)}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+            storeId === null ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
+          }`}
+        >
+          全店舗
+        </button>
+        {stores.map(s => (
+          <button
+            key={s.id}
+            onClick={() => setStoreId(s.id)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+              storeId === s.id ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
+            }`}
+          >
+            {s.name}
+          </button>
+        ))}
       </div>
 
       {/* 誕生日アラート */}

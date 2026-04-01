@@ -6,6 +6,7 @@ columns = [
     ("customers", "photo_path", "VARCHAR(500)"),
     ("customers", "age_group", "VARCHAR(10)"),
     ("customers", "features", "TEXT"),
+    ("customers", "store_id", "INTEGER"),
     # casts
     ("casts", "photo_path", "VARCHAR(500)"),
     ("casts", "birthday", "DATE"),
