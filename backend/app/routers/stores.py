@@ -31,8 +31,8 @@ class StoreResponse(BaseModel):
     id: int
     name: str
     code: str
-    set_price: int
-    extension_price: int
+    set_price: Optional[int] = 0
+    extension_price: Optional[int] = 0
     address: Optional[str]
     phone: Optional[str]
     is_active: bool

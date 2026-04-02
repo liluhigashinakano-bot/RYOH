@@ -17,6 +17,31 @@ router = APIRouter(prefix="/api/casts", tags=["casts"])
 MANAGER_ROLES = {models.UserRole.superadmin, models.UserRole.manager, models.UserRole.editor}
 
 
+def generate_cast_code(db: Session, store_id: int) -> str:
+    """店舗IDに基づいてユニークなキャストコードを生成する（例: L001F0001）"""
+    store = db.query(models.Store).filter(models.Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="店舗が見つかりません")
+    prefix = store.code  # 例: L001
+
+    # この店舗の既存コードから最大番号を取得
+    existing = db.query(models.Cast.cast_code).filter(
+        models.Cast.cast_code.like(f"{prefix}F%"),
+    ).all()
+    max_num = 0
+    for (code,) in existing:
+        if code:
+            try:
+                num = int(code[len(prefix) + 1:])  # "L001F0042" → 42
+                max_num = max(max_num, num)
+            except ValueError:
+                pass
+    next_num = max_num + 1
+    if next_num > 9999:
+        raise HTTPException(status_code=400, detail="キャストIDの上限（9999）に達しました")
+    return f"{prefix}F{next_num:04d}"
+
+
 class CastCreate(BaseModel):
     stage_name: str
     rank: str = "C"
@@ -50,6 +75,7 @@ class CastUpdate(BaseModel):
 class CastResponse(BaseModel):
     id: int
     store_id: int
+    cast_code: Optional[str]
     stage_name: str
     rank: str
     hourly_rate: int
@@ -74,6 +100,7 @@ class CastResponse(BaseModel):
         return cls(
             id=cast.id,
             store_id=cast.store_id,
+            cast_code=cast.cast_code,
             stage_name=cast.stage_name,
             rank=cast.rank,
             hourly_rate=cast.hourly_rate,
@@ -127,7 +154,8 @@ def create_cast(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    cast = models.Cast(store_id=store_id, **data.model_dump())
+    cast_code = generate_cast_code(db, store_id)
+    cast = models.Cast(store_id=store_id, cast_code=cast_code, **data.model_dump())
     db.add(cast)
     db.commit()
     db.refresh(cast)

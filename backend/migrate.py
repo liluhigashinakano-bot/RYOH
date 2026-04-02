@@ -7,7 +7,11 @@ columns = [
     ("customers", "age_group", "VARCHAR(10)"),
     ("customers", "features", "TEXT"),
     ("customers", "store_id", "INTEGER"),
+    ("customers", "customer_code", "VARCHAR(20)"),
+    ("customers", "merged_customer_ids", "TEXT"),
+    ("customers", "merged_into_id", "INTEGER"),
     # casts
+    ("casts", "cast_code", "VARCHAR(20)"),
     ("casts", "photo_path", "VARCHAR(500)"),
     ("casts", "birthday", "DATE"),
     ("casts", "employment_start_date", "DATE"),

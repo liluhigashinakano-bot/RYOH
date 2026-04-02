@@ -206,6 +206,7 @@ export default function CastDetail() {
       {/* 基本情報タブ */}
       {tab === 'info' && (
         <div className="card space-y-0">
+          <InfoRow label="キャストID" value={cast.cast_code} />
           <InfoRow label="基本時給" value={cast.hourly_rate ? `¥${cast.hourly_rate.toLocaleString()}` : null} />
           {stats && <InfoRow label="実質時給" value={`¥${stats.real_hourly_rate.toLocaleString()}`} />}
           <InfoRow label="ランク" value={cast.rank} />

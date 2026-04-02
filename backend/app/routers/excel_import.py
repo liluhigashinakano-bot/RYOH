@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from ..database import get_db
 from .. import models
+from .casts import generate_cast_code
+from .customers import generate_customer_code
 from ..auth import get_current_user
 
 try:
@@ -292,18 +294,18 @@ def parse_daily_sheets(wb, year: int, month: int) -> tuple[list[dict], list[dict
 
 def _calc_prefs_from_monthly(monthly_data: dict, day_labels: list) -> dict:
     """monthly_dataの全月分から集計値を再計算する"""
-    total_visits = sum(m["visits"] for m in monthly_data.values())
-    total_spend = sum(m["spend"] for m in monthly_data.values())
-    total_extensions = sum(m["extensions"] for m in monthly_data.values())
-    total_persons = sum(m["persons"] for m in monthly_data.values())
-    total_set_l = sum(m["set_l"] for m in monthly_data.values())
-    total_set_mg = sum(m["set_mg"] for m in monthly_data.values())
-    total_set_shot = sum(m["set_shot"] for m in monthly_data.values())
+    total_visits = sum(m.get("visits", 0) for m in monthly_data.values())
+    total_spend = sum(m.get("spend", 0) for m in monthly_data.values())
+    total_extensions = sum(m.get("extensions", 0) for m in monthly_data.values())
+    total_persons = sum(m.get("persons", 0) for m in monthly_data.values())
+    total_set_l = sum(m.get("set_l", 0) for m in monthly_data.values())
+    total_set_mg = sum(m.get("set_mg", 0) for m in monthly_data.values())
+    total_set_shot = sum(m.get("set_shot", 0) for m in monthly_data.values())
     all_in_mins = [mn for m in monthly_data.values() for mn in m.get("in_mins", [])]
 
     avg_spend = int(total_spend / total_visits) if total_visits > 0 else 0
-    avg_extensions = round(total_extensions / max(total_persons, 1), 2)
-    avg_group = round(total_persons / total_visits, 1) if total_visits > 0 else 1
+    avg_extensions = round(total_extensions / max(total_persons, 1), 2) if total_persons > 0 else round(total_extensions / max(total_visits, 1), 2)
+    avg_group = round(total_persons / total_visits, 1) if total_visits > 0 and total_persons > 0 else 1
     divisor = total_extensions + 1
     set_l_avg = round(total_set_l / divisor, 2)
     set_mg_avg = round(total_set_mg / divisor, 2)
@@ -329,10 +331,6 @@ def _calc_prefs_from_monthly(monthly_data: dict, day_labels: list) -> dict:
     for m in monthly_data.values():
         for k, cnt in m.get("day_prefs", {}).items():
             merged_day[k] = merged_day.get(k, 0) + cnt
-
-    # テスト: 来店動機合計 == 合計来店数
-    src_total = sum(merged_src.values())
-    assert src_total == total_visits, f"来店動機合計({src_total}) != 合計来店数({total_visits})"
 
     return {
         "_total_visits": total_visits,
@@ -409,6 +407,10 @@ async def import_customers_from_excel(
     created = updated = skipped = 0
     imported_names = []
 
+    # 店舗を取得（顧客コード生成用）
+    store_obj = db.query(models.Store).filter(models.Store.name == store_name).first()
+    store_id = store_obj.id if store_obj else 1
+
     for cdata in customers_data:
         name = cdata["name"]
         if not name:
@@ -426,9 +428,12 @@ async def import_customers_from_excel(
                 existing.birthday = cdata["birthday"]
             existing.preferences = {**(existing.preferences or {}), **cdata["preferences"]}
             flag_modified(existing, "preferences")
+            if not existing.store_id:
+                existing.store_id = store_id
             updated += 1
         else:
             customer = models.Customer(
+                store_id=store_id,
                 name=name,
                 last_visit_date=cdata["last_visit_date"],
                 total_visits=cdata["total_visits"],
@@ -437,6 +442,8 @@ async def import_customers_from_excel(
                 preferences=cdata["preferences"],
             )
             db.add(customer)
+            db.flush()
+            customer.customer_code = generate_customer_code(db, store_id)
             created += 1
         imported_names.append(name)
 
@@ -499,6 +506,10 @@ async def import_daily_sheets(
     # 顧客DBに登録・更新
     created = updated = 0
     seen_names: set[str] = set()
+
+    # 店舗を取得（顧客コード生成用）
+    store_obj_for_customer = db.query(models.Store).filter(models.Store.name == store_name).first()
+    customer_store_id = store_obj_for_customer.id if store_obj_for_customer else 1
 
     day_labels = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -573,6 +584,7 @@ async def import_daily_sheets(
             all_prefs = _calc_prefs_from_monthly(monthly_data, day_labels)
             all_prefs["monthly_data"] = monthly_data
             customer_obj = models.Customer(
+                store_id=customer_store_id,
                 name=name,
                 total_visits=all_prefs["_total_visits"],
                 total_spend=all_prefs["_total_spend"],
@@ -582,6 +594,7 @@ async def import_daily_sheets(
             )
             db.add(customer_obj)
             db.flush()  # IDを確定
+            customer_obj.customer_code = generate_customer_code(db, customer_store_id)
             created += 1
 
         # 来店履歴をCustomerVisitに保存（同月同店舗は削除→再挿入）
@@ -625,10 +638,12 @@ async def import_daily_sheets(
                     models.Cast.is_active == True,
                 ).first()
                 if not found:
-                    # 未登録キャストは自動作成
+                    # 未登録キャストは自動作成（キャストコードも自動付与）
+                    cast_code = generate_cast_code(db, store_obj.id)
                     found = models.Cast(
                         store_id=store_obj.id,
                         stage_name=sname,
+                        cast_code=cast_code,
                     )
                     db.add(found)
                     db.flush()

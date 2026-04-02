@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle, Camera, User } from 'lucide-react'
+import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle, Camera, User, Link, Unlink, Search } from 'lucide-react'
 import apiClient from '../../api/client'
 
 export default function CustomerDetail() {
@@ -14,6 +14,8 @@ export default function CustomerDetail() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'notes' | 'history'>('info')
   const photoRef = useRef<HTMLInputElement>(null)
+  const [showMergeSearch, setShowMergeSearch] = useState(false)
+  const [mergeQuery, setMergeQuery] = useState('')
 
   const uploadPhoto = async (file: File) => {
     const fd = new FormData()
@@ -46,6 +48,30 @@ export default function CustomerDetail() {
   const deleteMutation = useMutation({
     mutationFn: () => apiClient.delete(`/api/customers/${id}`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['customers'] }); navigate('/customers') },
+  })
+
+  const mergeMutation = useMutation({
+    mutationFn: (sourceId: number) => apiClient.post(`/api/customers/${id}/merge`, { source_id: sourceId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer', id] })
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      setShowMergeSearch(false)
+      setMergeQuery('')
+    },
+  })
+
+  const unmergeMutation = useMutation({
+    mutationFn: (sourceId: number) => apiClient.delete(`/api/customers/${id}/merge/${sourceId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer', id] })
+      qc.invalidateQueries({ queryKey: ['customers'] })
+    },
+  })
+
+  const { data: mergeSearchResults = [] } = useQuery({
+    queryKey: ['customers-search', mergeQuery],
+    queryFn: () => apiClient.get('/api/customers', { params: { q: mergeQuery } }).then(r => r.data),
+    enabled: mergeQuery.length >= 1,
   })
 
   const updateAI = async () => {
@@ -121,8 +147,42 @@ export default function CustomerDetail() {
               onChange={e => { const f = e.target.files?.[0]; if (f) uploadPhoto(f) }}
             />
             <div>
-              <h1 className="text-2xl font-bold text-white">{customer.name}</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-bold text-white">{customer.name}</h1>
+                <button
+                  onClick={() => setShowMergeSearch(v => !v)}
+                  className="flex items-center gap-1 text-xs bg-night-700 hover:bg-night-600 text-gray-400 hover:text-white px-2 py-1 rounded-lg transition-colors"
+                  title="顧客名を追加してマージ"
+                >
+                  <Link className="w-3 h-3" />追加
+                </button>
+              </div>
               {customer.alias && <p className="text-gray-400 text-sm">({customer.alias})</p>}
+              {/* マージ済み顧客名 */}
+              {(customer.merged_names || []).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(customer.merged_names || []).map((name: string, i: number) => {
+                    // merged_customer_idsからsource_idを特定するため顧客リストを検索
+                    const sourceId = (customer.merged_customer_ids || [])[i]
+                    return (
+                      <span key={i} className="flex items-center gap-1 text-xs bg-primary-900/30 text-primary-300 border border-primary-800/40 px-2 py-0.5 rounded-full">
+                        {name}
+                        <button
+                          onClick={() => {
+                            if (sourceId && window.confirm(`「${name}」のマージを解除しますか？`)) {
+                              unmergeMutation.mutate(sourceId)
+                            }
+                          }}
+                          className="hover:text-red-400 transition-colors ml-0.5"
+                          title="マージ解除"
+                        >
+                          <Unlink className="w-3 h-3" />
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex gap-2 flex-wrap justify-end">
@@ -134,6 +194,48 @@ export default function CustomerDetail() {
             )}
           </div>
         </div>
+
+        {/* マージ検索パネル */}
+        {showMergeSearch && (
+          <div className="border border-primary-800/40 bg-night-800 rounded-xl p-3 space-y-2">
+            <div className="flex items-center gap-2 text-xs text-primary-400 font-medium">
+              <Search className="w-3 h-3" />マージする顧客名を検索
+            </div>
+            <input
+              type="text"
+              value={mergeQuery}
+              onChange={e => setMergeQuery(e.target.value)}
+              placeholder="顧客名を入力..."
+              className="input-field w-full text-sm"
+              autoFocus
+            />
+            {mergeSearchResults.length > 0 && (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {mergeSearchResults
+                  .filter((c: any) => c.id !== Number(id) && !c.merged_into_id)
+                  .map((c: any) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        if (window.confirm(`「${c.name}」を「${customer.name}」にマージしますか？\n※マージ後は再集計されます`)) {
+                          mergeMutation.mutate(c.id)
+                        }
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-lg bg-night-700 hover:bg-night-600 transition-colors"
+                    >
+                      <span className="text-white text-sm">{c.name}</span>
+                      {c.alias && <span className="text-gray-500 text-xs ml-2">({c.alias})</span>}
+                      <span className="text-gray-500 text-xs ml-2">来店{c.total_visits}回</span>
+                    </button>
+                  ))}
+              </div>
+            )}
+            {mergeQuery.length >= 1 && mergeSearchResults.filter((c: any) => c.id !== Number(id)).length === 0 && (
+              <p className="text-gray-500 text-xs">顧客が見つかりません</p>
+            )}
+            <button onClick={() => { setShowMergeSearch(false); setMergeQuery('') }} className="text-xs text-gray-500 hover:text-white">閉じる</button>
+          </div>
+        )}
 
         {/* KPI グリッド */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -181,6 +283,12 @@ export default function CustomerDetail() {
           {/* 基本情報 */}
           <div className="card space-y-3">
             <h3 className="font-medium text-white text-sm">基本情報</h3>
+            {customer.customer_code && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500">顧客ID</span>
+                <span className="text-xs font-mono bg-night-700 text-primary-400 px-2 py-0.5 rounded">{customer.customer_code}</span>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2 text-sm">
               <InfoRow label="電話番号" value={customer.phone_masked || '—'} />
               <InfoRow label="誕生日" value={customer.birthday || '—'} />
