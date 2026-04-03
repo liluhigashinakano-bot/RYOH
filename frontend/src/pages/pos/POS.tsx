@@ -332,10 +332,11 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   onSubmit: (castId: number | null) => void
   onClose: () => void
 }) {
-  const { data: casts = [] } = useQuery({
+  const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
   })
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
   const [castId, setCastId] = useState<number | null>(null)
 
   return (

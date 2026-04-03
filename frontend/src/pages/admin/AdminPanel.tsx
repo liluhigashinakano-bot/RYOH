@@ -4,7 +4,7 @@ import { Plus, X, Trash2, Edit2 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
-type Tab = 'users' | 'stores'
+type Tab = 'users' | 'stores' | 'casts'
 
 export default function AdminPanel() {
   const [tab, setTab] = useState<Tab>('users')
@@ -13,9 +13,8 @@ export default function AdminPanel() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-white">管理者設定</h1>
 
-      {/* タブ */}
       <div className="flex gap-2">
-        {(['users', 'stores'] as Tab[]).map(t => (
+        {(['users', 'stores', 'casts'] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -23,12 +22,12 @@ export default function AdminPanel() {
               tab === t ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
             }`}
           >
-            {t === 'users' ? 'ユーザー管理' : '店舗管理'}
+            {t === 'users' ? 'ユーザー管理' : t === 'stores' ? '店舗管理' : 'キャスト管理'}
           </button>
         ))}
       </div>
 
-      {tab === 'users' ? <UsersTab /> : <StoresTab />}
+      {tab === 'users' ? <UsersTab /> : tab === 'stores' ? <StoresTab /> : <CastsTab />}
     </div>
   )
 }
@@ -189,6 +188,126 @@ function StoresTab() {
       </div>
 
       {showAdd && <AddStoreModal onClose={() => setShowAdd(false)} />}
+    </div>
+  )
+}
+
+function CastsTab() {
+  const { stores } = useAuthStore()
+  const qc = useQueryClient()
+  const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
+  const [showAdd, setShowAdd] = useState(false)
+  const [editCast, setEditCast] = useState<any | null>(null)
+
+  const { data: casts = [] } = useQuery({
+    queryKey: ['casts', selectedStoreId],
+    queryFn: () => apiClient.get(`/api/casts/${selectedStoreId}`).then(r => r.data),
+    enabled: !!selectedStoreId,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (castId: number) => apiClient.delete(`/api/casts/${selectedStoreId}/${castId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['casts', selectedStoreId] }),
+  })
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <select value={selectedStoreId} onChange={e => setSelectedStoreId(Number(e.target.value))} className="input-field text-sm">
+          {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm">
+          <Plus className="w-4 h-4" />キャスト追加
+        </button>
+      </div>
+
+      <div className="card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-night-600 text-gray-400">
+              <th className="text-left py-2 px-3">ID</th>
+              <th className="text-left py-2 px-3">名前</th>
+              <th className="text-left py-2 px-3">在籍状況</th>
+              <th className="py-2 px-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {casts.map((c: any) => (
+              <tr key={c.id} className="border-b border-night-700 hover:bg-night-700/50">
+                <td className="py-2.5 px-3 text-gray-500 text-xs">{c.cast_code || `#${c.id}`}</td>
+                <td className="py-2.5 px-3 font-medium text-white">{c.name}</td>
+                <td className="py-2.5 px-3">
+                  <span className={`badge ${c.is_active ? 'bg-green-900/40 text-green-400' : 'bg-night-700 text-gray-500'}`}>
+                    {c.is_active ? '在籍中' : '退職'}
+                  </span>
+                </td>
+                <td className="py-2.5 px-3">
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setEditCast(c)} className="text-gray-500 hover:text-primary-400 transition-colors">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => { if (confirm(`${c.name}を削除しますか？`)) deleteMutation.mutate(c.id) }} className="text-gray-600 hover:text-red-400 transition-colors">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {casts.length === 0 && (
+              <tr><td colSpan={4} className="text-center text-gray-600 py-8">キャストが登録されていません</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {showAdd && <CastModal storeId={selectedStoreId} onClose={() => setShowAdd(false)} />}
+      {editCast && <CastModal storeId={selectedStoreId} cast={editCast} onClose={() => setEditCast(null)} />}
+    </div>
+  )
+}
+
+function CastModal({ storeId, cast, onClose }: { storeId: number; cast?: any; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ name: cast?.name || '', is_active: cast?.is_active ?? true })
+
+  const mutation = useMutation({
+    mutationFn: () => cast
+      ? apiClient.put(`/api/casts/${storeId}/${cast.id}`, form)
+      : apiClient.post(`/api/casts/${storeId}`, { ...form, store_id: storeId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['casts', storeId] }); onClose() },
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="card w-full max-w-sm space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">{cast ? 'キャスト編集' : 'キャスト追加'}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm text-gray-400 block mb-1.5">名前</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="キャスト名" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-400 block mb-1.5">在籍状況</label>
+            <div className="flex gap-2">
+              {[true, false].map(v => (
+                <button key={String(v)} onClick={() => setForm({ ...form, is_active: v })}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${form.is_active === v ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
+                  {v ? '在籍中' : '退職'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={() => mutation.mutate()} disabled={!form.name} className="btn-primary flex-1 disabled:opacity-40">
+            {cast ? '更新' : '追加'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
