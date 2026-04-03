@@ -250,21 +250,30 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
 
 function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; storeId: number; onClose: () => void }) {
   const qc = useQueryClient()
-  const { data: tickets } = useQuery({ queryKey: ['tickets', storeId, 'open'] })
-  const ticket = (tickets as any[])?.find(t => t.id === ticketId)
-  const [showClose, setShowClose] = useState(false)
   const [aiAdvice, setAiAdvice] = useState('')
   const [loadingAI, setLoadingAI] = useState(false)
+
+  const { data: ticket, isLoading } = useQuery({
+    queryKey: ['ticket', ticketId],
+    queryFn: () => apiClient.get(`/api/tickets/${ticketId}`).then(r => r.data),
+    refetchInterval: 10000,
+  })
 
   const addOrderMutation = useMutation({
     mutationFn: (item: { item_type: string; unit_price: number; quantity: number }) =>
       apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets', storeId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+    },
   })
 
   const closeMutation = useMutation({
     mutationFn: (data: any) => apiClient.post(`/api/tickets/${ticketId}/close`, data).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tickets', storeId] }); onClose() },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      onClose()
+    },
   })
 
   const fetchAI = async () => {
@@ -276,74 +285,153 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     setLoadingAI(false)
   }
 
-  if (!ticket) return null
+  if (isLoading || !ticket) return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div className="text-gray-400">読み込み中...</div>
+    </div>
+  )
+
+  const startedAt = new Date(ticket.started_at)
+  const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 60000)
+  const elapsedH = Math.floor(elapsed / 60)
+  const elapsedM = elapsed % 60
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-      <div className="bg-night-800 border border-night-600 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-4 border-b border-night-600 sticky top-0 bg-night-800">
-          <div>
-            <p className="text-sm text-gray-400">卓番</p>
-            <h3 className="font-bold text-white text-lg">{ticket.table_no || '—'}</h3>
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4">
+      <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-4xl h-[92vh] flex flex-col overflow-hidden">
+
+        {/* ヘッダー */}
+        <div className="flex justify-between items-center px-4 py-3 border-b border-night-600 shrink-0">
+          <div className="flex items-center gap-4">
+            <div>
+              <p className="text-xs text-gray-500">卓番</p>
+              <p className="text-xl font-bold text-white">{ticket.table_no || '—'}</p>
+            </div>
+            <div className="flex gap-1.5">
+              {ticket.visit_type && (
+                <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
+                  {ticket.visit_type}
+                </span>
+              )}
+              {ticket.plan_type && (
+                <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-300'}`}>
+                  {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
+                </span>
+              )}
+              {ticket.guest_count > 0 && (
+                <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>
+              )}
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-400">合計</p>
-            <p className="font-bold text-primary-400 text-xl">¥{ticket.total_amount.toLocaleString()}</p>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-xs text-gray-500">経過時間</p>
+              <p className="text-sm text-green-400 font-medium">
+                {elapsedH > 0 ? `${elapsedH}h` : ''}{elapsedM}分
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500">合計</p>
+              <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
+            </div>
+            <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
           </div>
-          <button onClick={onClose} className="ml-4"><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
-        <div className="p-4 space-y-4">
-          {/* 注文ボタン */}
-          <div>
-            <p className="text-sm text-gray-400 mb-2">注文追加</p>
-            <div className="grid grid-cols-2 gap-2">
-              {ITEM_TYPES.map(({ type, label, defaultPrice }) => (
-                <button
-                  key={type}
-                  onClick={() => addOrderMutation.mutate({ item_type: type, unit_price: defaultPrice, quantity: 1 })}
-                  className="btn-secondary text-sm py-3 touch-target"
-                >
-                  {label}
-                  {defaultPrice > 0 && <span className="block text-xs text-gray-500">¥{defaultPrice.toLocaleString()}</span>}
-                </button>
-              ))}
+        {/* 本体: 左(伝票) + 右(操作) */}
+        <div className="flex flex-1 overflow-hidden">
+
+          {/* 左: 伝票 */}
+          <div className="w-1/2 border-r border-night-600 flex flex-col overflow-hidden">
+            <div className="px-4 py-2 border-b border-night-700">
+              <p className="text-xs text-gray-500">
+                {startedAt.getHours().toString().padStart(2,'0')}:{startedAt.getMinutes().toString().padStart(2,'0')} 入店
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-night-800">
+                  <tr className="text-xs text-gray-500 border-b border-night-700">
+                    <th className="text-left px-4 py-2">ご注文</th>
+                    <th className="text-center px-2 py-2">数</th>
+                    <th className="text-right px-2 py-2">単価</th>
+                    <th className="text-right px-4 py-2">金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ticket.order_items?.map((item: any) => (
+                    <tr key={item.id} className="border-b border-night-700/50">
+                      <td className="px-4 py-2 text-gray-200">{item.item_name || item.item_type}</td>
+                      <td className="text-center px-2 py-2 text-gray-400">{item.quantity}</td>
+                      <td className="text-right px-2 py-2 text-gray-400">¥{item.unit_price.toLocaleString()}</td>
+                      <td className="text-right px-4 py-2 text-white font-medium">¥{item.amount.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {(!ticket.order_items || ticket.order_items.length === 0) && (
+                    <tr><td colSpan={4} className="text-center text-gray-600 py-8 text-sm">注文なし</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-night-600 px-4 py-3 flex justify-between items-center">
+              <span className="text-gray-400 text-sm">合計</span>
+              <span className="text-primary-400 font-bold text-lg">¥{ticket.total_amount.toLocaleString()}</span>
             </div>
           </div>
 
-          {/* 付け回しAI */}
-          <div className="border-t border-night-600 pt-4">
-            <button
-              onClick={fetchAI}
-              disabled={loadingAI}
-              className="flex items-center gap-2 text-primary-400 text-sm font-medium disabled:opacity-50"
-            >
-              <Bot className="w-4 h-4" />
-              {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
-            </button>
-            {aiAdvice && (
-              <div className="mt-2 p-3 bg-primary-900/20 border border-primary-800/40 rounded-xl text-sm text-gray-300 whitespace-pre-wrap">
-                {aiAdvice}
+          {/* 右: 操作 */}
+          <div className="w-1/2 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {/* 注文追加 */}
+              <p className="text-xs text-gray-500">注文追加</p>
+              <div className="grid grid-cols-2 gap-2">
+                {ITEM_TYPES.map(({ type, label, defaultPrice }) => (
+                  <button
+                    key={type}
+                    onClick={() => addOrderMutation.mutate({ item_type: type, unit_price: defaultPrice, quantity: 1 })}
+                    className="btn-secondary text-sm py-3"
+                  >
+                    {label}
+                    {defaultPrice > 0 && <span className="block text-xs text-gray-500">¥{defaultPrice.toLocaleString()}</span>}
+                  </button>
+                ))}
               </div>
-            )}
-          </div>
 
-          {/* 会計ボタン */}
-          <div className="border-t border-night-600 pt-4 grid grid-cols-2 gap-3">
-            <button
-              onClick={() => closeMutation.mutate({ payment_method: 'cash', cash_amount: ticket.total_amount })}
-              className="btn-secondary flex items-center justify-center gap-2 py-3"
-            >
-              <Banknote className="w-4 h-4" />
-              現金会計
-            </button>
-            <button
-              onClick={() => closeMutation.mutate({ payment_method: 'card', card_amount: ticket.total_amount })}
-              className="btn-primary flex items-center justify-center gap-2 py-3"
-            >
-              <CreditCard className="w-4 h-4" />
-              カード会計
-            </button>
+              {/* AI */}
+              <div className="border-t border-night-700 pt-2">
+                <button
+                  onClick={fetchAI}
+                  disabled={loadingAI}
+                  className="flex items-center gap-2 text-primary-400 text-sm font-medium disabled:opacity-50"
+                >
+                  <Bot className="w-4 h-4" />
+                  {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
+                </button>
+                {aiAdvice && (
+                  <div className="mt-2 p-3 bg-primary-900/20 border border-primary-800/40 rounded-xl text-xs text-gray-300 whitespace-pre-wrap">
+                    {aiAdvice}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 会計ボタン */}
+            <div className="border-t border-night-600 p-3 grid grid-cols-2 gap-3 shrink-0">
+              <button
+                onClick={() => closeMutation.mutate({ payment_method: 'cash', cash_amount: ticket.total_amount })}
+                className="btn-secondary flex items-center justify-center gap-2 py-3"
+              >
+                <Banknote className="w-4 h-4" />
+                現金会計
+              </button>
+              <button
+                onClick={() => closeMutation.mutate({ payment_method: 'card', card_amount: ticket.total_amount })}
+                className="btn-primary flex items-center justify-center gap-2 py-3"
+              >
+                <CreditCard className="w-4 h-4" />
+                カード会計
+              </button>
+            </div>
           </div>
         </div>
       </div>

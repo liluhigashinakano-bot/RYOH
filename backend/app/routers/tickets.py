@@ -35,6 +35,20 @@ class TicketClose(BaseModel):
     discount_amount: int = 0
 
 
+class OrderItemResponse(BaseModel):
+    id: int
+    item_type: str
+    item_name: Optional[str]
+    quantity: int
+    unit_price: int
+    amount: int
+    cast_id: Optional[int]
+    canceled_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
 class TicketResponse(BaseModel):
     id: int
     store_id: int
@@ -54,6 +68,24 @@ class TicketResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TicketDetailResponse(TicketResponse):
+    order_items: list[OrderItemResponse] = []
+
+
+@router.get("/{ticket_id}", response_model=TicketDetailResponse)
+def get_ticket(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="伝票が見つかりません")
+    result = TicketDetailResponse.model_validate(ticket)
+    result.order_items = [OrderItemResponse.model_validate(i) for i in ticket.order_items if i.canceled_at is None]
+    return result
 
 
 @router.get("")
