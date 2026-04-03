@@ -9,7 +9,7 @@ from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
-CAST_DRINK_TYPES = {"drink_l", "drink_mg", "champagne"}
+CAST_DRINK_TYPES = {"drink_l", "drink_mg", "champagne", "shot_cast"}
 
 
 def _ticket_extra(ticket: models.Ticket) -> dict:
@@ -23,14 +23,17 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         current_cast_name = latest.cast.name if latest.cast else None
         e_started_at = latest.started_at
 
-    # 最終キャストドリンク注文時刻
-    last_drink_at = None
-    drink_orders = [
-        i for i in (ticket.order_items or [])
-        if i.item_type in CAST_DRINK_TYPES and i.canceled_at is None
-    ]
-    if drink_orders:
-        last_drink_at = max(i.created_at for i in drink_orders)
+    # 種別ごとの最終キャストドリンク注文時刻
+    last_drink_times: dict = {}
+    for drink_type in CAST_DRINK_TYPES:
+        orders = [
+            i for i in (ticket.order_items or [])
+            if i.item_type == drink_type and i.canceled_at is None
+        ]
+        if orders:
+            last_drink_times[drink_type] = max(i.created_at for i in orders)
+        else:
+            last_drink_times[drink_type] = None
 
     # 顧客名
     customer_name = ticket.customer.name if ticket.customer else None
@@ -38,7 +41,7 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
     return {
         "current_cast_name": current_cast_name,
         "e_started_at": e_started_at,
-        "last_drink_at": last_drink_at,
+        "last_drink_times": last_drink_times,
         "customer_name": customer_name,
     }
 
@@ -106,7 +109,7 @@ class TicketResponse(BaseModel):
     # computed extras
     current_cast_name: Optional[str] = None
     e_started_at: Optional[datetime] = None
-    last_drink_at: Optional[datetime] = None
+    last_drink_times: Optional[dict] = None
     customer_name: Optional[str] = None
 
     class Config:
@@ -139,7 +142,10 @@ def _to_response(ticket: models.Ticket) -> dict:
         "set_is_paused": ticket.set_is_paused or False,
         "set_paused_at": ticket.set_paused_at,
         "set_paused_seconds": ticket.set_paused_seconds or 0,
-        **extra,
+        "current_cast_name": extra["current_cast_name"],
+        "e_started_at": extra["e_started_at"],
+        "last_drink_times": extra["last_drink_times"],
+        "customer_name": extra["customer_name"],
     }
     return data
 
@@ -173,7 +179,15 @@ def get_tickets(
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
     tickets = query.order_by(models.Ticket.started_at.desc()).all()
-    return [_to_response(t) for t in tickets]
+    result = []
+    for t in tickets:
+        data = _to_response(t)
+        data["order_items"] = [
+            {"id": i.id, "item_name": i.item_name or i.item_type, "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount}
+            for i in t.order_items if i.canceled_at is None
+        ]
+        result.append(data)
+    return result
 
 
 @router.post("", response_model=TicketResponse)
