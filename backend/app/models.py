@@ -232,6 +232,9 @@ class Ticket(Base):
     card_amount = Column(Integer, default=0)
     staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text)
+    guest_count = Column(Integer, default=1)
+    plan_type = Column(String(20), nullable=True)
+    visit_type = Column(String(5), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")

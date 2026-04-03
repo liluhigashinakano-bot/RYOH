@@ -37,7 +37,7 @@ export default function POS() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: { store_id: number; table_no: string }) =>
+    mutationFn: (data: { store_id: number; table_no: string; guest_count: number; plan_type: string; visit_type: string }) =>
       apiClient.post('/api/tickets', data).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId] })
@@ -104,7 +104,9 @@ export default function POS() {
       {showNewTicket && (
         <NewTicketModal
           storeId={selectedStoreId}
-          onSubmit={(tableNo) => createMutation.mutate({ store_id: selectedStoreId, table_no: tableNo })}
+          onSubmit={(tableNo, guestCount, planType, visitType) =>
+            createMutation.mutate({ store_id: selectedStoreId, table_no: tableNo, guest_count: guestCount, plan_type: planType, visit_type: visitType })
+          }
           onClose={() => setShowNewTicket(false)}
         />
       )}
@@ -140,6 +142,21 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
           {hours > 0 ? `${hours}h` : ''}{mins}分
         </span>
       </div>
+      <div className="flex gap-2 flex-wrap">
+        {ticket.visit_type && (
+          <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
+            {ticket.visit_type}
+          </span>
+        )}
+        {ticket.plan_type && (
+          <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>
+            {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
+          </span>
+        )}
+        {ticket.guest_count > 0 && (
+          <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名</span>
+        )}
+      </div>
       <div>
         <p className="text-xs text-gray-400">延長 {ticket.extension_count}回</p>
         <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
@@ -148,8 +165,22 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
   )
 }
 
-function NewTicketModal({ storeId, onSubmit, onClose }: { storeId: number; onSubmit: (t: string) => void; onClose: () => void }) {
-  const [tableNo, setTableNo] = useState('')
+const TABLE_NOS = [
+  ...['A1','A2','A3','A4','A5','A6'],
+  ...['B1','B2','B3','B4','B5','B6'],
+  ...['C1','C2','C3','C4','C5','C6'],
+]
+
+function NewTicketModal({ storeId, onSubmit, onClose }: {
+  storeId: number
+  onSubmit: (tableNo: string, guestCount: number, planType: string, visitType: string) => void
+  onClose: () => void
+}) {
+  const [tableNo, setTableNo] = useState(TABLE_NOS[0])
+  const [guestCount, setGuestCount] = useState(1)
+  const [planType, setPlanType] = useState('premium')
+  const [visitType, setVisitType] = useState('N')
+
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="card w-full max-w-sm space-y-4">
@@ -157,20 +188,60 @@ function NewTicketModal({ storeId, onSubmit, onClose }: { storeId: number; onSub
           <h3 className="font-bold text-white">新規伝票</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
+
         <div>
           <label className="text-sm text-gray-400 block mb-1.5">卓番号</label>
-          <input
-            type="text"
-            value={tableNo}
-            onChange={e => setTableNo(e.target.value)}
-            className="input-field w-full"
-            placeholder="例: 1番、A卓"
-            autoFocus
-          />
+          <select value={tableNo} onChange={e => setTableNo(e.target.value)} className="input-field w-full">
+            {TABLE_NOS.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
         </div>
+
+        <div>
+          <label className="text-sm text-gray-400 block mb-1.5">客数</label>
+          <select value={guestCount} onChange={e => setGuestCount(Number(e.target.value))} className="input-field w-full">
+            {Array.from({length: 20}, (_, i) => i + 1).map(n => (
+              <option key={n} value={n}>{n}名</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="text-sm text-gray-400 block mb-1.5">プラン</label>
+          <div className="flex gap-2">
+            {['premium', 'standard'].map(p => (
+              <button
+                key={p}
+                onClick={() => setPlanType(p)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  planType === p ? 'bg-primary-600 text-white' : 'btn-secondary'
+                }`}
+              >
+                {p === 'premium' ? 'プレミアム' : 'スタンダード'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-sm text-gray-400 block mb-1.5">区分</label>
+          <div className="flex gap-2">
+            {['N', 'R'].map(v => (
+              <button
+                key={v}
+                onClick={() => setVisitType(v)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  visitType === v ? 'bg-primary-600 text-white' : 'btn-secondary'
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => onSubmit(tableNo)} className="btn-primary flex-1">開始</button>
+          <button onClick={() => onSubmit(tableNo, guestCount, planType, visitType)} className="btn-primary flex-1">開始</button>
         </div>
       </div>
     </div>

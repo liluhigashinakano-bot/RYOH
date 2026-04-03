@@ -18,6 +18,10 @@ columns = [
     ("casts", "last_rate_change_date", "DATE"),
     # confirmed_shifts
     ("confirmed_shifts", "shift_data", "TEXT"),
+    # tickets
+    ("tickets", "guest_count", "INTEGER DEFAULT 1"),
+    ("tickets", "plan_type", "VARCHAR(20)"),
+    ("tickets", "visit_type", "VARCHAR(5)"),
 ]
 
 with engine.connect() as conn:

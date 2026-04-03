@@ -15,6 +15,9 @@ class TicketCreate(BaseModel):
     customer_id: Optional[int] = None
     table_no: Optional[str] = None
     notes: Optional[str] = None
+    guest_count: int = 1
+    plan_type: Optional[str] = None
+    visit_type: Optional[str] = None
 
 
 class OrderItemCreate(BaseModel):
@@ -45,6 +48,9 @@ class TicketResponse(BaseModel):
     total_amount: int
     discount_amount: int
     notes: Optional[str]
+    guest_count: int = 1
+    plan_type: Optional[str] = None
+    visit_type: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -79,6 +85,9 @@ def create_ticket(
         table_no=data.table_no,
         staff_id=current_user.id,
         notes=data.notes,
+        guest_count=data.guest_count,
+        plan_type=data.plan_type,
+        visit_type=data.visit_type,
     )
     # セット料金を自動追加
     if store.set_price > 0:
