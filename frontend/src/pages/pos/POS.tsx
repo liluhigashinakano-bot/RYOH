@@ -61,6 +61,8 @@ function calcElapsed(startIso: string | null | undefined, now: number): number {
   return Math.max(0, Math.floor((now - ms) / 1000))
 }
 
+const SET_DURATION = 40 * 60 // 40分
+
 function calcSetElapsed(ticket: any, now: number): number | null {
   const startMs = toUtcMs(ticket.set_started_at)
   if (startMs === null) return null
@@ -71,6 +73,19 @@ function calcSetElapsed(ticket: any, now: number): number | null {
     ? Math.floor((now - pausedAtMs) / 1000)
     : 0
   return Math.max(0, total - paused - currentPause)
+}
+
+// 現在セット内の残り秒数（0～SET_DURATION）
+function calcSetCountdown(setElapsed: number | null): number | null {
+  if (setElapsed === null) return null
+  const withinSet = setElapsed % SET_DURATION
+  return SET_DURATION - withinSet
+}
+
+// 何セット目か（1始まり）
+function calcSetInterval(setElapsed: number | null): number {
+  if (setElapsed === null) return 0
+  return Math.floor(setElapsed / SET_DURATION)
 }
 
 export default function POS() {
@@ -214,12 +229,14 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
         <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
       </div>
 
-      {/* E/SET タイマー */}
+      {/* E/残り時間タイマー */}
       <div className="flex gap-3 text-xs font-mono mb-1">
         <span className="text-gray-500">E <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>{eElapsed !== null ? fmtTime(eElapsed) : '—'}</span></span>
-        {setElapsed !== null && (
-          <span className="text-gray-500">SET <span className={ticket.set_is_paused ? 'text-yellow-400' : 'text-green-400'}>{fmtTime(setElapsed)}</span></span>
-        )}
+        {setElapsed !== null && (() => {
+          const countdown = calcSetCountdown(setElapsed)!
+          const urgent = countdown <= 5 * 60
+          return <span className="text-gray-500">残り <span className={ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}>{fmtTime(countdown)}</span></span>
+        })()}
       </div>
 
       {/* D時間 */}
@@ -368,7 +385,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [aiAdvice, setAiAdvice] = useState('')
   const [loadingAI, setLoadingAI] = useState(false)
   const [castSelectItem, setCastSelectItem] = useState<{ type: string; label: string; price: number } | null>(null)
-  const prevSetIntervalRef = useRef<number>(-1)
+  const prevSetIntervalRef = useRef<number | null>(null)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketId],
@@ -404,14 +421,19 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   useEffect(() => {
     if (!ticket || ticket.set_is_paused || !ticket.set_started_at) return
     const setElapsed = calcSetElapsed(ticket, now)
-    if (setElapsed === null || setElapsed < 1) return
-    const intervalNum = Math.floor(setElapsed / (40 * 60))
-    if (intervalNum > 0 && intervalNum !== prevSetIntervalRef.current) {
+    if (setElapsed === null) return
+    const intervalNum = calcSetInterval(setElapsed)
+
+    // 初回マウント時は現在のインターバル番号をセットするだけ（過去分は加算しない）
+    if (prevSetIntervalRef.current === null) {
+      prevSetIntervalRef.current = intervalNum
+      return
+    }
+
+    if (intervalNum > prevSetIntervalRef.current) {
       prevSetIntervalRef.current = intervalNum
       const guestCount = ticket.guest_count || 1
-      const store = ticket.store_id
-      // 延長料金を取得してから加算（storeのextension_priceを使用）
-      apiClient.get(`/api/stores/${store}`).then(r => {
+      apiClient.get(`/api/stores/${ticket.store_id}`).then(r => {
         const extPrice = r.data.extension_price || 2700
         for (let i = 0; i < guestCount; i++) {
           addOrderMutation.mutate({ item_type: 'extension', unit_price: extPrice, quantity: 1 })
@@ -492,7 +514,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>{eElapsed !== null ? fmtTime(eElapsed) : '—'}</span>
             </div>
 
-            {/* セットタイマー */}
+            {/* セットタイマー（残り時間カウントダウン） */}
             <div className="flex items-center gap-2 ml-auto">
               {!ticket.set_started_at ? (
                 <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
@@ -501,10 +523,21 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 </button>
               ) : (
                 <>
-                  <span className="text-xs text-gray-500">SET</span>
-                  <span className={`text-base font-bold font-mono ${ticket.set_is_paused ? 'text-yellow-400' : 'text-green-400'}`}>
-                    {setElapsed !== null ? fmtTime(setElapsed) : '—'}
-                  </span>
+                  {(() => {
+                    const countdown = calcSetCountdown(setElapsed)
+                    const urgent = countdown !== null && countdown <= 5 * 60
+                    const intervalNum = calcSetInterval(setElapsed)
+                    return (
+                      <>
+                        <span className="text-xs text-gray-500">セット残り</span>
+                        <span className={`text-lg font-bold font-mono ${ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}`}>
+                          {countdown !== null ? fmtTime(countdown) : '—'}
+                        </span>
+                        {intervalNum > 0 && <span className="badge bg-night-700 text-gray-400 text-xs">{intervalNum}延長済</span>}
+                      </>
+                    )
+                  })()}
+
                   <button onClick={() => setToggleMutation.mutate()} disabled={setToggleMutation.isPending}
                     className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors ${
                       ticket.set_is_paused ? 'bg-green-800/50 hover:bg-green-700/50 text-green-300' : 'bg-yellow-800/50 hover:bg-yellow-700/50 text-yellow-300'
