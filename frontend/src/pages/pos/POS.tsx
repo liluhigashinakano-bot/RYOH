@@ -232,11 +232,14 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
       {/* E/残り時間タイマー */}
       <div className="flex gap-3 text-xs font-mono mb-1">
         <span className="text-gray-500">E <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>{eElapsed !== null ? fmtTime(eElapsed) : '—'}</span></span>
-        {setElapsed !== null && (() => {
-          const countdown = calcSetCountdown(setElapsed)!
-          const urgent = countdown <= 5 * 60
-          return <span className="text-gray-500">残り <span className={ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}>{fmtTime(countdown)}</span></span>
-        })()}
+        {setElapsed === null
+          ? <span className="text-gray-600 text-xs">▶ 開始待ち</span>
+          : (() => {
+              const countdown = calcSetCountdown(setElapsed)!
+              const urgent = countdown <= 5 * 60
+              return <span className="text-gray-500">残り <span className={ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}>{fmtTime(countdown)}</span></span>
+            })()
+        }
       </div>
 
       {/* D時間 */}
@@ -518,8 +521,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             <div className="flex items-center gap-2 ml-auto">
               {!ticket.set_started_at ? (
                 <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1 bg-green-800/50 hover:bg-green-700/50 text-green-300 rounded-lg text-xs font-medium transition-colors">
-                  <Play className="w-3 h-3" />セットスタート
+                  className="flex items-center gap-2 px-5 py-2 bg-green-700 hover:bg-green-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50">
+                  <Play className="w-4 h-4" />伝票開始
                 </button>
               ) : (
                 <>
