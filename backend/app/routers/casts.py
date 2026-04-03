@@ -70,6 +70,7 @@ class CastUpdate(BaseModel):
     birthday: Optional[date] = None
     employment_start_date: Optional[date] = None
     last_rate_change_date: Optional[date] = None
+    is_active: Optional[bool] = None
 
 
 class CastResponse(BaseModel):

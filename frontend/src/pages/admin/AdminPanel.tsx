@@ -268,12 +268,12 @@ function CastsTab() {
 
 function CastModal({ storeId, cast, onClose }: { storeId: number; cast?: any; onClose: () => void }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ name: cast?.name || '', is_active: cast?.is_active ?? true })
+  const [form, setForm] = useState({ stage_name: cast?.stage_name || cast?.name || '', is_active: cast?.is_active ?? true })
 
   const mutation = useMutation({
     mutationFn: () => cast
       ? apiClient.put(`/api/casts/${storeId}/${cast.id}`, form)
-      : apiClient.post(`/api/casts/${storeId}`, { ...form, store_id: storeId }),
+      : apiClient.post(`/api/casts/${storeId}`, form),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['casts', storeId] }); onClose() },
   })
 
@@ -286,8 +286,8 @@ function CastModal({ storeId, cast, onClose }: { storeId: number; cast?: any; on
         </div>
         <div className="space-y-3">
           <div>
-            <label className="text-sm text-gray-400 block mb-1.5">名前</label>
-            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="キャスト名" />
+            <label className="text-sm text-gray-400 block mb-1.5">源氏名</label>
+            <input value={form.stage_name} onChange={e => setForm({ ...form, stage_name: e.target.value })} className="input-field w-full" placeholder="源氏名" />
           </div>
           <div>
             <label className="text-sm text-gray-400 block mb-1.5">在籍状況</label>
@@ -303,7 +303,7 @@ function CastModal({ storeId, cast, onClose }: { storeId: number; cast?: any; on
         </div>
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => mutation.mutate()} disabled={!form.name} className="btn-primary flex-1 disabled:opacity-40">
+          <button onClick={() => mutation.mutate()} disabled={!form.stage_name} className="btn-primary flex-1 disabled:opacity-40">
             {cast ? '更新' : '追加'}
           </button>
         </div>
