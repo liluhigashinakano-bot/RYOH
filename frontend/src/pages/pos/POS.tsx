@@ -170,19 +170,19 @@ export default function POS() {
 
 // D時間: 種別ごとに色分けして表示
 function DrinkTimers({ lastDrinkTimes, now }: { lastDrinkTimes: any; now: number }) {
-  if (!lastDrinkTimes) return <span className="text-gray-600 text-xs font-mono">D —</span>
+  if (!lastDrinkTimes) return null
+
+  const ordered = Object.entries(DRINK_COLORS).filter(([type]) => lastDrinkTimes[type] !== null)
+  if (ordered.length === 0) return null
 
   return (
     <div className="flex gap-2 flex-wrap">
-      {Object.entries(DRINK_COLORS).map(([type, cfg]) => {
-        const iso = lastDrinkTimes[type]
-        const elapsed = iso ? calcElapsed(iso, now) : null
+      {ordered.map(([type, cfg]) => {
+        const elapsed = calcElapsed(lastDrinkTimes[type], now)
         return (
           <span key={type} className="flex items-center gap-1 text-xs font-mono">
             <span className={`${cfg.bg} ${cfg.color} px-1 rounded text-xs`}>{cfg.label}</span>
-            <span className={elapsed !== null ? cfg.color : 'text-gray-600'}>
-              {elapsed !== null ? fmtTime(elapsed) : '∞'}
-            </span>
+            <span className={cfg.color}>{fmtTime(elapsed)}</span>
           </span>
         )
       })}
