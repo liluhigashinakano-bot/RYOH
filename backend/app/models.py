@@ -235,6 +235,10 @@ class Ticket(Base):
     guest_count = Column(Integer, default=1)
     plan_type = Column(String(20), nullable=True)
     visit_type = Column(String(5), nullable=True)
+    set_started_at = Column(DateTime, nullable=True)
+    set_is_paused = Column(Boolean, default=False)
+    set_paused_at = Column(DateTime, nullable=True)
+    set_paused_seconds = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")

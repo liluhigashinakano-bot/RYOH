@@ -9,6 +9,39 @@ from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
+CAST_DRINK_TYPES = {"drink_l", "drink_mg", "champagne"}
+
+
+def _ticket_extra(ticket: models.Ticket) -> dict:
+    """伝票の追加情報（キャスト名・E開始時刻・最終キャストドリンク時刻）を返す"""
+    # 現在担当キャスト（ended_at が null の最新アサイン）
+    current_cast_name = None
+    e_started_at = None
+    active_assignments = [a for a in (ticket.assignments or []) if a.ended_at is None]
+    if active_assignments:
+        latest = max(active_assignments, key=lambda a: a.started_at)
+        current_cast_name = latest.cast.name if latest.cast else None
+        e_started_at = latest.started_at
+
+    # 最終キャストドリンク注文時刻
+    last_drink_at = None
+    drink_orders = [
+        i for i in (ticket.order_items or [])
+        if i.item_type in CAST_DRINK_TYPES and i.canceled_at is None
+    ]
+    if drink_orders:
+        last_drink_at = max(i.created_at for i in drink_orders)
+
+    # 顧客名
+    customer_name = ticket.customer.name if ticket.customer else None
+
+    return {
+        "current_cast_name": current_cast_name,
+        "e_started_at": e_started_at,
+        "last_drink_at": last_drink_at,
+        "customer_name": customer_name,
+    }
+
 
 class TicketCreate(BaseModel):
     store_id: int
@@ -44,6 +77,7 @@ class OrderItemResponse(BaseModel):
     amount: int
     cast_id: Optional[int]
     canceled_at: Optional[datetime]
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -65,6 +99,15 @@ class TicketResponse(BaseModel):
     guest_count: int = 1
     plan_type: Optional[str] = None
     visit_type: Optional[str] = None
+    set_started_at: Optional[datetime] = None
+    set_is_paused: bool = False
+    set_paused_at: Optional[datetime] = None
+    set_paused_seconds: int = 0
+    # computed extras
+    current_cast_name: Optional[str] = None
+    e_started_at: Optional[datetime] = None
+    last_drink_at: Optional[datetime] = None
+    customer_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -72,6 +115,33 @@ class TicketResponse(BaseModel):
 
 class TicketDetailResponse(TicketResponse):
     order_items: list[OrderItemResponse] = []
+
+
+def _to_response(ticket: models.Ticket) -> dict:
+    extra = _ticket_extra(ticket)
+    data = {
+        "id": ticket.id,
+        "store_id": ticket.store_id,
+        "customer_id": ticket.customer_id,
+        "table_no": ticket.table_no,
+        "started_at": ticket.started_at,
+        "ended_at": ticket.ended_at,
+        "is_closed": ticket.is_closed,
+        "set_count": ticket.set_count,
+        "extension_count": ticket.extension_count,
+        "total_amount": ticket.total_amount,
+        "discount_amount": ticket.discount_amount,
+        "notes": ticket.notes,
+        "guest_count": ticket.guest_count or 1,
+        "plan_type": ticket.plan_type,
+        "visit_type": ticket.visit_type,
+        "set_started_at": ticket.set_started_at,
+        "set_is_paused": ticket.set_is_paused or False,
+        "set_paused_at": ticket.set_paused_at,
+        "set_paused_seconds": ticket.set_paused_seconds or 0,
+        **extra,
+    }
+    return data
 
 
 @router.get("/{ticket_id}", response_model=TicketDetailResponse)
@@ -83,9 +153,13 @@ def get_ticket(
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="伝票が見つかりません")
-    result = TicketDetailResponse.model_validate(ticket)
-    result.order_items = [OrderItemResponse.model_validate(i) for i in ticket.order_items if i.canceled_at is None]
-    return result
+    data = _to_response(ticket)
+    data["order_items"] = [
+        OrderItemResponse.model_validate(i)
+        for i in ticket.order_items
+        if i.canceled_at is None
+    ]
+    return data
 
 
 @router.get("")
@@ -98,7 +172,8 @@ def get_tickets(
     query = db.query(models.Ticket).filter(models.Ticket.store_id == store_id)
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
-    return query.order_by(models.Ticket.started_at.desc()).all()
+    tickets = query.order_by(models.Ticket.started_at.desc()).all()
+    return [_to_response(t) for t in tickets]
 
 
 @router.post("", response_model=TicketResponse)
@@ -121,16 +196,14 @@ def create_ticket(
         plan_type=data.plan_type,
         visit_type=data.visit_type,
     )
-    # セット料金を自動追加
-    if store.set_price > 0:
+    if store.set_price and store.set_price > 0:
         ticket.total_amount = store.set_price
 
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
 
-    # セット料金を注文明細に追加
-    if store.set_price > 0:
+    if store.set_price and store.set_price > 0:
         item = models.OrderItem(
             ticket_id=ticket.id,
             item_type="set",
@@ -142,7 +215,56 @@ def create_ticket(
         db.add(item)
         db.commit()
 
-    return ticket
+    return _to_response(ticket)
+
+
+@router.post("/{ticket_id}/set-start")
+def set_start(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = db.query(models.Ticket).filter(
+        models.Ticket.id == ticket_id, models.Ticket.is_closed == False
+    ).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="伝票が見つかりません")
+    if ticket.set_started_at:
+        raise HTTPException(status_code=400, detail="既にスタート済みです")
+    ticket.set_started_at = datetime.utcnow()
+    ticket.set_is_paused = False
+    ticket.set_paused_seconds = 0
+    db.commit()
+    return {"message": "セットスタート"}
+
+
+@router.post("/{ticket_id}/set-toggle")
+def set_toggle(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    ticket = db.query(models.Ticket).filter(
+        models.Ticket.id == ticket_id, models.Ticket.is_closed == False
+    ).first()
+    if not ticket or not ticket.set_started_at:
+        raise HTTPException(status_code=404, detail="伝票が見つかりません")
+
+    now = datetime.utcnow()
+    if ticket.set_is_paused:
+        # 再開: 一時停止時間を累積
+        if ticket.set_paused_at:
+            paused_sec = int((now - ticket.set_paused_at).total_seconds())
+            ticket.set_paused_seconds = (ticket.set_paused_seconds or 0) + paused_sec
+        ticket.set_is_paused = False
+        ticket.set_paused_at = None
+    else:
+        # 一時停止
+        ticket.set_is_paused = True
+        ticket.set_paused_at = now
+
+    db.commit()
+    return {"message": "トグル完了", "is_paused": ticket.set_is_paused}
 
 
 @router.post("/{ticket_id}/orders")
@@ -172,7 +294,6 @@ def add_order(
     db.add(item)
     ticket.total_amount += amount
 
-    # 延長の場合カウントアップ
     if data.item_type == "extension":
         ticket.extension_count += 1
 
@@ -226,7 +347,6 @@ def close_ticket(
     ticket.discount_amount = data.discount_amount
     ticket.total_amount = max(0, ticket.total_amount - data.discount_amount)
 
-    # 顧客の来店データ更新
     if ticket.customer_id:
         customer = db.query(models.Customer).filter(models.Customer.id == ticket.customer_id).first()
         if customer:
@@ -240,7 +360,7 @@ def close_ticket(
 
     db.commit()
     db.refresh(ticket)
-    return ticket
+    return _to_response(ticket)
 
 
 @router.get("/live/{store_id}")
@@ -249,7 +369,6 @@ def get_live_summary(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """リアルタイム売上サマリー"""
     from datetime import date
     today = date.today()
 

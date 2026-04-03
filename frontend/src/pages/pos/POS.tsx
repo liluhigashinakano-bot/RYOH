@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, X, CreditCard, Banknote, Bot } from 'lucide-react'
+import { Plus, X, CreditCard, Banknote, Bot, Play, Pause } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -14,6 +14,44 @@ const ITEM_TYPES = [
   { type: 'champagne', label: 'シャンパン', defaultPrice: 0 },
   { type: 'other', label: 'その他', defaultPrice: 0 },
 ]
+
+const TABLE_NOS = [
+  ...['A1','A2','A3','A4','A5','A6'],
+  ...['B1','B2','B3','B4','B5','B6'],
+  ...['C1','C2','C3','C4','C5','C6'],
+]
+
+function useNow() {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return now
+}
+
+function fmtTime(totalSec: number) {
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`
+}
+
+function calcElapsed(startIso: string | null | undefined, now: number): number {
+  if (!startIso) return 0
+  return Math.max(0, Math.floor((now - new Date(startIso).getTime()) / 1000))
+}
+
+function calcSetElapsed(ticket: any, now: number): number | null {
+  if (!ticket.set_started_at) return null
+  const total = Math.floor((now - new Date(ticket.set_started_at).getTime()) / 1000)
+  const paused = ticket.set_paused_seconds || 0
+  const currentPause = ticket.set_is_paused && ticket.set_paused_at
+    ? Math.floor((now - new Date(ticket.set_paused_at).getTime()) / 1000)
+    : 0
+  return Math.max(0, total - paused - currentPause)
+}
 
 export default function POS() {
   const { stores } = useAuthStore()
@@ -47,11 +85,9 @@ export default function POS() {
 
   return (
     <div className="space-y-4">
-      {/* ヘッダー */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-white">POS・伝票管理</h1>
         <div className="flex items-center gap-3">
-          {/* 店舗選択 */}
           <select
             value={selectedStoreId}
             onChange={(e) => setSelectedStoreId(Number(e.target.value))}
@@ -66,7 +102,6 @@ export default function POS() {
         </div>
       </div>
 
-      {/* リアルタイム売上バー */}
       <div className="card flex flex-wrap gap-4 text-sm">
         <div>
           <span className="text-gray-400">本日合計</span>
@@ -83,7 +118,6 @@ export default function POS() {
         </div>
       </div>
 
-      {/* 伝票一覧 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {tickets.map((ticket: any) => (
           <TicketCard
@@ -100,7 +134,6 @@ export default function POS() {
         )}
       </div>
 
-      {/* 新規伝票モーダル */}
       {showNewTicket && (
         <NewTicketModal
           storeId={selectedStoreId}
@@ -111,7 +144,6 @@ export default function POS() {
         />
       )}
 
-      {/* 伝票詳細モーダル */}
       {selectedTicketId && (
         <TicketDetailModal
           ticketId={selectedTicketId}
@@ -124,39 +156,55 @@ export default function POS() {
 }
 
 function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number; onClick: () => void }) {
-  const elapsed = Math.floor((Date.now() - new Date(ticket.started_at).getTime()) / 60000)
-  const hours = Math.floor(elapsed / 60)
-  const mins = elapsed % 60
+  const now = useNow()
+  const elapsed = calcElapsed(ticket.started_at, now)
+  const setElapsed = calcSetElapsed(ticket, now)
+  const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
+  const dElapsed = ticket.last_drink_at ? calcElapsed(ticket.last_drink_at, now) : null
 
   return (
     <button
       onClick={onClick}
-      className="card text-left space-y-3 hover:border-primary-600/50 transition-colors active:scale-95"
+      className="card text-left space-y-2 hover:border-primary-600/50 transition-colors active:scale-95"
     >
+      {/* 上段: 卓番・バッジ・経過時間 */}
       <div className="flex justify-between items-start">
         <div>
-          <span className="text-xs text-gray-500">卓番</span>
           <p className="text-lg font-bold text-white">{ticket.table_no || '—'}</p>
+          <div className="flex gap-1 flex-wrap mt-0.5">
+            {ticket.visit_type && (
+              <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
+                {ticket.visit_type}
+              </span>
+            )}
+            {ticket.plan_type && (
+              <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>
+                {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
+              </span>
+            )}
+            {ticket.guest_count > 0 && (
+              <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名</span>
+            )}
+          </div>
         </div>
-        <span className="badge bg-green-900/40 text-green-400">
-          {hours > 0 ? `${hours}h` : ''}{mins}分
-        </span>
+        <span className="badge bg-green-900/40 text-green-400 font-mono text-xs">{fmtTime(elapsed)}</span>
       </div>
-      <div className="flex gap-2 flex-wrap">
-        {ticket.visit_type && (
-          <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
-            {ticket.visit_type}
-          </span>
-        )}
-        {ticket.plan_type && (
-          <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>
-            {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
-          </span>
-        )}
-        {ticket.guest_count > 0 && (
-          <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名</span>
+
+      {/* 顧客名・担当キャスト */}
+      <div className="flex gap-3 text-xs">
+        <span className="text-gray-400">{ticket.customer_name || '—'}</span>
+        <span className="text-primary-400">{ticket.current_cast_name || '—'}</span>
+      </div>
+
+      {/* E/D/セットタイマー */}
+      <div className="flex gap-2 text-xs font-mono">
+        <span className="text-gray-500">E <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>{eElapsed !== null ? fmtTime(eElapsed) : '—'}</span></span>
+        <span className="text-gray-500">D <span className={dElapsed !== null ? 'text-cyan-400' : 'text-gray-600'}>{dElapsed !== null ? fmtTime(dElapsed) : '∞'}</span></span>
+        {setElapsed !== null && (
+          <span className="text-gray-500">SET <span className={ticket.set_is_paused ? 'text-yellow-400' : 'text-green-400'}>{fmtTime(setElapsed)}</span></span>
         )}
       </div>
+
       <div>
         <p className="text-xs text-gray-400">延長 {ticket.extension_count}回</p>
         <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
@@ -164,12 +212,6 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
     </button>
   )
 }
-
-const TABLE_NOS = [
-  ...['A1','A2','A3','A4','A5','A6'],
-  ...['B1','B2','B3','B4','B5','B6'],
-  ...['C1','C2','C3','C4','C5','C6'],
-]
 
 function NewTicketModal({ storeId, onSubmit, onClose }: {
   storeId: number
@@ -250,6 +292,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
 
 function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; storeId: number; onClose: () => void }) {
   const qc = useQueryClient()
+  const now = useNow()
   const [aiAdvice, setAiAdvice] = useState('')
   const [loadingAI, setLoadingAI] = useState(false)
 
@@ -276,6 +319,16 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     },
   })
 
+  const setStartMutation = useMutation({
+    mutationFn: () => apiClient.post(`/api/tickets/${ticketId}/set-start`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ticket', ticketId] }),
+  })
+
+  const setToggleMutation = useMutation({
+    mutationFn: () => apiClient.post(`/api/tickets/${ticketId}/set-toggle`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ticket', ticketId] }),
+  })
+
   const fetchAI = async () => {
     setLoadingAI(true)
     try {
@@ -291,50 +344,106 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     </div>
   )
 
+  const elapsed = calcElapsed(ticket.started_at, now)
+  const setElapsed = calcSetElapsed(ticket, now)
+  const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
+  const dElapsed = ticket.last_drink_at ? calcElapsed(ticket.last_drink_at, now) : null
   const startedAt = new Date(ticket.started_at)
-  const elapsed = Math.floor((Date.now() - startedAt.getTime()) / 60000)
-  const elapsedH = Math.floor(elapsed / 60)
-  const elapsedM = elapsed % 60
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-4xl h-[92vh] flex flex-col overflow-hidden">
 
         {/* ヘッダー */}
-        <div className="flex justify-between items-center px-4 py-3 border-b border-night-600 shrink-0">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-xs text-gray-500">卓番</p>
+        <div className="px-4 py-3 border-b border-night-600 shrink-0 space-y-2">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
               <p className="text-xl font-bold text-white">{ticket.table_no || '—'}</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {ticket.visit_type && (
+                  <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
+                    {ticket.visit_type}
+                  </span>
+                )}
+                {ticket.plan_type && (
+                  <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-300'}`}>
+                    {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
+                  </span>
+                )}
+                {ticket.guest_count > 0 && (
+                  <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>
+                )}
+              </div>
             </div>
-            <div className="flex gap-1.5">
-              {ticket.visit_type && (
-                <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>
-                  {ticket.visit_type}
-                </span>
-              )}
-              {ticket.plan_type && (
-                <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-300'}`}>
-                  {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
-                </span>
-              )}
-              {ticket.guest_count > 0 && (
-                <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>
-              )}
+            <div className="flex items-center gap-4">
+              <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
+              <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-xs text-gray-500">経過時間</p>
-              <p className="text-sm text-green-400 font-medium">
-                {elapsedH > 0 ? `${elapsedH}h` : ''}{elapsedM}分
-              </p>
+
+          {/* タイマー行 */}
+          <div className="flex flex-wrap items-center gap-4 text-sm font-mono">
+            {/* 顧客名・担当者 */}
+            <div className="flex gap-2 text-xs not-font-mono">
+              <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
+              <span className="text-gray-600">/</span>
+              <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500">合計</p>
-              <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
+
+            {/* 経過時間 */}
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-xs">経過</span>
+              <span className="text-green-400">{fmtTime(elapsed)}</span>
             </div>
-            <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+
+            {/* E時間 */}
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-xs">E</span>
+              <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>
+                {eElapsed !== null ? fmtTime(eElapsed) : '—'}
+              </span>
+            </div>
+
+            {/* D時間 */}
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 text-xs">D</span>
+              <span className={dElapsed !== null ? 'text-cyan-400' : 'text-gray-600'}>
+                {dElapsed !== null ? fmtTime(dElapsed) : '∞'}
+              </span>
+            </div>
+
+            {/* セットタイマー */}
+            <div className="flex items-center gap-2 ml-auto">
+              {!ticket.set_started_at ? (
+                <button
+                  onClick={() => setStartMutation.mutate()}
+                  disabled={setStartMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-green-800/50 hover:bg-green-700/50 text-green-300 rounded-lg text-xs font-medium transition-colors"
+                >
+                  <Play className="w-3 h-3" />
+                  セットスタート
+                </button>
+              ) : (
+                <>
+                  <span className="text-xs text-gray-500">SET</span>
+                  <span className={`text-base font-bold ${ticket.set_is_paused ? 'text-yellow-400' : 'text-green-400'}`}>
+                    {setElapsed !== null ? fmtTime(setElapsed) : '—'}
+                  </span>
+                  <button
+                    onClick={() => setToggleMutation.mutate()}
+                    disabled={setToggleMutation.isPending}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors ${
+                      ticket.set_is_paused
+                        ? 'bg-green-800/50 hover:bg-green-700/50 text-green-300'
+                        : 'bg-yellow-800/50 hover:bg-yellow-700/50 text-yellow-300'
+                    }`}
+                  >
+                    {ticket.set_is_paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                    {ticket.set_is_paused ? '再開' : '一時停止'}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -382,7 +491,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           {/* 右: 操作 */}
           <div className="w-1/2 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {/* 注文追加 */}
               <p className="text-xs text-gray-500">注文追加</p>
               <div className="grid grid-cols-2 gap-2">
                 {ITEM_TYPES.map(({ type, label, defaultPrice }) => (
@@ -397,7 +505,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 ))}
               </div>
 
-              {/* AI */}
               <div className="border-t border-night-700 pt-2">
                 <button
                   onClick={fetchAI}
@@ -415,7 +522,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               </div>
             </div>
 
-            {/* 会計ボタン */}
             <div className="border-t border-night-600 p-3 grid grid-cols-2 gap-3 shrink-0">
               <button
                 onClick={() => closeMutation.mutate({ payment_method: 'cash', cash_amount: ticket.total_amount })}

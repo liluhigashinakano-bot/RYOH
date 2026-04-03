@@ -22,6 +22,10 @@ columns = [
     ("tickets", "guest_count", "INTEGER DEFAULT 1"),
     ("tickets", "plan_type", "VARCHAR(20)"),
     ("tickets", "visit_type", "VARCHAR(5)"),
+    ("tickets", "set_started_at", "DATETIME"),
+    ("tickets", "set_is_paused", "BOOLEAN DEFAULT 0"),
+    ("tickets", "set_paused_at", "DATETIME"),
+    ("tickets", "set_paused_seconds", "INTEGER DEFAULT 0"),
 ]
 
 with engine.connect() as conn:
