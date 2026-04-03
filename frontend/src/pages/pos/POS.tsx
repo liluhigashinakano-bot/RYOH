@@ -207,7 +207,10 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
       {/* 卓番・経過時間 */}
       <div className="flex justify-between items-start mb-1">
         <p className="text-lg font-bold text-white">{ticket.table_no || '—'}</p>
-        <span className="badge bg-green-900/40 text-green-400 font-mono text-xs">{fmtTime(elapsed)}</span>
+        <div className="flex items-center gap-1 font-mono text-sm">
+          <span className="text-gray-500 text-xs">経過</span>
+          <span className="text-green-400">{fmtTime(elapsed)}</span>
+        </div>
       </div>
 
       {/* バッジ */}
