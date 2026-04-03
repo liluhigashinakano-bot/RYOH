@@ -192,7 +192,7 @@ function DrinkTimers({ lastDrinkTimes, now }: { lastDrinkTimes: any; now: number
 
 function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number; onClick: () => void }) {
   const now = useNow()
-  const elapsed = calcElapsed(ticket.started_at, now)
+  const elapsed = calcElapsed(ticket.set_started_at || ticket.started_at, now)
   const setElapsed = calcSetElapsed(ticket, now)
   const eElapsed = ticket.e_started_at !== null ? calcElapsed(ticket.e_started_at, now) : null
   const startedAtMs = toUtcMs(ticket.started_at)
@@ -468,7 +468,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     </div>
   )
 
-  const elapsed = calcElapsed(ticket.started_at, now)
+  const elapsed = calcElapsed(ticket.set_started_at || ticket.started_at, now)
   const setElapsed = calcSetElapsed(ticket, now)
   const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
   const startedAtMs = toUtcMs(ticket.started_at)
