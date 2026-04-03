@@ -237,7 +237,12 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
           : (() => {
               const countdown = calcSetCountdown(setElapsed)!
               const urgent = countdown <= 5 * 60
-              return <span className="text-gray-500">残り <span className={ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}>{fmtTime(countdown)}</span></span>
+              return (
+                <div className="flex items-baseline gap-1">
+                  <span className="text-gray-500 text-xs">残り</span>
+                  <span className={`font-mono font-bold text-3xl ${ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}`}>{fmtTime(countdown)}</span>
+                </div>
+              )
             })()
         }
       </div>
