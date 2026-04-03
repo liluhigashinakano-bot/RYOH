@@ -38,17 +38,27 @@ function fmtTime(totalSec: number) {
   return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`
 }
 
+function toUtcMs(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  // バックエンドがタイムゾーン情報なしのUTC時刻を返すため、Zを付けてUTCとして解釈
+  const s = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z'
+  return new Date(s).getTime()
+}
+
 function calcElapsed(startIso: string | null | undefined, now: number): number {
-  if (!startIso) return 0
-  return Math.max(0, Math.floor((now - new Date(startIso).getTime()) / 1000))
+  const ms = toUtcMs(startIso)
+  if (ms === null) return 0
+  return Math.max(0, Math.floor((now - ms) / 1000))
 }
 
 function calcSetElapsed(ticket: any, now: number): number | null {
-  if (!ticket.set_started_at) return null
-  const total = Math.floor((now - new Date(ticket.set_started_at).getTime()) / 1000)
+  const startMs = toUtcMs(ticket.set_started_at)
+  if (startMs === null) return null
+  const total = Math.floor((now - startMs) / 1000)
   const paused = ticket.set_paused_seconds || 0
-  const currentPause = ticket.set_is_paused && ticket.set_paused_at
-    ? Math.floor((now - new Date(ticket.set_paused_at).getTime()) / 1000)
+  const pausedAtMs = toUtcMs(ticket.set_paused_at)
+  const currentPause = ticket.set_is_paused && pausedAtMs
+    ? Math.floor((now - pausedAtMs) / 1000)
     : 0
   return Math.max(0, total - paused - currentPause)
 }
@@ -159,8 +169,8 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
   const now = useNow()
   const elapsed = calcElapsed(ticket.started_at, now)
   const setElapsed = calcSetElapsed(ticket, now)
-  const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
-  const dElapsed = ticket.last_drink_at ? calcElapsed(ticket.last_drink_at, now) : null
+  const eElapsed = ticket.e_started_at !== null ? calcElapsed(ticket.e_started_at, now) : null
+  const dElapsed = ticket.last_drink_at !== null ? calcElapsed(ticket.last_drink_at, now) : null
 
   return (
     <button
@@ -348,7 +358,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const setElapsed = calcSetElapsed(ticket, now)
   const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
   const dElapsed = ticket.last_drink_at ? calcElapsed(ticket.last_drink_at, now) : null
-  const startedAt = new Date(ticket.started_at)
+  const startedAtMs = toUtcMs(ticket.started_at)
+  const startedAt = startedAtMs ? new Date(startedAtMs) : new Date()
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4">
