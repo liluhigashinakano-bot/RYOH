@@ -378,7 +378,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
           <label className="text-sm text-gray-400 block mb-1.5">担当キャスト</label>
           <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)} className="input-field w-full">
             <option value="">選択してください</option>
-            {casts.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
           </select>
         </div>
         <div className="flex gap-3">

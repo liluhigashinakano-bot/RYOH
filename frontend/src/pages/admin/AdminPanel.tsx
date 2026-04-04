@@ -235,7 +235,7 @@ function CastsTab() {
             {casts.map((c: any) => (
               <tr key={c.id} className="border-b border-night-700 hover:bg-night-700/50">
                 <td className="py-2.5 px-3 text-gray-500 text-xs">{c.cast_code || `#${c.id}`}</td>
-                <td className="py-2.5 px-3 font-medium text-white">{c.name}</td>
+                <td className="py-2.5 px-3 font-medium text-white">{c.stage_name}</td>
                 <td className="py-2.5 px-3">
                   <span className={`badge ${c.is_active ? 'bg-green-900/40 text-green-400' : 'bg-night-700 text-gray-500'}`}>
                     {c.is_active ? '在籍中' : '退職'}
