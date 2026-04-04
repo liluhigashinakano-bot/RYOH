@@ -11,9 +11,9 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
 }
 
 function displayItemName(item: any, castMap?: Record<number, string>): string {
-  const base = (item.item_name && item.item_name !== item.item_type)
-    ? item.item_name
-    : ITEM_TYPE_LABELS[item.item_type] || item.item_type
+  const raw = item.item_name || item.item_type || ''
+  // item_nameがitem_typeコード（英語）のままの場合も日本語ラベルに変換
+  const base = ITEM_TYPE_LABELS[raw] ?? raw
   if (castMap && item.cast_id && castMap[item.cast_id] && !base.includes('［')) {
     return `${base}［${castMap[item.cast_id]}］`
   }
