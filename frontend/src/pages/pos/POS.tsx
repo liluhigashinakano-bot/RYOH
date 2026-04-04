@@ -287,7 +287,7 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
           <tbody>
             {(ticket.order_items || []).map((item: any) => (
               <tr key={item.id} className="border-t border-night-700/30">
-                <td className="text-gray-300 py-0.5 truncate max-w-[90px]">{displayItemName(item)}</td>
+                <td className="text-gray-300 py-0.5 truncate max-w-[100px]">{displayItemName(item)}</td>
                 <td className="text-center text-gray-500 py-0.5">{item.quantity}</td>
                 <td className="text-right text-gray-300 py-0.5">¥{item.amount.toLocaleString()}</td>
               </tr>
@@ -369,11 +369,12 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
 }
 
 // キャスト選択が必要な注文ボタンを押したときのモーダル
+// シャンパンのみ複数キャスト選択可（キャストごとに1件ずつ追加）
 function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   itemType: string
   itemLabel: string
   storeId: number
-  onSubmit: (castId: number | null, castName: string | null) => void
+  onSubmit: (selections: { castId: number; castName: string; ratio: number }[]) => void
   onClose: () => void
 }) {
   const { data: castsAll = [] } = useQuery({
@@ -381,26 +382,80 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
   })
   const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const isChampagne = itemType === 'champagne'
+
+  // 単一選択
   const [castId, setCastId] = useState<number | null>(null)
-  const selectedCast = casts.find((c: any) => c.id === castId)
+  // 複数選択＋割合（シャンパン）
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [ratios, setRatios] = useState<Record<number, number>>({}) // castId -> 割合(1-10)
+
+  const toggleCast = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+        setRatios(r => { const nr = { ...r }; delete nr[id]; return nr })
+      } else {
+        next.add(id)
+        setRatios(r => ({ ...r, [id]: 1 }))
+      }
+      return next
+    })
+  }
+
+  const canSubmit = isChampagne ? selectedIds.size > 0 : castId !== null
+
+  const handleSubmit = () => {
+    if (isChampagne) {
+      const selections = casts
+        .filter((c: any) => selectedIds.has(c.id))
+        .map((c: any) => ({ castId: c.id, castName: c.stage_name, ratio: ratios[c.id] || 1 }))
+      onSubmit(selections)
+    } else {
+      const cast = casts.find((c: any) => c.id === castId)
+      if (cast) onSubmit([{ castId: cast.id, castName: cast.stage_name, ratio: 10 }])
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
       <div className="card w-full max-w-xs space-y-4">
         <div className="flex justify-between items-center">
-          <h3 className="font-bold text-white">{itemLabel} — キャスト選択</h3>
+          <h3 className="font-bold text-white">{itemLabel} — キャスト選択{isChampagne && <span className="text-xs text-gray-400 font-normal ml-1">（複数可）</span>}</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">担当キャスト</label>
-          <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)} className="input-field w-full">
-            <option value="">選択してください</option>
-            {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
-          </select>
-        </div>
+        {isChampagne ? (
+          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+            {casts.map((c: any) => (
+              <div key={c.id} className="flex items-center gap-2">
+                <button onClick={() => toggleCast(c.id)}
+                  className={`flex-1 text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedIds.has(c.id) ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-300 hover:bg-night-600'}`}>
+                  {c.stage_name}
+                </button>
+                {selectedIds.has(c.id) && (
+                  <select value={ratios[c.id] || 1} onChange={e => setRatios(r => ({ ...r, [c.id]: Number(e.target.value) }))}
+                    className="input-field text-sm w-20 shrink-0">
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                      <option key={n} value={n}>{n}割</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            <label className="text-sm text-gray-400 block mb-1.5">担当キャスト</label>
+            <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)} className="input-field w-full">
+              <option value="">選択してください</option>
+              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => onSubmit(castId, selectedCast?.stage_name || null)} disabled={!castId} className="btn-primary flex-1 disabled:opacity-40">追加</button>
+          <button onClick={handleSubmit} disabled={!canSubmit} className="btn-primary flex-1 disabled:opacity-40">追加</button>
         </div>
       </div>
     </div>
@@ -679,9 +734,14 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           itemType={castSelectItem.type}
           itemLabel={castSelectItem.label}
           storeId={storeId}
-          onSubmit={(castId, castName) => {
-            const itemName = castName ? `${castSelectItem.label}（${castName}）` : castSelectItem.label
-            addOrderMutation.mutate({ item_type: castSelectItem.type, item_name: itemName, unit_price: castSelectItem.price, quantity: 1, cast_id: castId })
+          onSubmit={(selections) => {
+            for (const { castId, castName, ratio } of selections) {
+              const ratioLabel = castSelectItem.type === 'champagne' ? `${ratio}割` : ''
+              const itemName = ratioLabel
+                ? `${castSelectItem.label}［${castName} ${ratioLabel}］`
+                : `${castSelectItem.label}［${castName}］`
+              addOrderMutation.mutate({ item_type: castSelectItem.type, item_name: itemName, unit_price: castSelectItem.price, quantity: 1, cast_id: castId })
+            }
             setCastSelectItem(null)
           }}
           onClose={() => setCastSelectItem(null)}
