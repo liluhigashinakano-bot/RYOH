@@ -357,7 +357,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   itemType: string
   itemLabel: string
   storeId: number
-  onSubmit: (castId: number | null) => void
+  onSubmit: (castId: number | null, castName: string | null) => void
   onClose: () => void
 }) {
   const { data: castsAll = [] } = useQuery({
@@ -366,6 +366,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   })
   const casts = (castsAll as any[]).filter((c: any) => c.is_active)
   const [castId, setCastId] = useState<number | null>(null)
+  const selectedCast = casts.find((c: any) => c.id === castId)
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
@@ -383,7 +384,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
         </div>
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => onSubmit(castId)} disabled={!castId} className="btn-primary flex-1 disabled:opacity-40">追加</button>
+          <button onClick={() => onSubmit(castId, selectedCast?.stage_name || null)} disabled={!castId} className="btn-primary flex-1 disabled:opacity-40">追加</button>
         </div>
       </div>
     </div>
@@ -654,8 +655,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           itemType={castSelectItem.type}
           itemLabel={castSelectItem.label}
           storeId={storeId}
-          onSubmit={(castId) => {
-            addOrderMutation.mutate({ item_type: castSelectItem.type, unit_price: castSelectItem.price, quantity: 1, cast_id: castId })
+          onSubmit={(castId, castName) => {
+            const itemName = castName ? `${castSelectItem.label}（${castName}）` : castSelectItem.label
+            addOrderMutation.mutate({ item_type: castSelectItem.type, item_name: itemName, unit_price: castSelectItem.price, quantity: 1, cast_id: castId })
             setCastSelectItem(null)
           }}
           onClose={() => setCastSelectItem(null)}
