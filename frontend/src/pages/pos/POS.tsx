@@ -4,6 +4,17 @@ import { Plus, X, CreditCard, Banknote, Bot, Play, Pause } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  extension: '延長', drink_s: 'Sドリンク', drink_l: 'Lドリンク',
+  drink_mg: 'MGドリンク', shot_cast: 'キャストショット', shot_guest: 'ゲストショット',
+  champagne: 'シャンパン', set: 'セット料金', other: 'その他',
+}
+
+function displayItemName(item: any): string {
+  if (item.item_name && item.item_name !== item.item_type) return item.item_name
+  return ITEM_TYPE_LABELS[item.item_type] || item.item_type
+}
+
 const ITEM_TYPES = [
   { type: 'extension', label: '延長', defaultPrice: 2700 },
   { type: 'drink_s', label: 'Sドリンク', defaultPrice: 900 },
@@ -271,7 +282,7 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
           <tbody>
             {(ticket.order_items || []).map((item: any) => (
               <tr key={item.id} className="border-t border-night-700/30">
-                <td className="text-gray-300 py-0.5 truncate max-w-[90px]">{item.item_name}</td>
+                <td className="text-gray-300 py-0.5 truncate max-w-[90px]">{displayItemName(item)}</td>
                 <td className="text-center text-gray-500 py-0.5">{item.quantity}</td>
                 <td className="text-right text-gray-300 py-0.5">¥{item.amount.toLocaleString()}</td>
               </tr>
@@ -588,7 +599,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 <tbody>
                   {ticket.order_items?.map((item: any) => (
                     <tr key={item.id} className="border-b border-night-700/50">
-                      <td className="px-4 py-2 text-gray-200">{item.item_name || item.item_type}</td>
+                      <td className="px-4 py-2 text-gray-200">{displayItemName(item)}</td>
                       <td className="text-center px-2 py-2 text-gray-400">{item.quantity}</td>
                       <td className="text-right px-2 py-2 text-gray-400">¥{item.unit_price.toLocaleString()}</td>
                       <td className="text-right px-4 py-2 text-white font-medium">¥{item.amount.toLocaleString()}</td>
