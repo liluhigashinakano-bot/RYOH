@@ -10,9 +10,14 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   champagne: 'シャンパン', set: 'セット料金', other: 'その他',
 }
 
-function displayItemName(item: any): string {
-  if (item.item_name && item.item_name !== item.item_type) return item.item_name
-  return ITEM_TYPE_LABELS[item.item_type] || item.item_type
+function displayItemName(item: any, castMap?: Record<number, string>): string {
+  const base = (item.item_name && item.item_name !== item.item_type)
+    ? item.item_name
+    : ITEM_TYPE_LABELS[item.item_type] || item.item_type
+  if (castMap && item.cast_id && castMap[item.cast_id] && !base.includes('［')) {
+    return `${base}［${castMap[item.cast_id]}］`
+  }
+  return base
 }
 
 const ITEM_TYPES = [
@@ -416,6 +421,14 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     refetchInterval: 10000,
   })
 
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const castMap: Record<number, string> = Object.fromEntries(
+    (castsAll as any[]).map((c: any) => [c.id, c.stage_name])
+  )
+
   const addOrderMutation = useMutation({
     mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null }) =>
       apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data),
@@ -599,7 +612,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 <tbody>
                   {ticket.order_items?.map((item: any) => (
                     <tr key={item.id} className="border-b border-night-700/50">
-                      <td className="px-4 py-2 text-gray-200">{displayItemName(item)}</td>
+                      <td className="px-4 py-2 text-gray-200">{displayItemName(item, castMap)}</td>
                       <td className="text-center px-2 py-2 text-gray-400">{item.quantity}</td>
                       <td className="text-right px-2 py-2 text-gray-400">¥{item.unit_price.toLocaleString()}</td>
                       <td className="text-right px-4 py-2 text-white font-medium">¥{item.amount.toLocaleString()}</td>
