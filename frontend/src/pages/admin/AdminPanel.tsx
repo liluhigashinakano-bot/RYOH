@@ -150,8 +150,9 @@ function AddUserModal({ stores, onClose }: { stores: any[]; onClose: () => void 
 
 function StoresTab() {
   const [showAdd, setShowAdd] = useState(false)
+  const [editStore, setEditStore] = useState<any | null>(null)
   const qc = useQueryClient()
-  const { stores: authStores, fetchMe } = useAuthStore()
+  const { fetchMe } = useAuthStore()
 
   const { data: stores = [] } = useQuery({
     queryKey: ['stores-admin'],
@@ -168,8 +169,7 @@ function StoresTab() {
       <div className="flex justify-between items-center">
         <p className="text-gray-400 text-sm">{stores.length}店舗</p>
         <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2 text-sm">
-          <Plus className="w-4 h-4" />
-          店舗追加
+          <Plus className="w-4 h-4" />店舗追加
         </button>
       </div>
 
@@ -178,16 +178,25 @@ function StoresTab() {
           <div key={s.id} className="card flex items-center justify-between">
             <div>
               <p className="font-medium text-white">{s.name}</p>
-              <p className="text-sm text-gray-400">セット ¥{s.set_price.toLocaleString()} / 延長 ¥{s.extension_price.toLocaleString()}</p>
+              <p className="text-sm text-gray-400">セット ¥{s.set_price?.toLocaleString()} / 延長 ¥{s.extension_price?.toLocaleString()}</p>
+              {(s.open_time || s.close_time) && (
+                <p className="text-sm text-gray-400">営業時間 {s.open_time || '—'}～{s.close_time || '—'}</p>
+              )}
             </div>
-            <button onClick={() => deleteMutation.mutate(s.id)} className="text-gray-600 hover:text-red-400 transition-colors ml-4">
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-2 ml-4">
+              <button onClick={() => setEditStore(s)} className="text-gray-500 hover:text-primary-400 transition-colors">
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button onClick={() => deleteMutation.mutate(s.id)} className="text-gray-600 hover:text-red-400 transition-colors">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         ))}
       </div>
 
       {showAdd && <AddStoreModal onClose={() => setShowAdd(false)} />}
+      {editStore && <EditStoreModal store={editStore} onClose={() => setEditStore(null)} />}
     </div>
   )
 }
@@ -306,6 +315,75 @@ function CastModal({ storeId, cast, onClose }: { storeId: number; cast?: any; on
           <button onClick={() => mutation.mutate()} disabled={!form.stage_name} className="btn-primary flex-1 disabled:opacity-40">
             {cast ? '更新' : '追加'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 営業時間の時:分セレクト（0〜35時、0〜59分）
+function TimeSelect({ value, onChange, minHour = 0 }: { value: string; onChange: (v: string) => void; minHour?: number }) {
+  const [h, m] = value ? value.split(':').map(Number) : [minHour, 0]
+  const setH = (newH: number) => onChange(`${String(newH).padStart(2,'0')}:${String(m).padStart(2,'0')}`)
+  const setM = (newM: number) => onChange(`${String(h).padStart(2,'0')}:${String(newM).padStart(2,'0')}`)
+  return (
+    <div className="flex items-center gap-1">
+      <select value={h} onChange={e => setH(Number(e.target.value))} className="input-field text-sm w-20">
+        {Array.from({ length: 36 - minHour }, (_, i) => i + minHour).map(n => (
+          <option key={n} value={n}>{String(n).padStart(2,'0')}</option>
+        ))}
+      </select>
+      <span className="text-gray-400">:</span>
+      <select value={m} onChange={e => setM(Number(e.target.value))} className="input-field text-sm w-20">
+        {[0, 15, 30, 45].map(n => <option key={n} value={n}>{String(n).padStart(2,'0')}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function EditStoreModal({ store, onClose }: { store: any; onClose: () => void }) {
+  const qc = useQueryClient()
+  const { fetchMe } = useAuthStore()
+  const [form, setForm] = useState({
+    name: store.name || '',
+    extension_price: store.extension_price || 2700,
+    open_time: store.open_time || '19:00',
+    close_time: store.close_time || '29:00',
+  })
+
+  const mutation = useMutation({
+    mutationFn: () => apiClient.put(`/api/stores/${store.id}`, form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stores-admin'] }); fetchMe(); onClose() },
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="card w-full max-w-sm space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">店舗設定</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="店舗名" />
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">延長料金（円）</label>
+            <input type="number" value={form.extension_price} onChange={e => setForm({ ...form, extension_price: Number(e.target.value) })} className="input-field w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">営業開始時間</label>
+            <TimeSelect value={form.open_time} onChange={v => setForm({ ...form, open_time: v })} minHour={0} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">営業終了時間（翌5:00 → 29:00）</label>
+            <TimeSelect value={form.close_time} onChange={v => setForm({ ...form, close_time: v })} minHour={0} />
+          </div>
+          {form.open_time && form.close_time && (
+            <p className="text-sm text-primary-400">営業時間: {form.open_time}～{form.close_time}</p>
+          )}
+        </div>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={() => mutation.mutate()} disabled={!form.name} className="btn-primary flex-1">保存</button>
         </div>
       </div>
     </div>
