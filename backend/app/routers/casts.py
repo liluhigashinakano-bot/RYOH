@@ -156,7 +156,9 @@ def create_cast(
     current_user: models.User = Depends(get_current_user),
 ):
     cast_code = generate_cast_code(db, store_id)
-    cast = models.Cast(store_id=store_id, cast_code=cast_code, **data.model_dump())
+    cast_data = data.model_dump()
+    cast_data['help_hourly_rate'] = cast_data['hourly_rate'] + 100
+    cast = models.Cast(store_id=store_id, cast_code=cast_code, **cast_data)
     db.add(cast)
     db.commit()
     db.refresh(cast)
@@ -184,6 +186,10 @@ def update_cast(
     if "hourly_rate" in update_data or "help_hourly_rate" in update_data:
         if current_user.role not in MANAGER_ROLES:
             raise HTTPException(status_code=403, detail="時給変更は管理者・編集者のみ可能です")
+
+    # ヘルプ時給は基本時給+100に自動設定
+    if "hourly_rate" in update_data:
+        update_data['help_hourly_rate'] = update_data['hourly_rate'] + 100
 
     for field, value in update_data.items():
         setattr(cast, field, value)

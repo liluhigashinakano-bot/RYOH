@@ -369,7 +369,6 @@ function EditCastModal({
     stage_name: cast.stage_name || '',
     rank: cast.rank || 'C',
     hourly_rate: cast.hourly_rate || 1400,
-    help_hourly_rate: cast.help_hourly_rate || 1500,
     alcohol_tolerance: cast.alcohol_tolerance || '普通',
     main_time_slot: cast.main_time_slot || '',
     transport_need: cast.transport_need || false,
@@ -412,15 +411,10 @@ function EditCastModal({
 
           {/* 時給（管理者のみ） */}
           {isManager && (
-            <div className="grid grid-cols-2 gap-3 p-3 bg-night-700 rounded-xl border border-night-600">
-              <div>
-                <label className="text-xs text-yellow-400 block mb-1">基本時給（管理者）</label>
-                <input type="number" value={form.hourly_rate} onChange={f('hourly_rate')} step={50} className="input-field w-full" />
-              </div>
-              <div>
-                <label className="text-xs text-yellow-400 block mb-1">ヘルプ時給</label>
-                <input type="number" value={form.help_hourly_rate} onChange={f('help_hourly_rate')} step={50} className="input-field w-full" />
-              </div>
+            <div className="p-3 bg-night-700 rounded-xl border border-night-600">
+              <label className="text-xs text-yellow-400 block mb-1">基本時給（管理者）</label>
+              <input type="number" value={form.hourly_rate} onChange={f('hourly_rate')} step={50} className="input-field w-full" />
+              <p className="text-xs text-gray-500 mt-1">ヘルプ時給は自動で基本時給+100円に設定されます</p>
             </div>
           )}
 
