@@ -3060,11 +3060,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       {/* 値引きモーダル */}
       {showDiscountModal && (
         <DiscountModal
+          storeId={storeId}
           onSubmit={(amount, reason, operator) => {
             setShowDiscountModal(false)
             addOrderMutation.mutate({
               item_type: 'other',
-              item_name: `値引き（${reason}）`,
+              item_name: `値引き（${reason}）担当:${operator}`,
               unit_price: -amount,
               quantity: 1,
             })
@@ -3424,7 +3425,8 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
   )
 }
 
-function DiscountModal({ onSubmit, onClose }: {
+function DiscountModal({ storeId, onSubmit, onClose }: {
+  storeId: number
   onSubmit: (amount: number, reason: string, operator: string) => void
   onClose: () => void
 }) {
@@ -3432,6 +3434,12 @@ function DiscountModal({ onSubmit, onClose }: {
   const [reasonType, setReasonType] = useState<'端数カット' | 'その他'>('端数カット')
   const [customReason, setCustomReason] = useState('')
   const [operator, setOperator] = useState('')
+
+  const { data: staffList = [] } = useQuery({
+    queryKey: ['staff-for-discount', storeId],
+    queryFn: () => apiClient.get('/api/staff', { params: { store_id: storeId } }).then(r => r.data),
+    enabled: !!storeId,
+  })
 
   const amount = parseInt(input, 10) || 0
   const reason = reasonType === 'その他' ? (customReason.trim() || 'その他') : '端数カット'
@@ -3472,10 +3480,14 @@ function DiscountModal({ onSubmit, onClose }: {
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">担当者名</label>
-          <input type="text" placeholder="担当者名（必須）" value={operator}
-            onChange={e => setOperator(e.target.value)}
-            className="input-field w-full text-sm" />
+          <label className="text-xs text-gray-400 block mb-1">担当者（必須）</label>
+          <select value={operator} onChange={e => setOperator(e.target.value)}
+            className="input-field w-full">
+            <option value="">選択してください</option>
+            {(staffList as any[]).map((m: any) => (
+              <option key={m.id} value={m.name}>{m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}）</option>
+            ))}
+          </select>
         </div>
 
         <div className="flex gap-3">
