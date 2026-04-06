@@ -316,10 +316,10 @@ export default function POS() {
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)', paddingBottom: '12px' }}>
       {/* ヘッダー */}
-      <div className="shrink-0 pb-2">
-        <div className="flex items-center gap-2 flex-nowrap min-w-0">
-          {/* 左: タイトル・店舗・新規伝票 */}
-          <h1 className="text-lg font-bold text-white shrink-0">POS・伝票管理</h1>
+      <div className="shrink-0 pb-2 flex flex-col gap-1.5">
+        {/* Row 1: 店舗・新規伝票 + 営業ボタン */}
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold text-white shrink-0 hidden md:block">POS・伝票管理</h1>
           <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(Number(e.target.value))} className="input-field text-xs py-1.5 shrink-0">
             {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
@@ -328,9 +328,28 @@ export default function POS() {
               <Plus className="w-3.5 h-3.5" />新規伝票
             </button>
           )}
-
-          {/* 中央: ナビタブ */}
-          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5 mx-auto shrink-0">
+          {/* 右: 売上サマリ + 営業ボタン */}
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            <div className="hidden md:flex items-center gap-3 text-xs">
+              <div><span className="text-gray-500">合計</span><span className="ml-1 text-white font-bold">¥{(currentSession ? (liveData?.total_amount ?? 0) : 0).toLocaleString()}</span></div>
+              <div><span className="text-gray-500">未会計</span><span className="ml-1 text-yellow-400 font-medium">¥{(currentSession ? (liveData?.open_amount ?? 0) : 0).toLocaleString()}</span><span className="ml-1 text-gray-600">({currentSession ? (liveData?.open_count ?? 0) : 0}卓)</span></div>
+            </div>
+            {currentSession && !currentSession.is_closed ? (
+              <button onClick={() => setShowCloseSessionModal(true)}
+                className="btn-danger text-xs px-3 py-1.5 whitespace-nowrap shrink-0">
+                営業締め作業
+              </button>
+            ) : (
+              <button onClick={() => setShowOpenSessionModal(true)}
+                className="bg-green-700 hover:bg-green-600 active:bg-green-800 text-white font-medium px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap shrink-0">
+                営業開始
+              </button>
+            )}
+          </div>
+        </div>
+        {/* Row 2: ナビタブ（横スクロール対応） */}
+        <div className="overflow-x-auto">
+          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5 min-w-max">
             <button onClick={() => setView('open')}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'open' ? 'bg-pink-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               オープン中
@@ -352,25 +371,6 @@ export default function POS() {
               日報一覧
             </button>
           </div>
-
-          {/* 右: 売上サマリ + 営業ボタン */}
-          <div className="flex items-center gap-3 shrink-0 ml-auto">
-            <div className="hidden sm:flex items-center gap-3 text-xs">
-              <div><span className="text-gray-500">合計</span><span className="ml-1 text-white font-bold">¥{(currentSession ? (liveData?.total_amount ?? 0) : 0).toLocaleString()}</span></div>
-              <div><span className="text-gray-500">未会計</span><span className="ml-1 text-yellow-400 font-medium">¥{(currentSession ? (liveData?.open_amount ?? 0) : 0).toLocaleString()}</span><span className="ml-1 text-gray-600">({currentSession ? (liveData?.open_count ?? 0) : 0}卓)</span></div>
-            </div>
-            {currentSession && !currentSession.is_closed ? (
-              <button onClick={() => setShowCloseSessionModal(true)}
-                className="btn-danger text-xs px-3 py-1.5 whitespace-nowrap shrink-0">
-                営業締め作業
-              </button>
-            ) : (
-              <button onClick={() => setShowOpenSessionModal(true)}
-                className="bg-green-700 hover:bg-green-600 active:bg-green-800 text-white font-medium px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap shrink-0">
-                営業開始
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -383,7 +383,7 @@ export default function POS() {
 
       {view === 'open' ? (
         /* 伝票カード一覧：残り高さを全部使う */
-        <div className="flex gap-3 overflow-x-auto overflow-y-auto flex-1 min-h-0 px-1 pb-1 items-start">
+        <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start">
           {tickets.map((ticket: any) => (
             <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
               onOpenCustomerModal={t => setCustomerModalTicket(t)}
@@ -1714,8 +1714,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
   return (
     <div
       onClick={e => { if (!(e.target as HTMLElement).closest('[data-nopropagate]')) onClick() }}
-      className="card text-left flex flex-col hover:border-primary-600/50 transition-colors shrink-0 cursor-pointer"
-      style={{ width: '220px' }}
+      className="card text-left flex flex-col hover:border-primary-600/50 transition-colors shrink-0 cursor-pointer w-full md:w-[220px]"
     >
       {/* 卓番・経過時間・ログボタン */}
       <div className="flex justify-between items-start mb-1">
