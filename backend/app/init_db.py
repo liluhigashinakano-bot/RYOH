@@ -40,6 +40,11 @@ def init_db():
             db.add(admin)
             db.commit()
             print("Superadmin created: admin@trust.com / trust1234")
+        else:
+            # パスワードハッシュを再生成（bcryptバージョン互換性のため）
+            existing_admin.password_hash = get_password_hash("trust1234")
+            db.commit()
+            print("Superadmin password rehashed: admin@trust.com / trust1234")
 
         print("Database initialized successfully")
 
