@@ -988,7 +988,7 @@ function BusinessCloseModal({ storeId, session, openTicketCount, salesTotal, cas
   cardTickets: any[]
   codeTickets: any[]
   expenses: ExpenseRow[]
-  onExpensesChange: (v: ExpenseRow[]) => void
+  onExpensesChange: React.Dispatch<React.SetStateAction<ExpenseRow[]>>
   withdrawals: { id: number; type: string; name: string; amount: string }[]
   onWithdrawalsChange: React.Dispatch<React.SetStateAction<{ id: number; type: string; name: string; amount: string }[]>>
   notes: string
