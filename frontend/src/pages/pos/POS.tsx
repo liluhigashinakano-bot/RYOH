@@ -67,9 +67,9 @@ const TABLE_NOS = [
 ]
 
 function useNow() {
-  const [now, setNow] = useState(new Date())
+  const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000)
+    const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
   return now
@@ -990,7 +990,7 @@ function BusinessCloseModal({ storeId, session, openTicketCount, salesTotal, cas
   expenses: ExpenseRow[]
   onExpensesChange: (v: ExpenseRow[]) => void
   withdrawals: { id: number; type: string; name: string; amount: string }[]
-  onWithdrawalsChange: (v: { id: number; type: string; name: string; amount: string }[]) => void
+  onWithdrawalsChange: React.Dispatch<React.SetStateAction<{ id: number; type: string; name: string; amount: string }[]>>
   notes: string
   onNotesChange: (v: string) => void
   onSubmit: (closing_cash: number, closing_cash_detail: Record<string, number>, notes?: string, cash_diff?: number | null, expenses_detail?: any, cash_sales?: number, card_sales?: number, code_sales?: number) => void
