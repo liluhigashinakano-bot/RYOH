@@ -11,6 +11,7 @@ import CustomerDetail from './pages/customers/CustomerDetail'
 import CastList from './pages/casts/CastList'
 import CastDetail from './pages/casts/CastDetail'
 import AdminPanel from './pages/admin/AdminPanel'
+import AdminSettings from './pages/admin/AdminSettings'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="casts" element={<CastList />} />
         <Route path="casts/:id" element={<CastDetail />} />
         <Route path="admin" element={<AdminPanel />} />
+        <Route path="settings" element={<AdminSettings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

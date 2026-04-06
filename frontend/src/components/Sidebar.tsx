@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Users, Star, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, LogOut } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 
 const navItems = [
@@ -7,7 +7,8 @@ const navItems = [
   { to: '/pos', icon: ShoppingCart, label: 'POS・伝票' },
   { to: '/customers', icon: Users, label: '顧客管理' },
   { to: '/casts', icon: Star, label: '従業員管理' },
-  { to: '/admin', icon: Settings, label: '管理者設定' },
+  { to: '/admin', icon: UserCog, label: 'アカウント管理' },
+  { to: '/settings', icon: SlidersHorizontal, label: '管理設定' },
 ]
 
 export default function Sidebar() {

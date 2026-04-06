@@ -52,7 +52,7 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
                     cleared_at = datetime.fromisoformat(cleared_at_iso)
                 except Exception:
                     cleared_at = None
-                if cleared_at and cleared_at >= entry["last_at"]:
+                if cleared_at and cleared_at.isoformat() >= entry["last_at"]:
                     continue  # クリア済みのためスキップ
             result.append(entry)
         last_drink_times[drink_type] = result

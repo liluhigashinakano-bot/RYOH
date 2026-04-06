@@ -493,6 +493,35 @@ class BusinessSession(Base):
 
 
 # ─────────────────────────────────────────
+# メニュー設定（追加注文）
+# ─────────────────────────────────────────
+class MenuItemConfig(Base):
+    __tablename__ = "menu_item_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    label = Column(String(100), nullable=False)          # 表示名（例: Lドリンク）
+    price = Column(Integer, default=0)                   # 単価
+    cast_required = Column(Boolean, default=True)        # キャスト選択が必要か
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# インセンティブ設定（日報キャストドリンクバック率）
+# ─────────────────────────────────────────
+class IncentiveConfig(Base):
+    __tablename__ = "incentive_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    drink_type = Column(String(50), nullable=False)      # drink_l / drink_mg / drink_s / shot_cast / champagne
+    rate = Column(Integer, default=10)                   # インセンティブ率（%）
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
 # AIアドバイス
 # ─────────────────────────────────────────
 class AIAdvice(Base):

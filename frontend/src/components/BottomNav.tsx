@@ -1,12 +1,13 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Users, Star, Settings } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal } from 'lucide-react'
 
 const items = [
   { to: '/', icon: LayoutDashboard, label: 'ホーム', exact: true },
   { to: '/pos', icon: ShoppingCart, label: 'POS' },
   { to: '/customers', icon: Users, label: '顧客' },
   { to: '/casts', icon: Star, label: '従業員' },
-  { to: '/admin', icon: Settings, label: '設定' },
+  { to: '/admin', icon: UserCog, label: 'アカウント' },
+  { to: '/settings', icon: SlidersHorizontal, label: '管理設定' },
 ]
 
 export default function BottomNav() {

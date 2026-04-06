@@ -11,7 +11,7 @@ export default function AdminPanel() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">管理者設定</h1>
+      <h1 className="text-2xl font-bold text-white">アカウント管理</h1>
 
       <div className="flex gap-2">
         {(['users', 'stores', 'casts'] as Tab[]).map(t => (
