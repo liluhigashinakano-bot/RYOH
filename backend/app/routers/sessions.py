@@ -1,0 +1,508 @@
+import os
+import re
+import json
+from collections import defaultdict
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional, Dict, List
+from datetime import datetime, date
+from ..database import get_db
+from .. import models
+from ..auth import get_current_user
+
+router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "reports")
+
+
+class SessionOpen(BaseModel):
+    store_id: int
+    opening_cash: int = 0
+    opening_cash_detail: Optional[Dict[str, int]] = None
+    prev_day_diff: int = 0
+    operator_name: Optional[str] = None
+    event_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SessionClose(BaseModel):
+    closing_cash: int = 0
+    closing_cash_detail: Optional[Dict[str, int]] = None
+    notes: Optional[str] = None
+    cash_diff: Optional[int] = None
+    expenses_detail: Optional[Dict] = None  # 経費・出金明細
+    cash_sales: Optional[int] = None
+    card_sales: Optional[int] = None
+    code_sales: Optional[int] = None
+
+
+def _session_dict(s: models.BusinessSession) -> dict:
+    return {
+        "id": s.id,
+        "store_id": s.store_id,
+        "date": s.date.isoformat() if s.date else None,
+        "opened_at": s.opened_at.isoformat() if s.opened_at else None,
+        "closed_at": s.closed_at.isoformat() if s.closed_at else None,
+        "opening_cash": s.opening_cash,
+        "opening_cash_detail": s.opening_cash_detail,
+        "closing_cash": s.closing_cash,
+        "closing_cash_detail": s.closing_cash_detail,
+        "prev_day_diff": s.prev_day_diff,
+        "sales_snapshot": s.sales_snapshot,
+        "operator_name": s.operator_name,
+        "event_name": s.event_name,
+        "is_closed": s.is_closed,
+        "notes": s.notes,
+        "cash_diff": s.cash_diff,
+        "expenses_detail": s.expenses_detail,
+        "cash_sales": s.cash_sales,
+        "card_sales": s.card_sales,
+        "code_sales": s.code_sales,
+        "opened_by_name": s.opened_by_user.name if s.opened_by_user else None,
+        "closed_by_name": s.closed_by_user.name if s.closed_by_user else None,
+        "store_name": s.store.name if s.store else None,
+    }
+
+
+def _save_report_file(session_data: dict) -> str:
+    """営業日報をJSONファイルとして保存する"""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    date_str = session_data.get("date", "unknown")
+    store_id = session_data.get("store_id", 0)
+    store_name = (session_data.get("store_name") or f"store{store_id}").replace(" ", "_")
+    filename = f"{date_str}_{store_name}_session{session_data['id']}.json"
+    filepath = os.path.join(REPORTS_DIR, filename)
+    report = {
+        "generated_at": datetime.utcnow().isoformat(),
+        "session": session_data,
+    }
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    return filepath
+
+
+@router.get("/last-closed")
+def get_last_closed_session(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """前回終了した営業セッションを取得（翌日の前日過不足金表示用）"""
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == True,
+    ).order_by(models.BusinessSession.closed_at.desc()).first()
+    if not session:
+        return None
+    return _session_dict(session)
+
+
+@router.get("/current")
+def get_current_session(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """現在アクティブな営業セッションを取得（なければ null）"""
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == False,
+    ).order_by(models.BusinessSession.opened_at.desc()).first()
+    if not session:
+        return None
+    return _session_dict(session)
+
+
+@router.get("/list")
+def list_sessions(store_id: int, limit: int = 30, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """終了済み営業セッション一覧（日報一覧用）"""
+    sessions = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == True,
+    ).order_by(models.BusinessSession.date.desc(), models.BusinessSession.closed_at.desc()).limit(limit).all()
+    return [_session_dict(s) for s in sessions]
+
+
+@router.post("/open")
+def open_session(data: SessionOpen, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """営業開始"""
+    existing = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == data.store_id,
+        models.BusinessSession.is_closed == False,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="既に営業中のセッションがあります")
+
+    # 営業日: 0〜11時は前日扱い（バー営業時間）
+    from datetime import timedelta
+    now = datetime.utcnow()
+    local_hour = (now.hour + 9) % 24  # JST
+    today = now.date()
+    if local_hour < 12:
+        today = now.date() - timedelta(days=1)
+
+    session = models.BusinessSession(
+        store_id=data.store_id,
+        date=today,
+        opening_cash=data.opening_cash,
+        opening_cash_detail=data.opening_cash_detail,
+        prev_day_diff=data.prev_day_diff,
+        operator_name=data.operator_name,
+        event_name=data.event_name,
+        opened_by=current_user.id,
+        notes=data.notes,
+        is_closed=False,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return _session_dict(session)
+
+
+@router.post("/{session_id}/close")
+def close_session(session_id: int, data: SessionClose, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """営業終了"""
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.id == session_id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    if session.is_closed:
+        raise HTTPException(status_code=400, detail="既に終了済みのセッションです")
+
+    from sqlalchemy import func
+    sales = db.query(func.sum(models.Ticket.total_amount)).filter(
+        models.Ticket.store_id == session.store_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.ended_at >= session.opened_at,
+    ).scalar() or 0
+
+    session.closed_at = datetime.utcnow()
+    session.closing_cash = data.closing_cash
+    session.closing_cash_detail = data.closing_cash_detail
+    session.sales_snapshot = sales
+    session.closed_by = current_user.id
+    session.is_closed = True
+    session.cash_diff = data.cash_diff
+    session.expenses_detail = data.expenses_detail
+    session.cash_sales = data.cash_sales
+    session.card_sales = data.card_sales
+    session.code_sales = data.code_sales
+    if data.notes:
+        parts = [p for p in [session.notes, data.notes] if p]
+        session.notes = '\n'.join(parts)
+
+    db.commit()
+    db.refresh(session)
+
+    # 当日の勤怠記録をクリア（actual_start/actual_end/is_late/is_absent をリセット）
+    from datetime import timedelta
+    from sqlalchemy import or_
+    session_date_jst = (session.opened_at + timedelta(hours=9)).date()
+    shifts_to_clear = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.store_id == session.store_id,
+        models.ConfirmedShift.date == session_date_jst,
+        or_(
+            models.ConfirmedShift.actual_start.isnot(None),
+            models.ConfirmedShift.is_absent == True,
+        )
+    ).all()
+
+    def _dt_to_bar_hhmm_snap(dt: datetime) -> str:
+        jst = dt + timedelta(hours=9)
+        h, m = jst.hour, jst.minute
+        display_h = h + 24 if h < 12 else h
+        return f"{display_h:02d}:{m:02d}"
+
+    # クリア前に勤怠スナップショットを expenses_detail に埋め込んで保存
+    snap: dict = {}
+    for shift in shifts_to_clear:
+        snap[str(shift.cast_id)] = {
+            "actual_start": _dt_to_bar_hhmm_snap(shift.actual_start) if shift.actual_start else None,
+            "actual_end": _dt_to_bar_hhmm_snap(shift.actual_end) if shift.actual_end else None,
+            "is_late": bool(shift.is_late),
+            "is_absent": bool(shift.is_absent),
+        }
+    # 社員/アルバイト勤怠もクリア前にスナップショット
+    staff_to_clear = db.query(models.StaffAttendance).filter(
+        models.StaffAttendance.store_id == session.store_id,
+        models.StaffAttendance.date == session_date_jst,
+    ).all()
+    staff_snap = [
+        {
+            "name": sr.name,
+            "actual_start": _dt_to_bar_hhmm_snap(sr.actual_start) if sr.actual_start else None,
+            "actual_end": _dt_to_bar_hhmm_snap(sr.actual_end) if sr.actual_end else None,
+            "is_late": bool(sr.is_late),
+            "is_absent": bool(sr.is_absent),
+        }
+        for sr in staff_to_clear
+    ]
+
+    # 既存の expenses_detail に "_attendance" / "_staff_attendance" キーで追記
+    existing_detail = session.expenses_detail or {}
+    session.expenses_detail = {**existing_detail, "_attendance": snap, "_staff_attendance": staff_snap}
+
+    for shift in shifts_to_clear:
+        shift.actual_start = None
+        shift.actual_end = None
+        shift.is_late = False
+        shift.is_absent = False
+
+    for sr in staff_to_clear:
+        db.delete(sr)
+    db.commit()
+
+    # 日報JSONファイルを保存
+    try:
+        _save_report_file(_session_dict(session))
+    except Exception as e:
+        print(f"[WARNING] Failed to save report file: {e}")
+
+    return _session_dict(session)
+
+
+CAST_DRINK_TYPES = ("drink_s", "drink_l", "drink_mg", "shot_cast", "champagne")
+DRINK_UNIT_PRICE = {"drink_s": 100, "drink_l": 400, "drink_mg": 800, "shot_cast": 300}
+
+
+def _parse_champagne_ratios(item_name: str) -> List[int]:
+    """
+    シャンパン item_name から配分比率リストを抽出。
+    例: "クリスタル［すずな 60%・みお 40%］" → [60, 40]
+    """
+    match = re.search(r'[［\[](.+?)[］\]]', item_name or "")
+    if not match:
+        return []
+    inner = match.group(1)
+    parts = re.split(r'[・,、]', inner)
+    ratios: List[int] = []
+    for part in parts:
+        m = re.search(r'(\d+)%', part)
+        ratios.append(int(m.group(1)) if m else 0)
+    return ratios
+
+
+@router.get("/{session_id}/cast-drinks")
+def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """営業セッション内のキャスト別ドリンク集計"""
+    session = db.query(models.BusinessSession).filter(models.BusinessSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    # セッション内の伝票を取得（get_session_ticketsと同じフィルター）
+    query = db.query(models.Ticket).filter(
+        models.Ticket.store_id == session.store_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.ended_at >= session.opened_at,
+    )
+    if session.closed_at:
+        query = query.filter(models.Ticket.ended_at <= session.closed_at)
+    tickets = query.all()
+
+    cast_map: dict = {}
+
+    def _ensure_cast(cid: int, item: models.OrderItem) -> None:
+        if cid not in cast_map:
+            cast_name = item.cast.stage_name if item.cast else f"Cast{cid}"
+            cast_map[cid] = {
+                "cast_id": cid,
+                "cast_name": cast_name,
+                "drink_s": 0,
+                "drink_l": 0,
+                "drink_mg": 0,
+                "shot_cast": 0,
+                "champagne": 0,
+                "champagne_amount": 0,
+            }
+
+    for ticket in tickets:
+        valid_items = [
+            i for i in ticket.order_items
+            if i.canceled_at is None and i.cast_id is not None and i.item_type in CAST_DRINK_TYPES
+        ]
+
+        # S/L/MG/shot_cast: 数量集計
+        for item in valid_items:
+            if item.item_type in ("drink_s", "drink_l", "drink_mg", "shot_cast"):
+                _ensure_cast(item.cast_id, item)
+                cast_map[item.cast_id][item.item_type] += item.quantity
+
+        # シャンパン: item_name でグループ化し、unit_price×10% を配分比率で分割
+        champ_groups: dict = defaultdict(list)
+        for item in valid_items:
+            if item.item_type == "champagne":
+                champ_groups[item.item_name or ""].append(item)
+
+        for item_name, items in champ_groups.items():
+            # unit_price > 0 のアイテムから販売価格を取得
+            price_item = next((i for i in items if (i.unit_price or 0) > 0), None)
+            unit_price = price_item.unit_price if price_item else 0
+            back_pool = unit_price * 0.1  # 販売価格の10%がバック総額
+
+            ratios = _parse_champagne_ratios(item_name)
+            # 作成順（id昇順）と比率リストの位置を対応させる
+            items_sorted = sorted(items, key=lambda i: i.id)
+
+            for idx, item in enumerate(items_sorted):
+                _ensure_cast(item.cast_id, item)
+                cast_map[item.cast_id]["champagne"] += item.quantity
+                ratio = ratios[idx] if idx < len(ratios) else 0
+                cast_map[item.cast_id]["champagne_amount"] += int(back_pool * ratio / 100)
+
+    # 勤怠情報を取得（クローズ済みはスナップショット、オープン中はライブデータ）
+    from datetime import timedelta
+    from sqlalchemy import or_
+
+    # スナップショット: cast_id(str) → {actual_start, actual_end, is_late, is_absent}
+    # expenses_detail の "_attendance" キーに保存されている
+    snap: dict = (session.expenses_detail or {}).get("_attendance", {})
+
+    if session.is_closed and snap:
+        # スナップショットから勤怠があるがドリンクがないキャストを追加
+        for cast_id_str, att in snap.items():
+            cid = int(cast_id_str)
+            if cid not in cast_map:
+                # キャスト名を DB から取得
+                cast_obj = db.query(models.Cast).filter(models.Cast.id == cid).first()
+                cast_name = cast_obj.stage_name if cast_obj else f"Cast{cid}"
+                cast_map[cid] = {
+                    "cast_id": cid,
+                    "cast_name": cast_name,
+                    "drink_s": 0,
+                    "drink_l": 0,
+                    "drink_mg": 0,
+                    "shot_cast": 0,
+                    "champagne": 0,
+                    "champagne_amount": 0,
+                }
+
+        # 合計金額と勤怠情報を付与
+        for cid, entry in cast_map.items():
+            entry["total_amount"] = (
+                entry["drink_s"] * DRINK_UNIT_PRICE["drink_s"]
+                + entry["drink_l"] * DRINK_UNIT_PRICE["drink_l"]
+                + entry["drink_mg"] * DRINK_UNIT_PRICE["drink_mg"]
+                + entry["shot_cast"] * DRINK_UNIT_PRICE["shot_cast"]
+                + entry["champagne_amount"]
+            )
+            att = snap.get(str(cid), {})
+            entry["actual_start"] = att.get("actual_start")
+            entry["actual_end"] = att.get("actual_end")
+            entry["is_late"] = att.get("is_late", False)
+            entry["is_absent"] = att.get("is_absent", False)
+    else:
+        # オープン中またはスナップショットなし: ライブの ConfirmedShift を参照
+        session_date_jst = (session.opened_at + timedelta(hours=9)).date()
+        shifts = db.query(models.ConfirmedShift).filter(
+            models.ConfirmedShift.store_id == session.store_id,
+            models.ConfirmedShift.date == session_date_jst,
+            or_(
+                models.ConfirmedShift.actual_start.isnot(None),
+                models.ConfirmedShift.is_absent == True,
+            )
+        ).all()
+
+        def _dt_to_bar_hhmm(dt: datetime) -> str:
+            jst = dt + timedelta(hours=9)
+            h, m = jst.hour, jst.minute
+            display_h = h + 24 if h < 12 else h
+            return f"{display_h:02d}:{m:02d}"
+
+        for shift in shifts:
+            cid = shift.cast_id
+            if cid not in cast_map:
+                cast_name = shift.cast.stage_name if shift.cast else f"Cast{cid}"
+                cast_map[cid] = {
+                    "cast_id": cid,
+                    "cast_name": cast_name,
+                    "drink_s": 0,
+                    "drink_l": 0,
+                    "drink_mg": 0,
+                    "shot_cast": 0,
+                    "champagne": 0,
+                    "champagne_amount": 0,
+                }
+
+        shift_map = {s.cast_id: s for s in shifts}
+        for cid, entry in cast_map.items():
+            entry["total_amount"] = (
+                entry["drink_s"] * DRINK_UNIT_PRICE["drink_s"]
+                + entry["drink_l"] * DRINK_UNIT_PRICE["drink_l"]
+                + entry["drink_mg"] * DRINK_UNIT_PRICE["drink_mg"]
+                + entry["shot_cast"] * DRINK_UNIT_PRICE["shot_cast"]
+                + entry["champagne_amount"]
+            )
+            shift = shift_map.get(cid)
+            entry["actual_start"] = _dt_to_bar_hhmm(shift.actual_start) if shift and shift.actual_start else None
+            entry["actual_end"] = _dt_to_bar_hhmm(shift.actual_end) if shift and shift.actual_end else None
+            entry["is_late"] = bool(shift.is_late) if shift else False
+            entry["is_absent"] = bool(shift.is_absent) if shift else False
+
+    return sorted(cast_map.values(), key=lambda x: x["cast_name"])
+
+
+@router.get("/{session_id}/staff-attendance")
+def get_session_staff_attendance(session_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """営業セッションの社員/アルバイト勤怠一覧"""
+    session = db.query(models.BusinessSession).filter(models.BusinessSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    from datetime import timedelta
+
+    # クローズ済みはスナップショットを返す
+    if session.is_closed:
+        snap = (session.expenses_detail or {}).get("_staff_attendance", [])
+        return snap
+
+    # オープン中はライブデータ
+    session_date_jst = (session.opened_at + timedelta(hours=9)).date()
+    records = db.query(models.StaffAttendance).filter(
+        models.StaffAttendance.store_id == session.store_id,
+        models.StaffAttendance.date == session_date_jst,
+    ).order_by(models.StaffAttendance.created_at).all()
+
+    def _dt_to_bar(dt) -> str:
+        jst = dt + timedelta(hours=9)
+        h, m = jst.hour, jst.minute
+        display_h = h + 24 if h < 12 else h
+        return f"{display_h:02d}:{m:02d}"
+
+    return [
+        {
+            "name": r.name,
+            "actual_start": _dt_to_bar(r.actual_start) if r.actual_start else None,
+            "actual_end": _dt_to_bar(r.actual_end) if r.actual_end else None,
+            "is_late": bool(r.is_late),
+            "is_absent": bool(r.is_absent),
+        }
+        for r in records
+    ]
+
+
+@router.get("/{session_id}/tickets")
+def get_session_tickets(session_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """営業セッション内の伝票一覧"""
+    session = db.query(models.BusinessSession).filter(models.BusinessSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="セッションが見つかりません")
+    query = db.query(models.Ticket).filter(
+        models.Ticket.store_id == session.store_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.ended_at >= session.opened_at,
+    )
+    if session.closed_at:
+        query = query.filter(models.Ticket.ended_at <= session.closed_at)
+    tickets = query.order_by(models.Ticket.ended_at).all()
+    result = []
+    for t in tickets:
+        result.append({
+            "id": t.id,
+            "table_no": t.table_no,
+            "guest_count": t.guest_count or 1,
+            "plan_type": t.plan_type,
+            "visit_type": t.visit_type,
+            "customer_name": t.customer.name if t.customer else None,
+            "total_amount": t.total_amount,
+            "payment_method": t.payment_method.value if t.payment_method else None,
+            "cash_amount": t.cash_amount or 0,
+            "card_amount": t.card_amount or 0,
+            "code_amount": t.code_amount or 0,
+            "started_at": t.started_at.isoformat() if t.started_at else None,
+            "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+        })
+    return result

@@ -32,6 +32,7 @@ class CastRank(str, enum.Enum):
 class PaymentMethod(str, enum.Enum):
     cash = "cash"
     card = "card"
+    code = "code"
     mixed = "mixed"
 
 
@@ -67,6 +68,8 @@ class Store(Base):
     code = Column(String(50), unique=True, nullable=False)
     set_price = Column(Integer, default=0)
     extension_price = Column(Integer, default=0)
+    open_time = Column(String(5), nullable=True)   # "19:00"
+    close_time = Column(String(5), nullable=True)  # "05:00"
     address = Column(String(200))
     phone = Column(String(20))
     is_active = Column(Boolean, default=True)
@@ -230,6 +233,7 @@ class Ticket(Base):
     payment_method = Column(Enum(PaymentMethod), nullable=True)
     cash_amount = Column(Integer, default=0)
     card_amount = Column(Integer, default=0)
+    code_amount = Column(Integer, default=0)
     staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text)
     guest_count = Column(Integer, default=1)
@@ -239,6 +243,10 @@ class Ticket(Base):
     set_is_paused = Column(Boolean, default=False)
     set_paused_at = Column(DateTime, nullable=True)
     set_paused_seconds = Column(Integer, default=0)
+    drink_clears = Column(JSON, default=dict)  # {"castId_drinkType": cleared_at_iso}
+    visit_motivation = Column(String(50), nullable=True)   # ティッシュ/SNS/LINE/紹介/Google/看板/電話
+    motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト
+    motivation_note = Column(String(200), nullable=True)   # 紹介用テキスト
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")
@@ -246,6 +254,7 @@ class Ticket(Base):
     order_items = relationship("OrderItem", back_populates="ticket")
     assignments = relationship("CastAssignment", back_populates="ticket")
     visit_notes = relationship("CustomerVisitNote", back_populates="ticket")
+    motivation_cast = relationship("Cast", foreign_keys=[motivation_cast_id])
 
 
 # ─────────────────────────────────────────
@@ -267,6 +276,33 @@ class OrderItem(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     ticket = relationship("Ticket", back_populates="order_items")
+    cast = relationship("Cast", foreign_keys=[cast_id])
+
+
+# ─────────────────────────────────────────
+# 注文変更履歴
+# ─────────────────────────────────────────
+class OrderItemLog(Base):
+    __tablename__ = "order_item_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
+    action = Column(String(20), nullable=False)   # 'cancel' | 'update_quantity'
+    item_type = Column(String(50))
+    item_name = Column(String(100))
+    old_quantity = Column(Integer, nullable=True)
+    new_quantity = Column(Integer, nullable=True)
+    old_amount = Column(Integer, nullable=True)
+    new_amount = Column(Integer, nullable=True)
+    changed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    operator_name = Column(String(50), nullable=True)  # 手動入力の担当者名
+    reason = Column(String(200), nullable=True)         # 変更理由
+    changed_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket")
+    order_item = relationship("OrderItem")
+    changed_by_user = relationship("User", foreign_keys=[changed_by])
 
 
 # ─────────────────────────────────────────
@@ -364,6 +400,23 @@ class CastDailyPay(Base):
 
 
 # ─────────────────────────────────────────
+# 社員/アルバイト勤怠
+# ─────────────────────────────────────────
+class StaffAttendance(Base):
+    __tablename__ = "staff_attendances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    name = Column(String(100), nullable=False)
+    actual_start = Column(DateTime, nullable=True)
+    actual_end = Column(DateTime, nullable=True)
+    is_late = Column(Boolean, default=False)
+    is_absent = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
 # 日報
 # ─────────────────────────────────────────
 class DailyReport(Base):
@@ -385,6 +438,41 @@ class DailyReport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="daily_reports")
+
+
+# ─────────────────────────────────────────
+# 営業セッション
+# ─────────────────────────────────────────
+class BusinessSession(Base):
+    __tablename__ = "business_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    date = Column(Date, nullable=False)        # 営業日
+    opened_at = Column(DateTime, default=datetime.utcnow)
+    closed_at = Column(DateTime, nullable=True)
+    opening_cash = Column(Integer, default=0)    # 開始レジ金（金種合計）
+    opening_cash_detail = Column(JSON, nullable=True)  # {10000:枚数, 5000:枚数, ...}
+    closing_cash = Column(Integer, nullable=True)       # 終了レジ金
+    closing_cash_detail = Column(JSON, nullable=True)
+    prev_day_diff = Column(Integer, default=0)   # 前日過不足金
+    sales_snapshot = Column(Integer, nullable=True)  # 終了時売上スナップショット
+    operator_name = Column(String(50), nullable=True)  # 担当者名
+    event_name = Column(String(100), nullable=True)    # 本日企画名
+    opened_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    closed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    is_closed = Column(Boolean, default=False)
+    cash_diff = Column(Integer, nullable=True)   # 営業終了時の過不足金（翌日繰越用）
+    expenses_detail = Column(JSON, nullable=True)  # 経費・出金明細
+    cash_sales = Column(Integer, nullable=True)    # 現金売上合計
+    card_sales = Column(Integer, nullable=True)    # カード売上合計
+    code_sales = Column(Integer, nullable=True)    # コード売上合計
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store")
+    opened_by_user = relationship("User", foreign_keys=[opened_by])
+    closed_by_user = relationship("User", foreign_keys=[closed_by])
 
 
 # ─────────────────────────────────────────

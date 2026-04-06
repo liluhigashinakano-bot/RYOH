@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
@@ -428,3 +428,316 @@ def get_cast_shifts(
             "honshimei_back": pay.honshimei_back if pay else None,
         })
     return result
+
+
+
+# ─────────────────────────────────────────
+# キャスト勤怠
+# ─────────────────────────────────────────
+
+class ClockInRequest(BaseModel):
+    cast_id: int
+    store_id: int
+    actual_start: Optional[str] = None  # "HH:MM" JST、未指定なら現在時刻
+    is_late: bool = False
+    is_absent: bool = False
+
+
+class AttendanceTimeUpdate(BaseModel):
+    actual_start: Optional[str] = None  # "HH:MM" JST
+    actual_end: Optional[str] = None    # "HH:MM" JST
+
+
+@router.get("/attendance/working/{store_id}")
+def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """本日勤務中のキャスト一覧（actual_start あり・actual_end なし）"""
+    today = date.today()
+    from sqlalchemy import or_
+    # 当欠（is_absent=True）または出勤済み（actual_start あり）を取得
+    shifts = (
+        db.query(models.ConfirmedShift)
+        .filter(
+            models.ConfirmedShift.store_id == store_id,
+            models.ConfirmedShift.date == today,
+            or_(
+                models.ConfirmedShift.actual_start.isnot(None),
+                models.ConfirmedShift.is_absent == True,
+            )
+        )
+        .order_by(models.ConfirmedShift.actual_start.nullslast())
+        .all()
+    )
+    result = []
+    for s in shifts:
+        result.append({
+            "shift_id": s.id,
+            "cast_id": s.cast_id,
+            "cast_name": s.cast.stage_name if s.cast else f"Cast{s.cast_id}",
+            "actual_start": s.actual_start.isoformat() if s.actual_start else None,
+            "actual_end": s.actual_end.isoformat() if s.actual_end else None,
+            "is_late": bool(s.is_late),
+            "is_absent": bool(s.is_absent),
+        })
+    return result
+
+
+@router.post("/attendance/clock-in")
+def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """出勤打刻: 本日のシフトに actual_start をセット。シフトがなければ当日分を新規作成"""
+    today = date.today()
+    from datetime import timedelta
+
+    if data.actual_start:
+        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
+        # バー営業: 12時未満は翌日扱い
+        d = today if h >= 12 else today + timedelta(days=1)
+        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+    else:
+        now = datetime.utcnow()
+
+    # 既に出勤中なら何もしない
+    already = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.cast_id == data.cast_id,
+        models.ConfirmedShift.store_id == data.store_id,
+        models.ConfirmedShift.date == today,
+        models.ConfirmedShift.actual_start.isnot(None),
+        models.ConfirmedShift.actual_end.is_(None),
+    ).first()
+    if already:
+        return {"shift_id": already.id, "message": "既に出勤中です"}
+
+    # 本日のシフトを探す
+    shift = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.cast_id == data.cast_id,
+        models.ConfirmedShift.store_id == data.store_id,
+        models.ConfirmedShift.date == today,
+    ).first()
+
+    if data.is_absent:
+        # 当欠: actual_start なし、is_absent=True
+        if shift:
+            shift.is_absent = True
+            shift.actual_start = None
+            shift.actual_end = None
+        else:
+            shift = models.ConfirmedShift(
+                cast_id=data.cast_id,
+                store_id=data.store_id,
+                date=today,
+                is_absent=True,
+            )
+            db.add(shift)
+        db.commit()
+        db.refresh(shift)
+        return {"shift_id": shift.id, "message": "当欠で登録しました"}
+
+    if shift:
+        shift.actual_start = now
+        shift.actual_end = None
+        shift.is_late = data.is_late
+        shift.is_absent = False
+    else:
+        shift = models.ConfirmedShift(
+            cast_id=data.cast_id,
+            store_id=data.store_id,
+            date=today,
+            actual_start=now,
+            is_late=data.is_late,
+        )
+        db.add(shift)
+
+    db.commit()
+    db.refresh(shift)
+    return {"shift_id": shift.id, "message": "出勤しました"}
+
+
+class ClockOutRequest(BaseModel):
+    actual_end: Optional[str] = None  # "HH:MM" JST、未指定なら現在時刻
+
+
+@router.post("/attendance/{shift_id}/clock-out")
+def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """退勤打刻"""
+    from datetime import timedelta
+    shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
+    if not shift:
+        raise HTTPException(status_code=404, detail="シフトが見つかりません")
+    if data.actual_end:
+        h, m = int(data.actual_end.split(':')[0]), int(data.actual_end.split(':')[1])
+        d = shift.date if h >= 12 else shift.date + timedelta(days=1)
+        shift.actual_end = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+    else:
+        shift.actual_end = datetime.utcnow()
+    db.commit()
+    return {"message": "退勤しました"}
+
+
+@router.patch("/attendance/{shift_id}/time")
+def update_attendance_time(shift_id: int, data: AttendanceTimeUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """出退勤時刻を修正（HH:MM JST で受け取り UTC に変換して保存）"""
+    shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
+    if not shift:
+        raise HTTPException(status_code=404, detail="シフトが見つかりません")
+
+    def hhmm_jst_to_utc(hhmm: str, base_date: date) -> datetime:
+        h, m = int(hhmm.split(':')[0]), int(hhmm.split(':')[1])
+        # バー営業は深夜をまたぐため、時刻が12時未満なら翌日扱い
+        from datetime import timedelta
+        d = base_date if h >= 12 else base_date + timedelta(days=1)
+        jst_dt = datetime(d.year, d.month, d.day, h, m)
+        return jst_dt - timedelta(hours=9)
+
+    if data.actual_start:
+        shift.actual_start = hhmm_jst_to_utc(data.actual_start, shift.date)
+    if data.actual_end:
+        shift.actual_end = hhmm_jst_to_utc(data.actual_end, shift.date)
+
+    db.commit()
+    return {"message": "時刻を更新しました"}
+
+
+@router.post("/attendance/{shift_id}/remove")
+def delete_attendance(shift_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """出勤記録を削除（actual_start/actual_end をクリア）"""
+    shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
+    if not shift:
+        raise HTTPException(status_code=404, detail="シフトが見つかりません")
+    # シフト自体は残してタイムスタンプのみクリア
+    shift.actual_start = None
+    shift.actual_end = None
+    db.commit()
+    return {"message": "出勤記録を削除しました"}
+
+
+# ─────────────────────────────────────────
+# 社員/アルバイト勤怠
+# ─────────────────────────────────────────
+
+class StaffClockInRequest(BaseModel):
+    store_id: int
+    name: str
+    actual_start: Optional[str] = None  # "HH:MM" JST
+    is_late: bool = False
+    is_absent: bool = False
+
+
+class StaffTimeUpdate(BaseModel):
+    actual_start: Optional[str] = None  # "HH:MM" JST
+    actual_end: Optional[str] = None    # "HH:MM" JST
+
+
+def _hhmm_to_utc(hhmm: str, base_date) -> datetime:
+    """HH:MM JST (バー営業対応) → UTC datetime"""
+    from datetime import timedelta
+    h, m = int(hhmm.split(':')[0]), int(hhmm.split(':')[1])
+    d = base_date if h >= 12 else base_date + timedelta(days=1)
+    return datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+
+
+@router.get("/staff-attendance/today/{store_id}")
+def get_staff_attendance(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """本日の社員/アルバイト勤怠一覧"""
+    today = date.today()
+    records = db.query(models.StaffAttendance).filter(
+        models.StaffAttendance.store_id == store_id,
+        models.StaffAttendance.date == today,
+    ).order_by(models.StaffAttendance.created_at).all()
+
+    def _fmt(dt):
+        if not dt:
+            return None
+        jst = dt
+        # actual_start/end はUTC保存なのでJSTに変換
+        from datetime import timedelta
+        jst = dt + timedelta(hours=9)
+        h = jst.hour
+        disp_h = h + 24 if h < 12 else h
+        return f"{disp_h:02d}:{jst.minute:02d}"
+
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "actual_start": r.actual_start.isoformat() if r.actual_start else None,
+            "actual_end": r.actual_end.isoformat() if r.actual_end else None,
+            "is_late": bool(r.is_late),
+            "is_absent": bool(r.is_absent),
+        }
+        for r in records
+    ]
+
+
+@router.post("/staff-attendance/clock-in")
+def staff_clock_in(data: StaffClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト出勤打刻"""
+    today = date.today()
+
+    if data.is_absent:
+        record = models.StaffAttendance(
+            store_id=data.store_id,
+            date=today,
+            name=data.name,
+            is_absent=True,
+            is_late=False,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return {"id": record.id, "message": "当欠で登録しました"}
+
+    start_dt = _hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
+    record = models.StaffAttendance(
+        store_id=data.store_id,
+        date=today,
+        name=data.name,
+        actual_start=start_dt,
+        is_late=data.is_late,
+        is_absent=False,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return {"id": record.id, "message": "出勤しました"}
+
+
+class StaffClockOutRequest(BaseModel):
+    actual_end: Optional[str] = None  # "HH:MM" JST
+
+
+@router.post("/staff-attendance/{record_id}/clock-out")
+def staff_clock_out(record_id: int, data: StaffClockOutRequest = StaffClockOutRequest(), db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト退勤打刻"""
+    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    if data.actual_end:
+        record.actual_end = _hhmm_to_utc(data.actual_end, record.date)
+    else:
+        record.actual_end = datetime.utcnow()
+    db.commit()
+    return {"message": "退勤しました"}
+
+
+@router.patch("/staff-attendance/{record_id}/time")
+def update_staff_time(record_id: int, data: StaffTimeUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト出退勤時刻修正"""
+    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    if data.actual_start is not None:
+        record.actual_start = _hhmm_to_utc(data.actual_start, record.date)
+    if data.actual_end is not None:
+        record.actual_end = _hhmm_to_utc(data.actual_end, record.date)
+    db.commit()
+    return {"message": "時刻を更新しました"}
+
+
+@router.delete("/staff-attendance/{record_id}")
+def delete_staff_attendance(record_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト勤怠記録を削除"""
+    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    db.delete(record)
+    db.commit()
+    return {"message": "削除しました"}

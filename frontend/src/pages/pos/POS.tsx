@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, X, CreditCard, Banknote, Bot, Play, Pause } from 'lucide-react'
+import { Plus, X, CreditCard, Banknote, Bot, Play, Pause, QrCode, ClipboardList } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -20,6 +20,24 @@ function displayItemName(item: any, castMap?: Record<number, string>): string {
   return base
 }
 
+const CHAMPAGNE_MENU = [
+  { name: 'ヴーヴイエロー', price: 26000 },
+  { name: 'ヴーヴホワイト', price: 28000 },
+  { name: 'ヴーヴリッチ', price: 37000 },
+  { name: 'ヴーヴリッチロゼ', price: 35000 },
+  { name: 'モエアイス', price: 30000 },
+  { name: 'モエアイスロゼ', price: 35000 },
+  { name: 'ペリエジュエベルエポック', price: 80000 },
+  { name: 'アルマンドブリニャック', price: 150000 },
+  { name: 'エンジェルブラック', price: 120000 },
+  { name: 'エンジェルホワイト', price: 200000 },
+  { name: '1688ノンアル', price: 20000 },
+  { name: 'シャメイ', price: 10000 },
+  { name: 'ノンアルオリシャン', price: 30000 },
+  { name: 'オリシャン', price: 20000 },
+  { name: '光オリシャン', price: 50000 },
+]
+
 const ITEM_TYPES = [
   { type: 'extension', label: '延長', defaultPrice: 2700 },
   { type: 'drink_s', label: 'Sドリンク', defaultPrice: 900 },
@@ -32,13 +50,13 @@ const ITEM_TYPES = [
 ]
 
 // キャストバックに影響するドリンク（キャスト選択が必要）
-const CAST_SELECT_TYPES = new Set(['drink_l', 'drink_mg', 'shot_cast', 'champagne'])
+const CAST_SELECT_TYPES = new Set(['drink_s', 'drink_l', 'drink_mg', 'shot_cast', 'champagne'])
 
-// D時間の色設定
+// D時間の色設定（shot_castは除外、drink_sを追加）
 const DRINK_COLORS: Record<string, { label: string; color: string; bg: string }> = {
+  drink_s:   { label: 'S',   color: 'text-green-400',  bg: 'bg-green-900/40' },
   drink_l:   { label: 'L',   color: 'text-cyan-400',   bg: 'bg-cyan-900/40' },
   drink_mg:  { label: 'MG',  color: 'text-purple-400', bg: 'bg-purple-900/40' },
-  shot_cast: { label: 'S',   color: 'text-orange-400', bg: 'bg-orange-900/40' },
   champagne: { label: 'Ch',  color: 'text-yellow-400', bg: 'bg-yellow-900/40' },
 }
 
@@ -49,13 +67,28 @@ const TABLE_NOS = [
 ]
 
 function useNow() {
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(new Date())
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
+    const id = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
   return now
 }
+
+// チケットのgrandTotal（税サ込み・先会計前の全額）を計算
+function calcTicketGrandTotal(ticket: any): number {
+  const sk = (ticket.order_items || [])
+    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
+    .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+  const sub = ticket.total_amount + sk
+  return Math.round(sub * 1.21)
+}
+
+// 0〜5時 → 24〜29時に変換（バー営業時間表記）
+function toBarHour(h: number) { return h < 12 ? h + 24 : h }
+function fromBarHour(h: number) { return h >= 24 ? h - 24 : h }
+// 19〜29の時間選択肢
+const BAR_HOURS = Array.from({ length: 11 }, (_, i) => i + 19)
 
 function fmtTime(totalSec: number) {
   const h = Math.floor(totalSec / 3600)
@@ -104,11 +137,105 @@ function calcSetInterval(setElapsed: number | null): number {
   return Math.floor(setElapsed / SET_DURATION)
 }
 
+function AutoExtender({ ticket, storeId, extensionPrice }: { ticket: any; storeId: number; extensionPrice: number }) {
+  const qc = useQueryClient()
+  const now = useNow()
+  const prevSetIntervalRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!ticket || ticket.set_is_paused || !ticket.set_started_at) return
+    const setElapsed = calcSetElapsed(ticket, now)
+    if (setElapsed === null) return
+    const intervalNum = calcSetInterval(setElapsed)
+
+    if (prevSetIntervalRef.current === null) {
+      prevSetIntervalRef.current = intervalNum
+      return
+    }
+
+    if (intervalNum > prevSetIntervalRef.current) {
+      prevSetIntervalRef.current = intervalNum
+      const guestCount = ticket.guest_count || 1
+      const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
+      const adds = Array.from({ length: guestCount }, () =>
+        apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: 1 })
+      )
+      Promise.all(adds).then(() => {
+        qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+        qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+      })
+    }
+  }, [ticket, now])
+
+  return null
+}
+
+const JOIN_DURATION = 40 * 60 * 1000  // 40分
+
+function JoinAutoExtender({ ticket, storeId }: { ticket: any; storeId: number }) {
+  const qc = useQueryClient()
+  useNow()  // 1秒ごとに再レンダリングさせるためだけに使用
+  const firedRef = useRef<Record<number, number>>({})
+
+  useEffect(() => {
+    if (!ticket || ticket.is_closed) return
+    const joinItems = (ticket.order_items || []).filter((i: any) =>
+      i.item_name && i.item_name.includes('合流') && i.created_at
+    )
+    if (!joinItems.length) return
+
+    const nowMs = Date.now()
+    for (const item of joinItems) {
+      const startMs = new Date(item.created_at.endsWith('Z') ? item.created_at : item.created_at + 'Z').getTime()
+      const elapsed = nowMs - startMs
+      const intervalNum = Math.floor(elapsed / JOIN_DURATION)
+
+      if (firedRef.current[item.id] === undefined) {
+        firedRef.current[item.id] = intervalNum
+        continue
+      }
+      if (intervalNum > firedRef.current[item.id]) {
+        firedRef.current[item.id] = intervalNum
+        const isPremium = item.item_name.includes('プレミアム')
+        const extPrice = isPremium ? 4000 : 3000
+        apiClient.post(`/api/tickets/${ticket.id}/orders`, {
+          item_type: 'extension',
+          item_name: isPremium ? '合流延長（プレミアム）' : '合流延長（スタンダード）',
+          unit_price: extPrice,
+          quantity: 1,
+        }).then(() => {
+          qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+          qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+        })
+      }
+    }
+  })
+
+  return null
+}
+
 export default function POS() {
   const { stores } = useAuthStore()
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
   const [showNewTicket, setShowNewTicket] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
+  const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports'>('open')
+  const [showOpenSessionModal, setShowOpenSessionModal] = useState(false)
+  const [showCloseSessionModal, setShowCloseSessionModal] = useState(false)
+  const [showSessionThanks, setShowSessionThanks] = useState(false)
+  const [showOpenTicketAlert, setShowOpenTicketAlert] = useState(false)
+  // 営業終了モーダルの入力値を保持（閉じても消えないように）
+  const [closeModalExpenses, setCloseModalExpenses] = useState<ExpenseRow[]>([
+    { id: 1, type: 'liquor', category: '田野屋', amount: '' },
+    { id: 2, type: 'other', category: '', amount: '' },
+  ])
+  const [closeModalWithdrawals, setCloseModalWithdrawals] = useState<{ id: number; type: string; name: string; amount: string }[]>([
+    { id: 1, type: '', name: '', amount: '' },
+  ])
+  const [closeModalNotes, setCloseModalNotes] = useState('')
+  // カード上の顧客・キャストモーダルをPOSPage レベルで管理（TicketCard内の event propagation 問題を回避）
+  const [customerModalTicket, setCustomerModalTicket] = useState<any | null>(null)
+  const [castModalTicket, setCastModalTicket] = useState<any | null>(null)
   const qc = useQueryClient()
 
   const { data: tickets = [] } = useQuery({
@@ -118,15 +245,67 @@ export default function POS() {
     refetchInterval: 15000,
   })
 
+  const { data: storeInfo } = useQuery({
+    queryKey: ['store', selectedStoreId],
+    queryFn: () => apiClient.get(`/api/stores/${selectedStoreId}`).then(r => r.data),
+    enabled: !!selectedStoreId,
+  })
+
+  const { data: currentSession } = useQuery({
+    queryKey: ['session', selectedStoreId],
+    queryFn: () => apiClient.get('/api/sessions/current', { params: { store_id: selectedStoreId } }).then(r => r.data),
+    enabled: !!selectedStoreId,
+    refetchInterval: 30000,
+  })
+
   const { data: liveData } = useQuery({
-    queryKey: ['live', selectedStoreId],
-    queryFn: () => apiClient.get(`/api/tickets/live/${selectedStoreId}`).then(r => r.data),
+    queryKey: ['live', selectedStoreId, currentSession?.opened_at ?? null],
+    queryFn: () => apiClient.get(`/api/tickets/live/${selectedStoreId}`, {
+      params: currentSession?.opened_at ? { session_opened_at: currentSession.opened_at } : {},
+    }).then(r => r.data),
     enabled: !!selectedStoreId,
     refetchInterval: 15000,
   })
 
+  const { data: lastClosedSession } = useQuery({
+    queryKey: ['session-last-closed', selectedStoreId],
+    queryFn: () => apiClient.get('/api/sessions/last-closed', { params: { store_id: selectedStoreId } }).then(r => r.data),
+    enabled: !!selectedStoreId && showOpenSessionModal,
+  })
+
+  const openSessionMutation = useMutation({
+    mutationFn: (d: { opening_cash: number; opening_cash_detail: Record<string, number>; prev_day_diff: number; operator_name?: string; event_name?: string; notes?: string }) =>
+      apiClient.post('/api/sessions/open', { store_id: selectedStoreId, ...d }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['session', selectedStoreId] })
+      setShowOpenSessionModal(false)
+      // 営業開始時に前日の締め作業入力をリセット
+      setCloseModalExpenses([
+        { id: 1, type: 'liquor', category: '田野屋', amount: '' },
+        { id: 2, type: 'other', category: '', amount: '' },
+      ])
+      setCloseModalWithdrawals([{ id: 1, type: '', name: '', amount: '' }])
+      setCloseModalNotes('')
+    },
+  })
+
+  const closeSessionMutation = useMutation({
+    mutationFn: (d: { closing_cash: number; closing_cash_detail: Record<string, number>; notes?: string; cash_diff?: number | null; expenses_detail?: any; cash_sales?: number; card_sales?: number; code_sales?: number }) =>
+      apiClient.post(`/api/sessions/${currentSession?.id}/close`, d).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['session', selectedStoreId] })
+      qc.invalidateQueries({ queryKey: ['session-list', selectedStoreId] })
+      qc.invalidateQueries({ queryKey: ['attendance', selectedStoreId] })
+      qc.invalidateQueries({ queryKey: ['staff-attendance', selectedStoreId] })
+      setShowCloseSessionModal(false)
+      setShowSessionThanks(true)
+      setTimeout(() => setShowSessionThanks(false), 4000)
+    },
+  })
+  const extensionPrice: number = storeInfo?.extension_price || 2700
+
   const createMutation = useMutation({
-    mutationFn: (data: { store_id: number; table_no: string; guest_count: number; plan_type: string; visit_type: string }) =>
+    mutationFn: (data: { store_id: number; table_no: string; guest_count: number; plan_type: string; visit_type: string; visit_motivation?: string; motivation_cast_id?: number | null; motivation_note?: string }) =>
       apiClient.post('/api/tickets', data).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId] })
@@ -135,43 +314,137 @@ export default function POS() {
   })
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-white">POS・伝票管理</h1>
-        <div className="flex items-center gap-3">
-          <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(Number(e.target.value))} className="input-field text-sm">
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)', paddingBottom: '12px' }}>
+      {/* ヘッダー */}
+      <div className="shrink-0 pb-2">
+        <div className="flex items-center gap-2 flex-nowrap min-w-0">
+          {/* 左: タイトル・店舗・新規伝票 */}
+          <h1 className="text-lg font-bold text-white shrink-0">POS・伝票管理</h1>
+          <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(Number(e.target.value))} className="input-field text-xs py-1.5 shrink-0">
             {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <button onClick={() => setShowNewTicket(true)} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" />新規伝票
-          </button>
+          {view === 'open' && (
+            <button onClick={() => setShowNewTicket(true)} className="btn-primary flex items-center gap-1 text-xs px-2.5 py-1.5 whitespace-nowrap shrink-0">
+              <Plus className="w-3.5 h-3.5" />新規伝票
+            </button>
+          )}
+
+          {/* 中央: ナビタブ */}
+          <div className="flex bg-gray-800 rounded-lg p-0.5 gap-0.5 mx-auto shrink-0">
+            <button onClick={() => setView('open')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'open' ? 'bg-pink-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              オープン中
+            </button>
+            <button onClick={() => setView('attendance')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'attendance' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              従業員勤怠
+            </button>
+            <button onClick={() => setView('history')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'history' ? 'bg-pink-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              会計済み
+            </button>
+            <button onClick={() => setView('logs')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'logs' ? 'bg-orange-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              変更履歴
+            </button>
+            <button onClick={() => setView('reports')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'reports' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              日報一覧
+            </button>
+          </div>
+
+          {/* 右: 売上サマリ + 営業ボタン */}
+          <div className="flex items-center gap-3 shrink-0 ml-auto">
+            <div className="hidden sm:flex items-center gap-3 text-xs">
+              <div><span className="text-gray-500">合計</span><span className="ml-1 text-white font-bold">¥{(currentSession ? (liveData?.total_amount ?? 0) : 0).toLocaleString()}</span></div>
+              <div><span className="text-gray-500">未会計</span><span className="ml-1 text-yellow-400 font-medium">¥{(currentSession ? (liveData?.open_amount ?? 0) : 0).toLocaleString()}</span><span className="ml-1 text-gray-600">({currentSession ? (liveData?.open_count ?? 0) : 0}卓)</span></div>
+            </div>
+            {currentSession && !currentSession.is_closed ? (
+              <button onClick={() => setShowCloseSessionModal(true)}
+                className="btn-danger text-xs px-3 py-1.5 whitespace-nowrap shrink-0">
+                営業締め作業
+              </button>
+            ) : (
+              <button onClick={() => setShowOpenSessionModal(true)}
+                className="bg-green-700 hover:bg-green-600 active:bg-green-800 text-white font-medium px-3 py-1.5 rounded-lg transition-colors text-xs whitespace-nowrap shrink-0">
+                営業開始
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="card flex flex-wrap gap-4 text-sm">
-        <div><span className="text-gray-400">本日合計</span><span className="ml-2 text-white font-bold text-lg">¥{(liveData?.total_amount ?? 0).toLocaleString()}</span></div>
-        <div><span className="text-gray-400">会計済み</span><span className="ml-2 text-green-400 font-medium">¥{(liveData?.closed_amount ?? 0).toLocaleString()}</span></div>
-        <div>
-          <span className="text-gray-400">未会計</span>
-          <span className="ml-2 text-yellow-400 font-medium">¥{(liveData?.open_amount ?? 0).toLocaleString()}</span>
-          <span className="ml-1 text-gray-500">({liveData?.open_count ?? 0}卓)</span>
-        </div>
-      </div>
+      {view === 'open' && tickets.map((ticket: any) => (
+        <AutoExtender key={ticket.id} ticket={ticket} storeId={selectedStoreId} extensionPrice={extensionPrice} />
+      ))}
+      {view === 'open' && tickets.map((ticket: any) => (
+        <JoinAutoExtender key={`join-${ticket.id}`} ticket={ticket} storeId={selectedStoreId} />
+      ))}
 
-      <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: '520px' }}>
-        {tickets.map((ticket: any) => (
-          <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)} />
-        ))}
-        {tickets.length === 0 && (
-          <div className="flex-1 text-center text-gray-500 py-16">現在オープン中の伝票はありません</div>
-        )}
-      </div>
+      {view === 'open' ? (
+        /* 伝票カード一覧：残り高さを全部使う */
+        <div className="flex gap-3 overflow-x-auto overflow-y-auto flex-1 min-h-0 px-1 pb-1 items-start">
+          {tickets.map((ticket: any) => (
+            <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
+              onOpenCustomerModal={t => setCustomerModalTicket(t)}
+              onOpenCastModal={t => setCastModalTicket(t)}
+            />
+          ))}
+          <div className="shrink-0 w-3" />
+          {tickets.length === 0 && (
+            <div className="flex-1 text-center text-gray-500 py-16">現在オープン中の伝票はありません</div>
+          )}
+        </div>
+      ) : view === 'attendance' ? (
+        <CastAttendanceView storeId={selectedStoreId} />
+      ) : view === 'history' ? (
+        <ClosedTicketHistory storeId={selectedStoreId} onDetail={(id) => setSelectedTicketId(id)} />
+      ) : view === 'logs' ? (
+        <OrderLogsView storeId={selectedStoreId} />
+      ) : (
+        <SessionReportList storeId={selectedStoreId} />
+      )}
+
+      {/* カード上の顧客・キャスト選択モーダル（POSPage レベルで管理） */}
+      {customerModalTicket && (
+        <CustomerSearchModal
+          storeId={selectedStoreId}
+          currentId={customerModalTicket.customer_id}
+          onSelect={id => {
+            apiClient.post(`/api/tickets/${customerModalTicket.id}/set-customer`, { customer_id: id })
+              .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
+            setCustomerModalTicket(null)
+          }}
+          onClose={() => setCustomerModalTicket(null)}
+        />
+      )}
+      {castModalTicket && (
+        <CastAssignModal
+          storeId={selectedStoreId}
+          currentCastName={castModalTicket.current_cast_name}
+          onSelect={id => {
+            apiClient.post(`/api/tickets/${castModalTicket.id}/set-cast`, { cast_id: id })
+              .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
+            setCastModalTicket(null)
+          }}
+          onClose={() => setCastModalTicket(null)}
+        />
+      )}
 
       {showNewTicket && (
         <NewTicketModal
           storeId={selectedStoreId}
-          onSubmit={(tableNo, guestCount, planType, visitType) =>
-            createMutation.mutate({ store_id: selectedStoreId, table_no: tableNo, guest_count: guestCount, plan_type: planType, visit_type: visitType })
+          onSubmit={({ tableNo, guestCount, planType, visitType, visitMotivation, motivationCastId, motivationNote }) =>
+            createMutation.mutate({
+              store_id: selectedStoreId,
+              table_no: tableNo,
+              guest_count: guestCount,
+              plan_type: planType,
+              visit_type: visitType,
+              visit_motivation: visitMotivation,
+              motivation_cast_id: motivationCastId,
+              motivation_note: motivationNote,
+            })
           }
           onClose={() => setShowNewTicket(false)}
         />
@@ -180,25 +453,1006 @@ export default function POS() {
       {selectedTicketId && (
         <TicketDetailModal ticketId={selectedTicketId} storeId={selectedStoreId} onClose={() => setSelectedTicketId(null)} />
       )}
+
+      {showOpenSessionModal && (
+        <BusinessOpenModal
+          onSubmit={(data) => openSessionMutation.mutate(data)}
+          onClose={() => setShowOpenSessionModal(false)}
+          isPending={openSessionMutation.isPending}
+          lastClosedDiff={lastClosedSession?.cash_diff}
+          lastClosingCashDetail={lastClosedSession?.closing_cash_detail}
+        />
+      )}
+
+      {showCloseSessionModal && currentSession && (
+        <BusinessCloseModal
+          storeId={selectedStoreId}
+          session={currentSession}
+          openTicketCount={liveData?.open_count ?? 0}
+          salesTotal={liveData?.closed_amount ?? 0}
+          cashSales={liveData?.cash_sales ?? 0}
+          cardTickets={liveData?.card_tickets ?? []}
+          codeTickets={liveData?.code_tickets ?? []}
+          expenses={closeModalExpenses}
+          onExpensesChange={setCloseModalExpenses}
+          withdrawals={closeModalWithdrawals}
+          onWithdrawalsChange={setCloseModalWithdrawals}
+          notes={closeModalNotes}
+          onNotesChange={setCloseModalNotes}
+          onSubmit={(closing_cash, closing_cash_detail, notes, cash_diff, expenses_detail, cash_sales, card_sales, code_sales) => closeSessionMutation.mutate({ closing_cash, closing_cash_detail, notes, cash_diff, expenses_detail, cash_sales, card_sales, code_sales })}
+          onClose={() => setShowCloseSessionModal(false)}
+          isPending={closeSessionMutation.isPending}
+        />
+      )}
+
+      {/* 営業終了後 お疲れさまでした */}
+      {showSessionThanks && (
+        <div className="fixed inset-0 z-[90] bg-gray-950 flex flex-col items-center justify-center gap-6 animate-fade-in">
+          <div className="text-6xl">🌙</div>
+          <div className="text-3xl font-black text-white tracking-wide">本日もお疲れさまでした</div>
+          <div className="text-gray-400 text-sm">営業お疲れ様でした。またお会いしましょう。</div>
+          <button onClick={() => setShowSessionThanks(false)} className="mt-4 text-gray-600 text-xs hover:text-gray-400">閉じる</button>
+        </div>
+      )}
     </div>
   )
 }
 
-// D時間: 種別ごとに色分けして表示
-function DrinkTimers({ lastDrinkTimes, now }: { lastDrinkTimes: any; now: number }) {
+// ─────────────────────────────────────────
+// 金種テーブル＋テンキー（共通）
+// ─────────────────────────────────────────
+const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1]
+
+function CashDenomPad({ counts, onChange, extraAmount = 0 }: {
+  counts: Record<number, number>
+  onChange: (denom: number, count: number) => void
+  extraAmount?: number
+}) {
+  const [selectedDenom, setSelectedDenom] = useState<number>(10000)
+  const [inputBuf, setInputBuf] = useState('')
+
+  const handlePad = (key: string) => {
+    if (key === 'C') {
+      setInputBuf('')
+      onChange(selectedDenom, 0)
+      return
+    }
+    if (key === 'OK') {
+      const v = parseInt(inputBuf, 10) || 0
+      onChange(selectedDenom, v)
+      setInputBuf('')
+      // 次の金種へ
+      const idx = DENOMS.indexOf(selectedDenom)
+      if (idx < DENOMS.length - 1) setSelectedDenom(DENOMS[idx + 1])
+      return
+    }
+    const next = inputBuf + key
+    if (next.length > 5) return
+    setInputBuf(next)
+    onChange(selectedDenom, parseInt(next, 10) || 0)
+  }
+
+  const handleSelectRow = (d: number) => {
+    setSelectedDenom(d)
+    setInputBuf(counts[d] > 0 ? String(counts[d]) : '')
+  }
+
+  const total = DENOMS.reduce((s, d) => s + d * (counts[d] || 0), 0)
+
+  const PAD_KEYS = [['7','8','9','C'],['4','5','6',''],['1','2','3','OK'],['0','00','','']]
+
+  return (
+    <div className="flex gap-3">
+      {/* 金種テーブル */}
+      <div className="flex-1 min-w-0">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-700">
+              <th className="px-2 py-1 text-left text-gray-300 font-medium border border-gray-600">金種</th>
+              <th className="px-2 py-1 text-right text-gray-300 font-medium border border-gray-600">枚数</th>
+              <th className="px-2 py-1 text-right text-gray-300 font-medium border border-gray-600">金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {DENOMS.map(d => {
+              const cnt = counts[d] || 0
+              const isSelected = d === selectedDenom
+              return (
+                <tr key={d}
+                  onClick={() => handleSelectRow(d)}
+                  className={`cursor-pointer border border-gray-600 transition-colors ${isSelected ? 'bg-yellow-900/60' : cnt > 0 ? 'bg-gray-800' : 'bg-gray-900 hover:bg-gray-800'}`}>
+                  <td className={`px-2 py-1 text-right font-medium ${isSelected ? 'text-yellow-300' : 'text-gray-300'}`}>
+                    {d.toLocaleString()}
+                  </td>
+                  <td className={`px-2 py-1 text-right ${cnt > 0 ? 'text-white' : 'text-gray-600'}`}>
+                    {isSelected && inputBuf ? inputBuf : (cnt > 0 ? cnt : 0)}
+                  </td>
+                  <td className={`px-2 py-1 text-right ${cnt > 0 ? 'text-white' : 'text-gray-600'}`}>
+                    {(d * cnt).toLocaleString()}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* テンキー */}
+      <div className="shrink-0 w-32 space-y-1.5">
+        {PAD_KEYS.map((row, ri) => (
+          <div key={ri} className="grid grid-cols-4 gap-1">
+            {row.map((k, ki) => {
+              if (!k) return <div key={ki} />
+              const isC = k === 'C'
+              const isOK = k === 'OK'
+              return (
+                <button key={ki}
+                  onClick={() => handlePad(k)}
+                  className={`${isOK ? 'col-span-1 row-span-2' : ''} ${isC ? 'text-red-400 bg-gray-700 hover:bg-gray-600' : isOK ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'} rounded text-sm font-bold h-8 transition-colors active:scale-95`}>
+                  {k}
+                </button>
+              )
+            })}
+          </div>
+        ))}
+        {/* 合計 */}
+        <div className="mt-2 border-t border-gray-600 pt-2 text-center">
+          <div className="text-xs text-gray-400">準備金合計</div>
+          <div className="text-green-400 font-bold text-sm">¥{(total + extraAmount).toLocaleString()}</div>
+          {extraAmount !== 0 && (
+            <div className={`text-[10px] mt-0.5 ${extraAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
+              金種計 ¥{total.toLocaleString()} {extraAmount > 0 ? '+' : ''}¥{extraAmount.toLocaleString()}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────
+// 営業開始モーダル
+// ─────────────────────────────────────────
+function BusinessOpenModal({ onSubmit, onClose, isPending, lastClosedDiff, lastClosingCashDetail }: {
+  onSubmit: (data: { opening_cash: number; opening_cash_detail: Record<string, number>; prev_day_diff: number; operator_name?: string; event_name?: string; notes?: string }) => void
+  onClose: () => void
+  isPending: boolean
+  lastClosedDiff?: number | null
+  lastClosingCashDetail?: Record<string, number> | null
+}) {
+  const [counts, setCounts] = useState<Record<number, number>>({})
+  const initializedRef = useRef(false)
+  useEffect(() => {
+    if (lastClosingCashDetail && !initializedRef.current) {
+      initializedRef.current = true
+      const result: Record<number, number> = {}
+      for (const [k, v] of Object.entries(lastClosingCashDetail)) {
+        result[Number(k)] = v
+      }
+      setCounts(result)
+    }
+  }, [lastClosingCashDetail])
+  const [prevDayDiff, setPrevDayDiff] = useState('')
+  const [prevDaySign, setPrevDaySign] = useState<'+' | '-'>('+')
+  const [operatorName, setOperatorName] = useState('')
+  const [eventName, setEventName] = useState('')
+  const [notes, setNotes] = useState('')
+
+  // 前回終了時の過不足金を自動反映
+  useEffect(() => {
+    if (lastClosedDiff != null && lastClosedDiff !== 0) {
+      setPrevDaySign(lastClosedDiff < 0 ? '-' : '+')
+      setPrevDayDiff(String(Math.abs(lastClosedDiff)))
+    }
+  }, [lastClosedDiff])
+
+  const total = DENOMS.reduce((s, d) => s + d * (counts[d] || 0), 0)
+  const diffAbs = parseInt(prevDayDiff.replace(/,/g, ''), 10) || 0
+  const diff = prevDaySign === '-' ? -diffAbs : diffAbs
+
+  const handleChange = (denom: number, count: number) => {
+    setCounts(prev => ({ ...prev, [denom]: count }))
+  }
+
+  const handleSubmit = () => {
+    const detail: Record<string, number> = {}
+    DENOMS.forEach(d => { if (counts[d] > 0) detail[String(d)] = counts[d] })
+    onSubmit({
+      opening_cash: total,
+      opening_cash_detail: detail,
+      prev_day_diff: diff,
+      operator_name: operatorName || undefined,
+      event_name: eventName || undefined,
+      notes: notes || undefined,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+      <div className="card w-full max-w-2xl space-y-4 my-auto">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white text-lg">営業開始</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* 金種テーブル＋テンキー */}
+        <CashDenomPad counts={counts} onChange={handleChange} extraAmount={diff} />
+
+        {/* その他入力 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">前日過不足金</label>
+            <div className="flex gap-1">
+              <div className="flex rounded-xl overflow-hidden border border-gray-700 shrink-0">
+                <button
+                  onClick={() => setPrevDaySign('+')}
+                  className={`px-3 py-2 text-sm font-bold transition-colors ${prevDaySign === '+' ? 'bg-green-700 text-white' : 'bg-gray-800 text-gray-500 hover:text-gray-300'}`}>
+                  ＋
+                </button>
+                <button
+                  onClick={() => setPrevDaySign('-')}
+                  className={`px-3 py-2 text-sm font-bold transition-colors ${prevDaySign === '-' ? 'bg-red-700 text-white' : 'bg-gray-800 text-gray-500 hover:text-gray-300'}`}>
+                  －
+                </button>
+              </div>
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">¥</span>
+                <input
+                  type="number"
+                  value={prevDayDiff}
+                  onChange={e => setPrevDayDiff(e.target.value)}
+                  className="input-field w-full pl-7"
+                  placeholder="0"
+                  min={0}
+                />
+              </div>
+            </div>
+            {diffAbs > 0 && (
+              <p className={`text-xs mt-1 ${prevDaySign === '+' ? 'text-green-400' : 'text-red-400'}`}>
+                {prevDaySign === '+' ? '過剰' : '不足'} ¥{diffAbs.toLocaleString()}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">担当者名（任意）</label>
+            <input type="text" value={operatorName} onChange={e => setOperatorName(e.target.value)}
+              className="input-field w-full" placeholder="担当者" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">本日企画名（任意）</label>
+            <input type="text" value={eventName} onChange={e => setEventName(e.target.value)}
+              className="input-field w-full" placeholder="例: バースデーイベント" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">メモ（任意）</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              className="input-field w-full" placeholder="引き継ぎ事項など" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={onClose} className="btn-secondary">キャンセル</button>
+          <button onClick={handleSubmit} disabled={isPending}
+            className="bg-green-700 hover:bg-green-600 text-white font-medium px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50">
+            営業開始
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 終了モーダル専用テンキー（selectedDenomを外から制御）
+function CloseModalDenomPad({ counts, onChange, extraAmount = 0, selectedDenom, onSelectDenom, carryover, onCarryoverChange, openingCash, cashSales, onInputBuf, diff = 0 }: {
+  counts: Record<number, number>
+  onChange: (denom: number, count: number) => void
+  extraAmount?: number
+  selectedDenom: number
+  onSelectDenom: (d: number) => void
+  carryover: number
+  onCarryoverChange: (v: number) => void
+  openingCash: number
+  cashSales: number
+  onInputBuf?: (buf: string) => void
+  diff?: number
+}) {
+  const [inputBuf, setInputBuf] = useState('')
+  const total = DENOMS.reduce((s, d) => s + d * (counts[d] || 0), 0)
+
+  const setBuf = (v: string) => { setInputBuf(v); onInputBuf?.(v) }
+
+  const handlePad = (key: string) => {
+    if (key === 'C') { setBuf(''); onChange(selectedDenom, 0); return }
+    if (key === 'OK') {
+      const v = parseInt(inputBuf, 10) || 0
+      onChange(selectedDenom, v)
+      setBuf('')
+      const idx = DENOMS.indexOf(selectedDenom)
+      if (idx < DENOMS.length - 1) onSelectDenom(DENOMS[idx + 1])
+      return
+    }
+    const next = inputBuf + key
+    if (next.length > 5) return
+    setBuf(next)
+  }
+
+  const PAD_KEYS = [['7','8','9','C'],['4','5','6',''],['1','2','3','OK'],['0','00','','']]
+
+  return (
+    <div className="shrink-0 flex flex-col gap-1.5 w-52">
+      {PAD_KEYS.map((row, ri) => (
+        <div key={ri} className="grid grid-cols-4 gap-1.5">
+          {row.map((k, ki) => {
+            if (!k) return <div key={ki} />
+            const isC = k === 'C', isOK = k === 'OK'
+            return (
+              <button key={ki} onClick={() => handlePad(k)}
+                className={`${isC ? 'text-red-400 bg-gray-700 hover:bg-gray-600' : isOK ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-white'} rounded text-base font-bold h-11 transition-colors active:scale-95`}>
+                {k}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+      <div className="border-t border-gray-600 pt-1.5 mt-1 space-y-1.5">
+        {/* 繰越金入力 */}
+        <div>
+          <div className="text-[10px] text-gray-400 mb-0.5">繰越金（差し引き）</div>
+          <div className="relative">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
+            <input
+              type="number" min={0} placeholder="0"
+              value={carryover || ''}
+              onChange={e => onCarryoverChange(parseInt(e.target.value, 10) || 0)}
+              className="input-field w-full pl-6 text-xs py-1"
+            />
+          </div>
+        </div>
+        {/* 準備金合計 = 開始レジ金 + レジ内現金合計 + extraAmount - 繰越金 */}
+        <div className="flex items-start justify-between gap-1 mt-0.5">
+          <div>
+            <div className="text-[10px] text-gray-400">準備金合計</div>
+            <div className={`font-bold text-sm ${(openingCash + cashSales + extraAmount - carryover) < 0 ? 'text-red-400' : 'text-green-400'}`}>
+              ¥{(openingCash + cashSales + extraAmount - carryover).toLocaleString()}
+            </div>
+            <div className="text-[9px] text-gray-500">
+              開始¥{openingCash.toLocaleString()}+現金¥{cashSales.toLocaleString()}
+              {extraAmount !== 0 && <span className="text-red-500"> -¥{Math.abs(extraAmount).toLocaleString()}</span>}
+              {carryover > 0 && <span className="text-orange-500"> -¥{carryover.toLocaleString()}</span>}
+            </div>
+            {inputBuf && (
+              <div className="text-yellow-400 text-xs">{inputBuf} 枚</div>
+            )}
+          </div>
+          {diff !== 0 && (
+            <div className="text-right shrink-0">
+              <div className="text-[10px] text-gray-400">過不足金</div>
+              <div className={`font-bold text-sm ${diff > 0 ? 'text-blue-300' : 'text-red-400'}`}>
+                {diff > 0 ? '+' : ''}¥{diff.toLocaleString()}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────
+// 営業終了モーダル
+// ─────────────────────────────────────────
+const LIQUOR_CATEGORIES = ['田野屋', 'カクヤス', 'その他酒類'] as const
+
+interface ExpenseRow {
+  id: number
+  type: 'liquor' | 'other'
+  category: string   // 酒類: 田野屋/カクヤス/その他酒類, その他: 自由テキスト
+  amount: string
+}
+
+function WithdrawalRow({ w, storeId, onUpdate, onRemove }: {
+  w: { id: number; type: string; name: string; amount: string }
+  storeId: number
+  onUpdate: (field: 'type' | 'name' | 'amount', value: string) => void
+  onRemove: () => void
+}) {
+  const [q, setQ] = useState(w.name)
+  const [open, setOpen] = useState(false)
+  const prevIdRef = useRef(w.id)
+  if (prevIdRef.current !== w.id) {
+    prevIdRef.current = w.id
+    if (q !== w.name) setQ(w.name)
+  }
+
+  const isDailyPay = w.type === '日払い' || w.type === 'ヘルプ日払い'
+
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+    enabled: isDailyPay && !!storeId,
+  })
+  const { data: attendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    enabled: isDailyPay && !!storeId,
+  })
+  const { data: staffAttendance = [] } = useQuery({
+    queryKey: ['staff-attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/staff-attendance/today/${storeId}`).then(r => r.data),
+    enabled: isDailyPay && !!storeId,
+  })
+  // 退勤済み（actual_end あり）のキャストIDセット
+  const clockedOutIds = new Set((attendance as any[]).filter((a: any) => !!a.actual_end).map((a: any) => a.cast_id))
+  const filteredCasts = (castsAll as any[]).filter((c: any) =>
+    c.is_active && clockedOutIds.has(c.id) && (!q || c.stage_name?.includes(q))
+  )
+  // 社員/アルバイト（本日出勤記録あり・名前フィルタ）
+  const filteredStaff = (staffAttendance as any[]).filter((s: any) =>
+    !q || s.name?.includes(q)
+  )
+  const hasDropdown = filteredCasts.length > 0 || filteredStaff.length > 0
+
+  const handleSelect = (name: string) => {
+    setQ(name)
+    onUpdate('name', name)
+    setOpen(false)
+  }
+
+  // isDailyPayでなくなったとき（種別変更）は通常テキスト入力に戻す
+  if (!isDailyPay) {
+    return (
+      <div className="flex gap-1.5 items-center">
+        <select value={w.type} onChange={ev => { onUpdate('type', ev.target.value); setQ(''); onUpdate('name', '') }}
+          className="input-field text-xs py-2 w-32 shrink-0">
+          <option value="">選択...</option>
+          <option value="日払い">日払い</option>
+          <option value="ヘルプ日払い">ヘルプ日払い</option>
+          <option value="その他">その他</option>
+        </select>
+        <input type="text" placeholder="備考（任意）" value={q}
+          onChange={ev => { setQ(ev.target.value) }}
+          onBlur={() => onUpdate('name', q)}
+          className="input-field text-xs flex-1 py-2" />
+        <div className="relative w-28 shrink-0">
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
+          <input type="number" min={0} placeholder="0" value={w.amount}
+            onChange={ev => onUpdate('amount', ev.target.value)}
+            className="input-field w-full pl-6 text-xs py-2" />
+        </div>
+        <button onClick={onRemove} className="text-gray-600 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-1.5 items-start">
+      <select value={w.type} onChange={ev => { onUpdate('type', ev.target.value); setQ(''); onUpdate('name', '') }}
+        className="input-field text-xs py-2 w-32 shrink-0">
+        <option value="">選択...</option>
+        <option value="日払い">日払い</option>
+        <option value="ヘルプ日払い">ヘルプ日払い</option>
+        <option value="その他">その他</option>
+      </select>
+      <div className="flex-1 relative">
+        <input type="text" placeholder="キャスト名または社員名で検索" value={q}
+          onChange={ev => { setQ(ev.target.value); setOpen(true); onUpdate('name', ev.target.value) }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          className="input-field text-xs w-full py-2" />
+        {open && hasDropdown && (
+          <div className="absolute top-full left-0 right-0 z-50 bg-gray-800 border border-gray-600 rounded-lg mt-0.5 max-h-48 overflow-y-auto shadow-xl">
+            {filteredCasts.length > 0 && (
+              <>
+                <div className="px-3 py-1 text-xs text-gray-500 bg-gray-900/60 font-medium">キャスト</div>
+                {filteredCasts.map((c: any) => (
+                  <button key={c.id} onMouseDown={() => handleSelect(c.stage_name)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700 transition-colors">
+                    {c.stage_name}
+                    {c.rank && <span className="text-gray-500 ml-1.5">{c.rank}</span>}
+                  </button>
+                ))}
+              </>
+            )}
+            {filteredStaff.length > 0 && (
+              <>
+                <div className="px-3 py-1 text-xs text-gray-500 bg-gray-900/60 font-medium">社員/アルバイト</div>
+                {filteredStaff.map((s: any) => (
+                  <button key={s.id} onMouseDown={() => handleSelect(s.name)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700 transition-colors">
+                    {s.name}
+                    {s.is_absent && <span className="text-red-400 ml-1.5 text-xs">当欠</span>}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="relative w-28 shrink-0">
+        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
+        <input type="number" min={0} placeholder="0" value={w.amount}
+          onChange={ev => onUpdate('amount', ev.target.value)}
+          className="input-field w-full pl-6 text-xs py-2" />
+      </div>
+      <button onClick={onRemove} className="text-gray-600 hover:text-red-400 shrink-0 mt-2"><X className="w-3.5 h-3.5" /></button>
+    </div>
+  )
+}
+
+function BusinessCloseModal({ storeId, session, openTicketCount, salesTotal, cashSales, cardTickets, codeTickets, expenses, onExpensesChange, withdrawals, onWithdrawalsChange, notes, onNotesChange, onSubmit, onClose, isPending }: {
+  storeId: number
+  session: any
+  openTicketCount: number
+  salesTotal: number
+  cashSales: number
+  cardTickets: any[]
+  codeTickets: any[]
+  expenses: ExpenseRow[]
+  onExpensesChange: (v: ExpenseRow[]) => void
+  withdrawals: { id: number; type: string; name: string; amount: string }[]
+  onWithdrawalsChange: (v: { id: number; type: string; name: string; amount: string }[]) => void
+  notes: string
+  onNotesChange: (v: string) => void
+  onSubmit: (closing_cash: number, closing_cash_detail: Record<string, number>, notes?: string, cash_diff?: number | null, expenses_detail?: any, cash_sales?: number, card_sales?: number, code_sales?: number) => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  const [counts, setCounts] = useState<Record<number, number>>({})
+  const [selectedDenom, setSelectedDenom] = useState<number>(10000)
+  const [inputBuf, setInputBuf] = useState('')
+  const [carryover, setCarryover] = useState(0)
+  const [showPaymentModal, setShowPaymentModal] = useState<'card' | 'code' | null>(null)
+  const [showCarryoverConfirm, setShowCarryoverConfirm] = useState(false)
+  const [operatorName, setOperatorName] = useState('')
+  const setExpenses = onExpensesChange
+  const setWithdrawals = onWithdrawalsChange
+  const setNotes = onNotesChange
+  // 既存の id より大きい値から始めることで、モーダル再オープン時の id 衝突を防ぐ
+  const maxExistingId = Math.max(
+    0,
+    ...expenses.map(e => e.id),
+    ...withdrawals.map(w => w.id),
+  )
+  const nextId = useRef(Math.max(1000, maxExistingId))
+
+  const total = DENOMS.reduce((s, d) => s + d * (counts[d] || 0), 0)
+  const openedTime = session.opened_at ? new Date(session.opened_at + (session.opened_at.endsWith('Z') ? '' : 'Z')) : null
+
+  // その他経費＋出金名目を差し引く
+  const otherExpenseTotal = expenses
+    .filter(e => e.type === 'other')
+    .reduce((s, e) => s + (parseInt(e.amount, 10) || 0), 0)
+  const withdrawalTotal = withdrawals.reduce((s, w) => s + (parseInt(w.amount, 10) || 0), 0)
+  const deductTotal = otherExpenseTotal + withdrawalTotal
+  // 準備金合計 = 開始レジ金 + レジ内現金合計(cashSales) - 経費出金 - 繰越金
+  const expectedCash = (session.opening_cash || 0) + cashSales - deductTotal - carryover
+  const diff = total - expectedCash  // 金種合計 vs 準備金合計
+
+  const updateWithdrawal = (id: number, field: 'type' | 'name' | 'amount', value: string) => {
+    setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, [field]: value } : w))
+  }
+
+  const addWithdrawal = () => {
+    nextId.current++
+    setWithdrawals(prev => [...prev, { id: nextId.current, type: '', name: '', amount: '' }])
+  }
+
+  const removeWithdrawal = (id: number) => setWithdrawals(prev => prev.filter(w => w.id !== id))
+
+  const updateExpense = (id: number, field: 'category' | 'amount', value: string) => {
+    setExpenses(prev => {
+      const updated = prev.map(e => e.id === id ? { ...e, [field]: value } : e)
+      // その他経費: 最後の行に何か入力されたら新しい空行を追加
+      const lastOther = [...updated].reverse().find(e => e.type === 'other')
+      if (lastOther && (lastOther.category || lastOther.amount)) {
+        const allOthers = updated.filter(e => e.type === 'other')
+        const last = allOthers[allOthers.length - 1]
+        if (last.category || last.amount) {
+          nextId.current++
+          return [...updated, { id: nextId.current, type: 'other', category: '', amount: '' }]
+        }
+      }
+      return updated
+    })
+  }
+
+  const updateLiquorExpense = (id: number, field: 'category' | 'amount', value: string) => {
+    setExpenses(prev => {
+      const updated = prev.map(e => e.id === id ? { ...e, [field]: value } : e)
+      // 酒類経費: 最後の行に何か入力されたら新しい空行を追加
+      const allLiquors = updated.filter(e => e.type === 'liquor')
+      const last = allLiquors[allLiquors.length - 1]
+      if (last.amount) {
+        nextId.current++
+        return [...updated, { id: nextId.current, type: 'liquor', category: '田野屋', amount: '' }]
+      }
+      return updated
+    })
+  }
+
+  const removeExpense = (id: number) => {
+    setExpenses(prev => prev.filter(e => e.id !== id))
+  }
+
+  const doSubmit = (cashDiff: number | null) => {
+    const detail: Record<string, number> = {}
+    DENOMS.forEach(d => { if (counts[d] > 0) detail[String(d)] = counts[d] })
+    // 経費・出金をまとめてJSON化
+    const expensesPayload = {
+      liquor: expenses.filter(e => e.type === 'liquor' && e.amount).map(e => ({ category: e.category, amount: parseInt(e.amount, 10) || 0 })),
+      other: expenses.filter(e => e.type === 'other' && (e.category || e.amount)).map(e => ({ category: e.category, amount: parseInt(e.amount, 10) || 0 })),
+      withdrawals: withdrawals
+        .filter(w => w.amount && w.type)
+        .map(w => ({
+          type: w.type,
+          person_name: w.name || '',
+          name: w.name ? `${w.type}（${w.name}）` : w.type,
+          amount: parseInt(w.amount, 10) || 0,
+        })),
+    }
+    onSubmit(total, detail, notes || undefined, cashDiff, expensesPayload, cashSales, cardSales, codeSales)
+  }
+
+  // 決済別内訳（各チケットの実際の決済金額フィールドで集計）
+  const cardSales = cardTickets.reduce((s: number, t: any) => s + (t.card_amount || t.grand_total || 0), 0)
+  const codeSales = codeTickets.reduce((s: number, t: any) => s + (t.code_amount || t.grand_total || 0), 0)
+
+  const [showOpenTicketBlock, setShowOpenTicketBlock] = useState(false)
+
+  const handleSubmit = () => {
+    if (openTicketCount > 0) {
+      setShowOpenTicketBlock(true)
+      return
+    }
+    if (diff !== 0) {
+      setShowCarryoverConfirm(true)
+      return
+    }
+    doSubmit(null)
+  }
+
+  const liquorExpenses = expenses.filter(e => e.type === 'liquor')
+  const otherExpenses = expenses.filter(e => e.type === 'other')
+
+  return (
+    <div className="fixed inset-0 bg-gray-950 z-50 flex flex-col">
+      {/* ヘッダー＋サマリー（1行） */}
+      <div className="shrink-0 flex items-center gap-4 px-4 py-2 border-b border-gray-800 bg-gray-900/60">
+        <h3 className="font-bold text-white text-base shrink-0">営業日報</h3>
+        <div className="flex items-center gap-4 text-xs flex-1 min-w-0">
+          <span className="text-gray-500 shrink-0">
+            開始 <span className="text-white font-medium">
+              {openedTime ? `${toBarHour(openedTime.getHours()).toString().padStart(2,'0')}:${openedTime.getMinutes().toString().padStart(2,'0')}` : '—'}
+            </span>
+          </span>
+          <span className="text-gray-500 shrink-0">開始レジ金 <span className="text-white font-medium">¥{(session.opening_cash || 0).toLocaleString()}</span></span>
+          <span className="text-gray-500 shrink-0">本日売上 <span className="text-green-400 font-bold">¥{salesTotal.toLocaleString()}</span></span>
+          <span className="text-gray-500 shrink-0">レジ内現金合計 <span className="text-yellow-400 font-bold">¥{cashSales.toLocaleString()}</span></span>
+          {openTicketCount > 0 && (
+            <span className="text-red-400 font-bold shrink-0">⚠ 未会計 {openTicketCount} 卓</span>
+          )}
+        </div>
+        <button onClick={onClose} className="shrink-0 text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1 rounded-lg transition-colors">戻る</button>
+      </div>
+
+      {/* メインコンテンツ 2カラム */}
+      <div className="flex-1 min-h-0 flex">
+        {/* 左：金種テーブル */}
+        <div className="w-1/2 border-r border-gray-800 flex flex-col px-3 pt-2 pb-2 gap-1.5">
+          <div className="shrink-0">
+            <label className="text-xs text-gray-400 mb-0.5 block">担当者名</label>
+            <input type="text" value={operatorName} onChange={e => setOperatorName(e.target.value)}
+              className="input-field w-full text-sm py-1.5" placeholder="担当者" />
+          </div>
+          <div className="text-xs text-gray-400 font-medium shrink-0">終了レジ金（金種別入力）</div>
+          <div className="flex-1 min-h-0 flex gap-2">
+            {/* 金種テーブル */}
+            <div className="flex-1 min-w-0">
+              <table className="w-full text-xs border-collapse h-full table-fixed">
+                <colgroup>
+                  <col style={{width:'72px'}} />
+                  <col style={{width:'44px'}} />
+                  <col style={{width:'110px'}} />
+                </colgroup>
+                <thead>
+                  <tr className="bg-gray-700">
+                    <th className="px-1 py-0.5 text-right text-gray-300 font-medium border border-gray-600">金種</th>
+                    <th className="px-1 py-0.5 text-right text-gray-300 font-medium border border-gray-600">枚数</th>
+                    <th className="px-1 py-0.5 text-right text-gray-300 font-medium border border-gray-600">金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DENOMS.map(d => {
+                    const cnt = counts[d] || 0
+                    const isSel = d === selectedDenom
+                    return (
+                      <tr key={d} onClick={() => setSelectedDenom(d)}
+                        className={`border border-gray-600 cursor-pointer transition-colors ${isSel ? 'bg-yellow-900/50' : cnt > 0 ? 'bg-gray-800' : 'bg-gray-900 hover:bg-gray-800'}`}>
+                        <td className={`px-1 py-0.5 text-right font-medium leading-5 ${isSel ? 'text-yellow-300' : 'text-gray-300'}`}>{d.toLocaleString()}</td>
+                        <td className="px-1 py-0.5 text-center leading-5">
+                          {isSel && inputBuf
+                            ? <span className="text-yellow-400 font-bold">{inputBuf}</span>
+                            : cnt > 0 ? <span className="text-white">{cnt}</span> : <span className="text-gray-700">0</span>}
+                        </td>
+                        <td className="px-1 py-0.5 text-right text-white leading-5">{cnt > 0 ? (d * cnt).toLocaleString() : <span className="text-gray-700">0</span>}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* テンキー */}
+            <CloseModalDenomPad
+              counts={counts}
+              onChange={(d, v) => setCounts(prev => ({ ...prev, [d]: v }))}
+              extraAmount={-deductTotal}
+              selectedDenom={selectedDenom}
+              onSelectDenom={setSelectedDenom}
+              carryover={carryover}
+              onCarryoverChange={setCarryover}
+              openingCash={session.opening_cash || 0}
+              cashSales={cashSales}
+              onInputBuf={setInputBuf}
+              diff={diff}
+            />
+          </div>
+          {diff === 0 && (
+            <div className="shrink-0 flex items-center gap-2 py-1">
+              <span className="text-2xl font-black text-yellow-400 tracking-widest drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]">PERFECT!</span>
+              <span className="text-xs text-green-400">準備金合計との差: ±¥0</span>
+            </div>
+          )}
+
+          {/* カード/コード会計ボタン */}
+          {(cardTickets.length > 0 || codeTickets.length > 0) && (
+            <div className="shrink-0 border-t border-gray-800 pt-1.5 flex gap-2">
+              {cardTickets.length > 0 && (
+                <button onClick={() => setShowPaymentModal('card')}
+                  className="flex-1 bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/50 rounded-lg px-2 py-1.5 text-left transition-colors">
+                  <div className="text-xs text-blue-400 font-medium">カード会計 {cardTickets.length}件</div>
+                  <div className="text-blue-300 font-bold text-xs">¥{cardTickets.reduce((s: number, t: any) => s + (t.card_amount || 0), 0).toLocaleString()}</div>
+                </button>
+              )}
+              {codeTickets.length > 0 && (
+                <button onClick={() => setShowPaymentModal('code')}
+                  className="flex-1 bg-purple-900/30 hover:bg-purple-900/50 border border-purple-700/50 rounded-lg px-2 py-1.5 text-left transition-colors">
+                  <div className="text-xs text-purple-400 font-medium">コード決済 {codeTickets.length}件</div>
+                  <div className="text-purple-300 font-bold text-xs">¥{codeTickets.reduce((s: number, t: any) => s + (t.code_amount || 0), 0).toLocaleString()}</div>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 右：経費・出金・その他 */}
+        <div className="w-1/2 flex flex-col overflow-y-auto p-3 gap-3">
+          {/* 酒類経費 */}
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5 font-medium">酒類経費</div>
+            <div className="space-y-1.5">
+              {liquorExpenses.map((e, i) => (
+                <div key={e.id} className="flex gap-1.5 items-center">
+                  <select value={e.category} onChange={ev => updateLiquorExpense(e.id, 'category', ev.target.value)}
+                    className="input-field text-xs flex-1 py-2">
+                    {LIQUOR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <div className="relative w-28 shrink-0">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
+                    <input type="number" min={0} placeholder="0" value={e.amount}
+                      onChange={ev => updateLiquorExpense(e.id, 'amount', ev.target.value)}
+                      className="input-field w-full pl-6 text-xs py-2" />
+                  </div>
+                  {liquorExpenses.length > 1 && i < liquorExpenses.length - 1 && (
+                    <button onClick={() => removeExpense(e.id)} className="text-gray-600 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* その他経費 */}
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5 font-medium">その他経費 <span className="text-orange-400">（差し引き）</span></div>
+            <div className="space-y-1.5">
+              {otherExpenses.map((e, i) => (
+                <div key={e.id} className="flex gap-1.5 items-center">
+                  <input type="text" placeholder="経費内容" value={e.category}
+                    onChange={ev => updateExpense(e.id, 'category', ev.target.value)}
+                    className="input-field text-xs flex-1 py-2" />
+                  <div className="relative w-28 shrink-0">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">¥</span>
+                    <input type="number" min={0} placeholder="0" value={e.amount}
+                      onChange={ev => updateExpense(e.id, 'amount', ev.target.value)}
+                      className="input-field w-full pl-6 text-xs py-2" />
+                  </div>
+                  {otherExpenses.length > 1 && i < otherExpenses.length - 1 && (
+                    <button onClick={() => removeExpense(e.id)} className="text-gray-600 hover:text-red-400 shrink-0"><X className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 出金名目 */}
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5 font-medium">出金名目 <span className="text-orange-400">（差し引き）</span></div>
+            <div className="space-y-1.5">
+              {withdrawals.map((w) => (
+                <WithdrawalRow
+                  key={w.id}
+                  w={w}
+                  storeId={storeId}
+                  onUpdate={(field, value) => updateWithdrawal(w.id, field, value)}
+                  onRemove={() => removeWithdrawal(w.id)}
+                />
+              ))}
+              <button onClick={addWithdrawal} className="text-xs text-gray-400 hover:text-white mt-1">＋ 追加</button>
+            </div>
+          </div>
+
+          {/* メモ */}
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">メモ（任意）</label>
+            <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
+              className="input-field w-full text-sm" placeholder="引き継ぎ事項など" />
+          </div>
+        </div>
+      </div>
+
+      {/* カード/コード会計詳細モーダル */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+          <div className="card w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="flex justify-between items-center mb-3 shrink-0">
+              <h4 className="font-bold text-white">
+                {showPaymentModal === 'card' ? 'カード会計' : 'コード決済'}一覧
+              </h4>
+              <button onClick={() => setShowPaymentModal(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1">
+              {(showPaymentModal === 'card' ? cardTickets : codeTickets).map((t: any) => {
+                const amt = showPaymentModal === 'card' ? (t.card_amount || 0) : (t.code_amount || 0)
+                const endedAt = t.ended_at ? new Date(t.ended_at.endsWith('Z') ? t.ended_at : t.ended_at + 'Z') : null
+                return (
+                  <div key={t.id} className="flex justify-between items-center bg-gray-800 rounded-lg px-3 py-2">
+                    <div>
+                      <span className="font-bold text-white text-sm">{t.table_no || '—'}</span>
+                      {endedAt && (
+                        <span className="text-gray-500 text-xs ml-2">
+                          {toBarHour(endedAt.getHours()).toString().padStart(2,'0')}:{endedAt.getMinutes().toString().padStart(2,'0')}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`font-bold text-sm ${showPaymentModal === 'card' ? 'text-blue-400' : 'text-purple-400'}`}>
+                      ¥{amt.toLocaleString()}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="border-t border-gray-700 pt-3 mt-3 shrink-0 flex justify-between items-center">
+              <span className="text-gray-400 text-sm">合計</span>
+              <span className={`font-bold text-lg ${showPaymentModal === 'card' ? 'text-blue-400' : 'text-purple-400'}`}>
+                ¥{(showPaymentModal === 'card'
+                  ? cardTickets.reduce((s: number, t: any) => s + (t.card_amount || 0), 0)
+                  : codeTickets.reduce((s: number, t: any) => s + (t.code_amount || 0), 0)
+                ).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 未会計伝票ブロックポップアップ */}
+      {showOpenTicketBlock && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-[70]">
+          <div className="card max-w-sm w-full mx-4 space-y-4">
+            <h4 className="font-bold text-white text-base">営業終了できません</h4>
+            <p className="text-gray-300 text-sm leading-relaxed">
+              未会計の伝票が <span className="text-yellow-400 font-bold">{openTicketCount}卓</span> 残っています。<br />
+              すべての伝票を会計してから営業終了してください。
+            </p>
+            <div className="flex justify-end">
+              <button onClick={() => setShowOpenTicketBlock(false)} className="btn-primary px-6">OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 過不足金繰越確認ポップアップ */}
+      {showCarryoverConfirm && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-[70]">
+          <div className="card max-w-sm w-full mx-4 space-y-4">
+            <h4 className="font-bold text-white text-center text-base">過不足金の繰越確認</h4>
+            <p className="text-gray-300 text-sm text-center leading-relaxed">
+              過不足金{' '}
+              <span className={`font-bold text-base ${diff > 0 ? 'text-blue-300' : 'text-red-400'}`}>
+                {diff > 0 ? '+' : ''}¥{diff.toLocaleString()}
+              </span>{' '}
+              を翌営業日に繰り越しますか？
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => { setShowCarryoverConfirm(false); doSubmit(null) }} className="btn-secondary">
+                キャンセル
+              </button>
+              <button onClick={() => { setShowCarryoverConfirm(false); doSubmit(diff) }} className="btn-primary">
+                はい
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* フッター */}
+      <div className="shrink-0 grid grid-cols-2 gap-3 px-4 py-3 border-t border-gray-800">
+        <button onClick={onClose} className="btn-secondary">キャンセル</button>
+        <button onClick={handleSubmit} disabled={isPending} className="btn-danger text-base py-3">
+          営業終了
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// D時間: 種別×キャストごとに色分けして表示
+function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared }: {
+  lastDrinkTimes: any; now: number; ticketId?: number; onCleared?: () => void
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null) // key
+  // key -> clearedAt (ms)。last_at がクリア時刻より新しければ再表示する
+  const [clearedKeys, setClearedKeys] = useState<Map<string, number>>(new Map())
+
   if (!lastDrinkTimes) return null
 
-  const ordered = Object.entries(DRINK_COLORS).filter(([type]) => lastDrinkTimes[type] !== null)
-  if (ordered.length === 0) return null
+  const entries: { key: string; label: string; color: string; bg: string; lastAt: string; castId: number; drinkType: string }[] = []
+  for (const [type, cfg] of Object.entries(DRINK_COLORS)) {
+    const raw = lastDrinkTimes[type]
+    if (!Array.isArray(raw) || raw.length === 0) continue
+    for (const c of raw) {
+      if (!c || typeof c !== 'object' || !c.last_at) continue
+      const label = c.cast_name ? `${cfg.label}${c.cast_name}` : cfg.label
+      entries.push({ key: `${type}-${c.cast_id ?? 0}`, label, color: cfg.color, bg: cfg.bg, lastAt: c.last_at, castId: c.cast_id, drinkType: type })
+    }
+  }
+
+  if (entries.length === 0) return null
+
+  const handleClear = (e: { castId: number; drinkType: string; key: string }) => {
+    if (!ticketId) return
+    // 即座にローカルで非表示（クリア時刻を記録）
+    setClearedKeys(prev => new Map([...prev, [e.key, Date.now()]]))
+    setConfirming(null)
+    apiClient.post(`/api/tickets/${ticketId}/drink-clear`, { cast_id: e.castId, drink_type: e.drinkType })
+      .then(() => onCleared?.())
+  }
+
+  const isHidden = (e: { key: string; lastAt: string }) => {
+    const clearedAt = clearedKeys.get(e.key)
+    if (clearedAt === undefined) return false
+    // last_at がクリア時刻より新しい（新規注文あり）→ 再表示
+    const lastAtMs = new Date(e.lastAt.endsWith('Z') ? e.lastAt : e.lastAt + 'Z').getTime()
+    return lastAtMs <= clearedAt
+  }
 
   return (
     <div className="flex gap-2 flex-wrap">
-      {ordered.map(([type, cfg]) => {
-        const elapsed = calcElapsed(lastDrinkTimes[type], now)
+      {entries.filter(e => !isHidden(e)).map(e => {
+        const elapsed = calcElapsed(e.lastAt, now)
+        if (confirming === e.key) {
+          return (
+            <span key={e.key} className="flex items-center gap-1 text-xs">
+              <span className={`${e.bg} ${e.color} px-1 rounded text-xs`}>{e.label}</span>
+              <button onClick={() => handleClear(e)} className="text-green-400 font-bold px-1 hover:text-green-300">完了</button>
+              <button onClick={() => setConfirming(null)} className="text-gray-500 px-1 hover:text-gray-300">×</button>
+            </span>
+          )
+        }
         return (
-          <span key={type} className="flex items-center gap-1 text-xs font-mono">
-            <span className={`${cfg.bg} ${cfg.color} px-1 rounded text-xs`}>{cfg.label}</span>
-            <span className={cfg.color}>{fmtTime(elapsed)}</span>
+          <span key={e.key} className="flex items-center gap-1 text-xs font-mono cursor-pointer"
+            onClick={() => setConfirming(e.key)}>
+            <span className={`${e.bg} ${e.color} px-1 rounded text-xs`}>{e.label}</span>
+            <span className={e.color}>{fmtTime(elapsed)}</span>
           </span>
         )
       })}
@@ -206,7 +1460,231 @@ function DrinkTimers({ lastDrinkTimes, now }: { lastDrinkTimes: any; now: number
   )
 }
 
-function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number; onClick: () => void }) {
+const PAYMENT_LABELS: Record<string, string> = { cash: '現金', card: 'カード', code: 'コード', mixed: '混合' }
+
+function OrderLogsView({ storeId }: { storeId: number }) {
+  const qc = useQueryClient()
+  const [selectedLog, setSelectedLog] = useState<any | null>(null)
+  const { data: logs = [], isLoading } = useQuery({
+    queryKey: ['order-logs', storeId],
+    queryFn: () => apiClient.get('/api/tickets/logs', { params: { store_id: storeId } }).then(r => r.data),
+    enabled: !!storeId,
+    refetchInterval: 10000,
+  })
+
+  const ACTION_LABELS: Record<string, string> = {
+    cancel: '削除',
+    update_quantity: '数量変更',
+    change_start_time: '時間変更',
+  }
+
+  const actionColor = (action: string) =>
+    action === 'cancel' ? 'bg-red-900/60 text-red-400'
+    : action === 'change_start_time' ? 'bg-blue-900/60 text-blue-400'
+    : 'bg-yellow-900/60 text-yellow-400'
+
+  return (
+    <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-gray-500">削除・変更履歴（直近200件）</p>
+          <button onClick={() => qc.invalidateQueries({ queryKey: ['order-logs', storeId] })}
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded-lg transition-colors">
+            更新
+          </button>
+        </div>
+        {isLoading && <p className="text-gray-500 text-sm">読み込み中...</p>}
+        {!isLoading && logs.length === 0 && (
+          <p className="text-center text-gray-500 py-16">履歴はありません</p>
+        )}
+        <div className="space-y-1">
+          {logs.map((log: any) => (
+            <div key={log.id}
+              onClick={() => setSelectedLog(log)}
+              className="flex items-center gap-3 px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-sm cursor-pointer hover:border-gray-600 hover:bg-gray-800/60 transition-colors">
+              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${actionColor(log.action)}`}>
+                {ACTION_LABELS[log.action] ?? log.action}
+              </span>
+              <span className="text-gray-400 text-xs shrink-0">{log.table_no ?? '—'}</span>
+              <span className="text-white truncate max-w-[200px]">{log.item_name}</span>
+              {log.action === 'cancel' ? (
+                <span className="text-red-400 text-xs shrink-0">¥{(log.old_amount ?? 0).toLocaleString()}</span>
+              ) : log.action === 'change_start_time' ? (
+                <span className="text-blue-400 text-xs shrink-0">—</span>
+              ) : (
+                <span className="text-yellow-400 text-xs shrink-0">{log.old_quantity}→{log.new_quantity}</span>
+              )}
+              <span className="text-gray-600 text-xs shrink-0">{log.operator_name || log.changed_by_name || '—'}</span>
+              {log.reason && <span className="text-gray-500 text-xs italic truncate max-w-[160px]">「{log.reason}」</span>}
+              <span className="text-gray-600 text-xs shrink-0 ml-auto">
+                {log.changed_at ? new Date(log.changed_at + 'Z').toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 詳細モーダル */}
+      {selectedLog && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[300] p-4"
+          onClick={() => setSelectedLog(null)}>
+          <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-sm shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-night-600">
+              <span className={`text-sm font-bold px-2.5 py-1 rounded-full ${actionColor(selectedLog.action)}`}>
+                {ACTION_LABELS[selectedLog.action] ?? selectedLog.action}
+              </span>
+              <button onClick={() => setSelectedLog(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              {[
+                { label: '卓番', value: selectedLog.table_no ?? '—' },
+                { label: '品目', value: selectedLog.item_name ?? '—' },
+                selectedLog.action === 'cancel'
+                  ? { label: '金額', value: `¥${(selectedLog.old_amount ?? 0).toLocaleString()}` }
+                  : selectedLog.action === 'update_quantity'
+                  ? { label: '数量変更', value: `${selectedLog.old_quantity} → ${selectedLog.new_quantity}` }
+                  : null,
+                selectedLog.action === 'cancel'
+                  ? { label: '数量', value: `${selectedLog.old_quantity}` }
+                  : null,
+                { label: '担当者', value: selectedLog.operator_name || selectedLog.changed_by_name || '—' },
+                { label: '理由', value: selectedLog.reason || '—' },
+                { label: '日時', value: selectedLog.changed_at ? new Date(selectedLog.changed_at + 'Z').toLocaleString('ja-JP') : '—' },
+              ].filter(Boolean).map((row: any) => (
+                <div key={row.label} className="flex gap-3">
+                  <span className="text-gray-500 text-sm w-20 shrink-0">{row.label}</span>
+                  <span className="text-white text-sm break-all">{row.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail: (id: number) => void }) {
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10)
+  })
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+
+  const { data: closed = [], isLoading } = useQuery({
+    queryKey: ['tickets', storeId, 'closed', dateFrom, dateTo],
+    queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: true } }).then(r => r.data),
+    enabled: !!storeId,
+  })
+
+  const filtered = (closed as any[]).filter(t => {
+    const ms = toUtcMs(t.ended_at || t.started_at)
+    if (!ms) return true
+    const d = new Date(ms).toISOString().slice(0, 10)
+    return d >= dateFrom && d <= dateTo
+  }).sort((a: any, b: any) => {
+    const ma = toUtcMs(b.ended_at || b.started_at) ?? 0
+    const mb = toUtcMs(a.ended_at || a.started_at) ?? 0
+    return ma - mb
+  })
+
+  const totalAmount = filtered.reduce((s: number, t: any) => s + calcTicketGrandTotal(t), 0)
+
+  return (
+    <div className="flex-1 overflow-y-auto min-h-0">
+      {/* フィルター */}
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field text-sm" />
+        <span className="text-gray-500">〜</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field text-sm" />
+        <span className="text-gray-400 text-sm ml-2">{filtered.length}件</span>
+        <span className="text-white font-bold text-sm">合計 ¥{totalAmount.toLocaleString()}</span>
+      </div>
+
+      {isLoading && <div className="text-gray-500 text-sm py-8 text-center">読み込み中...</div>}
+
+      <div className="space-y-2">
+        {filtered.map((ticket: any) => {
+          const endMs = toUtcMs(ticket.ended_at)
+          const startMs = toUtcMs(ticket.started_at)
+          const endDate = endMs ? new Date(endMs) : null
+          const startDate = startMs ? new Date(startMs) : null
+          const isExpanded = expandedId === ticket.id
+          return (
+            <div key={ticket.id} className="card">
+              <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : ticket.id)}>
+                {/* 日付・時刻 */}
+                <div className="shrink-0 text-xs text-gray-500 w-24">
+                  {endDate ? (
+                    <>
+                      <div>{endDate.toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit' })}</div>
+                      <div>{toBarHour(endDate.getHours()).toString().padStart(2,'0')}:{endDate.getMinutes().toString().padStart(2,'0')} 退店</div>
+                    </>
+                  ) : '—'}
+                </div>
+                {/* 卓・プラン */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-white">{ticket.table_no || '—'}</span>
+                    {ticket.visit_type && <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{ticket.visit_type}</span>}
+                    {ticket.plan_type && <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>{ticket.plan_type === 'premium' ? 'P' : 'S'}</span>}
+                    <span className="text-xs text-gray-500">{ticket.guest_count}名</span>
+                    {ticket.visit_motivation && <span className="badge text-xs bg-teal-900/40 text-teal-400">{ticket.visit_motivation}</span>}
+                    {ticket.customer_name && <span className="text-xs text-gray-400 truncate">{ticket.customer_name}</span>}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {startDate ? `${toBarHour(startDate.getHours()).toString().padStart(2,'0')}:${startDate.getMinutes().toString().padStart(2,'0')} 入店` : ''}
+                    {ticket.extension_count > 0 && <span className="ml-2">延長{ticket.extension_count}回</span>}
+                  </div>
+                </div>
+                {/* 金額・支払方法 */}
+                <div className="shrink-0 text-right">
+                  <div className="font-bold text-pink-400">¥{calcTicketGrandTotal(ticket).toLocaleString()}</div>
+                  <div className="text-xs text-gray-500">
+                    {PAYMENT_LABELS[ticket.payment_method] ?? ticket.payment_method ?? '—'}
+                    {(ticket.order_items || []).some((i: any) => i.item_name?.startsWith('先会計') && !i.canceled_at) && (
+                      <span className="ml-1 text-orange-400">+先会計</span>
+                    )}
+                  </div>
+                </div>
+                <span className="text-gray-600 text-xs ml-1">{isExpanded ? '▲' : '▼'}</span>
+              </div>
+
+              {/* 展開: 注文明細 */}
+              {isExpanded && (
+                <div className="mt-3 border-t border-gray-700 pt-3 space-y-3">
+                  <div className="grid grid-cols-3 gap-1 text-xs">
+                    {(ticket.order_items || []).filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0)).map((item: any) => (
+                      <div key={item.id} className={`flex justify-between px-2 py-1 rounded ${item.canceled_at ? 'opacity-40' : 'bg-gray-800'}`}>
+                        <span className={`truncate ${item.canceled_at ? 'line-through text-gray-500' : 'text-gray-300'}`}>{item.item_name || item.item_type} ×{item.quantity}</span>
+                        <span className="text-gray-400 shrink-0 ml-1">¥{item.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => onDetail(ticket.id)}
+                    className="text-xs text-pink-400 hover:text-pink-300 transition-colors">
+                    詳細を開く →
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+        {!isLoading && filtered.length === 0 && (
+          <div className="text-center text-gray-500 py-16">該当する会計済み伝票はありません</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal }: {
+  ticket: any; storeId: number; onClick: () => void
+  onOpenCustomerModal: (ticket: any) => void
+  onOpenCastModal: (ticket: any) => void
+}) {
+  const qc = useQueryClient()
   const now = useNow()
   const elapsed = calcElapsed(ticket.set_started_at || ticket.started_at, now)
   const setElapsed = calcSetElapsed(ticket, now)
@@ -214,18 +1692,47 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
   const startedAtMs = toUtcMs(ticket.started_at)
   const startedAt = startedAtMs ? new Date(startedAtMs) : new Date()
 
+  const [showEditBtn, setShowEditBtn] = useState(false)
+  const [editingTime, setEditingTime] = useState(false)
+  const [editHour, setEditHour] = useState(toBarHour(startedAt.getHours()))
+  const [editMin, setEditMin] = useState(startedAt.getMinutes())
+  const [showLog, setShowLog] = useState(false)
+
+  const saveTime = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const base = new Date(startedAt)
+    base.setHours(fromBarHour(editHour), editMin, 0, 0)
+    const utcIso = base.toISOString()
+    apiClient.patch(`/api/tickets/${ticket.id}`, { started_at: utcIso }).then(() => {
+      qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+      qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+    })
+    setEditingTime(false)
+    setShowEditBtn(false)
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className="card text-left flex flex-col hover:border-primary-600/50 transition-colors active:scale-95 shrink-0"
-      style={{ width: '220px', minHeight: '480px' }}
+    <div
+      onClick={e => { if (!(e.target as HTMLElement).closest('[data-nopropagate]')) onClick() }}
+      className="card text-left flex flex-col hover:border-primary-600/50 transition-colors shrink-0 cursor-pointer"
+      style={{ width: '220px' }}
     >
-      {/* 卓番・経過時間 */}
+      {/* 卓番・経過時間・ログボタン */}
       <div className="flex justify-between items-start mb-1">
         <p className="text-lg font-bold text-white">{ticket.table_no || '—'}</p>
-        <div className="flex items-center gap-1 font-mono text-sm">
-          <span className="text-gray-500 text-xs">経過</span>
-          <span className="text-green-400">{fmtTime(elapsed)}</span>
+        <div className="flex items-center gap-2">
+          <button
+            data-nopropagate
+            onClick={e => { e.stopPropagation(); setShowLog(true) }}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 rounded-lg px-2 py-0.5 transition-colors shrink-0"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            ログ
+          </button>
+          <div className="flex items-center gap-1 font-mono text-sm">
+            <span className="text-gray-500 text-xs">経過</span>
+            <span className="text-green-400">{fmtTime(elapsed)}</span>
+          </div>
         </div>
       </div>
 
@@ -239,13 +1746,26 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
             {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
           </span>
         )}
-        {ticket.guest_count > 0 && <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名</span>}
+        {ticket.guest_count > 0 && <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>}
+        {ticket.visit_motivation && (
+          <span className="badge text-xs bg-teal-900/40 text-teal-400">
+            {ticket.visit_motivation}
+            {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
+            {ticket.motivation_note && `／${ticket.motivation_note}`}
+          </span>
+        )}
       </div>
 
       {/* 顧客・キャスト */}
       <div className="flex flex-col gap-0.5 text-xs mb-2">
-        <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
-        <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
+        <button onClick={e => { e.stopPropagation(); onOpenCustomerModal(ticket) }}
+          className="w-fit text-left text-gray-400 hover:text-white transition-colors underline decoration-dotted">
+          {ticket.customer_name || '顧客未設定'}
+        </button>
+        <button onClick={e => { e.stopPropagation(); onOpenCastModal(ticket) }}
+          className="w-fit text-left text-primary-400 hover:text-primary-300 transition-colors underline decoration-dotted">
+          {ticket.current_cast_name || '担当未設定'}
+        </button>
       </div>
 
       {/* E/残り時間タイマー */}
@@ -267,15 +1787,43 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
       </div>
 
       {/* D時間 */}
-      <div className="mb-3">
-        <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} />
+      <div className="mb-3" data-nopropagate>
+        <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticket.id}
+          onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
       </div>
 
       {/* 注文明細 */}
       <div className="flex-1 border-t border-night-700 pt-2 mb-2">
-        <p className="text-xs text-gray-500 mb-1">
-          {startedAt.getHours().toString().padStart(2,'0')}:{startedAt.getMinutes().toString().padStart(2,'0')} 入店
-        </p>
+        <div className="flex items-center gap-1 mb-1" data-nopropagate>
+          {editingTime ? (
+            <>
+              <select value={editHour} onChange={e => setEditHour(Number(e.target.value))}
+                className="input-field text-xs py-0.5 px-1 w-16">
+                {BAR_HOURS.map(n => <option key={n} value={n}>{String(n).padStart(2,'0')}</option>)}
+              </select>
+              <span className="text-gray-500 text-xs">:</span>
+              <select value={editMin} onChange={e => setEditMin(Number(e.target.value))}
+                className="input-field text-xs py-0.5 px-1 w-14">
+                {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{i.toString().padStart(2,'0')}</option>)}
+              </select>
+              <button onClick={saveTime} className="text-xs bg-primary-600 hover:bg-primary-500 text-white px-1.5 py-0.5 rounded">保存</button>
+              <button onClick={e => { e.stopPropagation(); setEditingTime(false); setShowEditBtn(false) }} className="text-xs text-gray-500">×</button>
+            </>
+          ) : (
+            <>
+              <span
+                className="text-xs text-gray-500 cursor-pointer hover:text-gray-300"
+                onClick={e => { e.stopPropagation(); setShowEditBtn(v => !v) }}
+              >
+                {toBarHour(startedAt.getHours()).toString().padStart(2,'0')}:{startedAt.getMinutes().toString().padStart(2,'0')} 入店
+              </span>
+              {showEditBtn && (
+                <button onClick={e => { e.stopPropagation(); setEditHour(toBarHour(startedAt.getHours())); setEditMin(startedAt.getMinutes()); setEditingTime(true) }}
+                  className="text-xs text-primary-400 hover:text-primary-300 underline ml-1">編集</button>
+              )}
+            </>
+          )}
+        </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-gray-600">
@@ -300,68 +1848,358 @@ function TicketCard({ ticket, storeId, onClick }: { ticket: any; storeId: number
       </div>
 
       {/* 合計 */}
-      <div className="border-t border-night-600 pt-2">
-        <p className="text-xs text-gray-400">延長 {ticket.extension_count}回</p>
-        <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
+      {(() => {
+        const sk = (ticket.order_items || [])
+          .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
+          .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+        const sub = ticket.total_amount + sk
+        const grand = Math.round(sub * 1.21) - sk
+        return (
+          <div className="border-t border-night-600 pt-2 space-y-0.5">
+            <p className="text-xs text-gray-400">延長 {ticket.extension_count}回</p>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500">小計</span>
+              <span className="text-sm text-gray-400">¥{sub.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-gray-500">サービス料10%／消費税10%</span>
+              <span className="text-xl font-bold text-primary-400">¥{grand.toLocaleString()}</span>
+            </div>
+          </div>
+        )
+      })()}
+
+      <div data-nopropagate>
+        {showLog && (
+          <TicketLogModal ticket={ticket} onClose={() => setShowLog(false)} />
+        )}
       </div>
-    </button>
+    </div>
   )
 }
 
+// ─────────────────────────────────────────
+// 伝票操作ログモーダル
+// ─────────────────────────────────────────
+function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void }) {
+  // タイムラインイベントを集約して時刻順に並べる
+  const events: { time: string; label: string; sub?: string; color: string }[] = []
+
+  const addEvent = (isoStr: string | null | undefined, label: string, sub?: string, color = 'text-gray-300') => {
+    if (!isoStr) return
+    events.push({ time: isoStr, label, sub, color })
+  }
+
+  addEvent(ticket.started_at, '入店', undefined, 'text-green-400')
+  addEvent(ticket.set_started_at, 'セット開始（飲み放題）', undefined, 'text-blue-400')
+  addEvent(ticket.e_started_at, '延長開始', undefined, 'text-orange-400')
+
+  // オーダーアイテム
+  for (const item of ticket.order_items || []) {
+    if (!item.created_at) continue
+    const canceled = !!item.canceled_at
+    const name = item.item_name || item.item_type || '—'
+    addEvent(
+      item.created_at,
+      canceled ? `[取消] ${name}` : name,
+      item.quantity > 1 ? `×${item.quantity}  ¥${item.amount.toLocaleString()}` : `¥${item.amount.toLocaleString()}`,
+      canceled ? 'text-gray-600 line-through' : 'text-gray-200'
+    )
+    if (canceled) addEvent(item.canceled_at, `取消: ${name}`, undefined, 'text-red-500')
+  }
+
+  // ドリンクスタンプ（last_drink_times）
+  if (ticket.last_drink_times) {
+    for (const [type, arr] of Object.entries(ticket.last_drink_times as Record<string, any[]>)) {
+      if (!Array.isArray(arr)) continue
+      for (const c of arr) {
+        if (!c?.last_at) continue
+        const cfg = (DRINK_COLORS as any)[type]
+        const label = cfg ? `${cfg.label}スタンプ${c.cast_name ? `（${c.cast_name}）` : ''}` : `${type}スタンプ`
+        addEvent(c.last_at, label, undefined, cfg?.color || 'text-yellow-400')
+      }
+    }
+  }
+
+  // 時刻順ソート
+  events.sort((a, b) => a.time.localeCompare(b.time))
+
+  const toJst = (iso: string) => {
+    const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+    const h = ((d.getUTCHours() + 9) % 24).toString().padStart(2, '0')
+    const m = d.getUTCMinutes().toString().padStart(2, '0')
+    return `${h}:${m}`
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-3 shrink-0">
+          <div>
+            <h4 className="font-bold text-white text-base">{ticket.table_no} — 操作ログ</h4>
+            <p className="text-xs text-gray-500">{ticket.customer_name || '顧客未設定'}</p>
+          </div>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {events.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-8">ログがありません</p>
+          ) : (
+            <div className="relative pl-4">
+              {/* 縦線 */}
+              <div className="absolute left-1.5 top-0 bottom-0 w-px bg-gray-700" />
+              <div className="space-y-3">
+                {events.map((ev, i) => (
+                  <div key={i} className="flex items-start gap-3 relative">
+                    {/* ドット */}
+                    <div className="absolute -left-2.5 top-1.5 w-2 h-2 rounded-full bg-gray-600 shrink-0" />
+                    <span className="text-xs text-gray-500 font-mono shrink-0 w-10">{toJst(ev.time)}</span>
+                    <div className="min-w-0">
+                      <span className={`text-sm font-medium ${ev.color}`}>{ev.label}</span>
+                      {ev.sub && <span className="text-xs text-gray-500 ml-1.5">{ev.sub}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const MOTIVATION_OPTIONS = ['ティッシュ', 'SNS', 'LINE', '紹介', 'Google', '看板', '電話']
+const MOTIVATION_CAST_REQUIRED = new Set(['ティッシュ', 'LINE'])
+
 function NewTicketModal({ storeId, onSubmit, onClose }: {
   storeId: number
-  onSubmit: (tableNo: string, guestCount: number, planType: string, visitType: string) => void
+  onSubmit: (data: {
+    tableNo: string; guestCount: number; planType: string; visitType: string
+    visitMotivation?: string; motivationCastId?: number | null; motivationNote?: string
+  }) => void
   onClose: () => void
 }) {
   const [tableNo, setTableNo] = useState(TABLE_NOS[0])
   const [guestCount, setGuestCount] = useState(1)
   const [planType, setPlanType] = useState('premium')
   const [visitType, setVisitType] = useState('N')
+  const [motivation, setMotivation] = useState('')
+  const [motivationCastId, setMotivationCastId] = useState<number | null>(null)
+  const [motivationNote, setMotivationNote] = useState('')
+
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+
+  const needsCast = MOTIVATION_CAST_REQUIRED.has(motivation)
+  const needsNote = motivation === '紹介'
+
+  const row = "flex items-center gap-2"
+  const label = "text-xs text-gray-400 w-20 shrink-0"
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-sm space-y-4">
-        <div className="flex justify-between items-center">
+      <div className="card w-full max-w-sm space-y-2.5">
+        <div className="flex justify-between items-center mb-1">
           <h3 className="font-bold text-white">新規伝票</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">卓番号</label>
-          <select value={tableNo} onChange={e => setTableNo(e.target.value)} className="input-field w-full">
+
+        <div className={row}>
+          <span className={label}>卓番号</span>
+          <select value={tableNo} onChange={e => setTableNo(e.target.value)} className="input-field flex-1 text-sm py-1.5">
             {TABLE_NOS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">客数</label>
-          <select value={guestCount} onChange={e => setGuestCount(Number(e.target.value))} className="input-field w-full">
+
+        <div className={row}>
+          <span className={label}>客数</span>
+          <select value={guestCount} onChange={e => setGuestCount(Number(e.target.value))} className="input-field flex-1 text-sm py-1.5">
             {Array.from({length: 20}, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}名</option>)}
           </select>
         </div>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">プラン</label>
-          <div className="flex gap-2">
+
+        <div className={row}>
+          <span className={label}>プラン</span>
+          <div className="flex gap-1.5 flex-1">
             {['premium', 'standard'].map(p => (
               <button key={p} onClick={() => setPlanType(p)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${planType === p ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${planType === p ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
                 {p === 'premium' ? 'プレミアム' : 'スタンダード'}
               </button>
             ))}
           </div>
         </div>
-        <div>
-          <label className="text-sm text-gray-400 block mb-1.5">区分</label>
-          <div className="flex gap-2">
+
+        <div className={row}>
+          <span className={label}>区分</span>
+          <div className="flex gap-1.5 flex-1">
             {['N', 'R'].map(v => (
               <button key={v} onClick={() => setVisitType(v)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${visitType === v ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${visitType === v ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
                 {v}
               </button>
             ))}
           </div>
         </div>
-        <div className="flex gap-3">
+
+        <div className={row}>
+          <span className={label}>来店動機</span>
+          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastId(null); setMotivationNote('') }}
+            className="input-field flex-1 text-sm py-1.5">
+            <option value="">未選択</option>
+            {MOTIVATION_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        {needsCast && (
+          <div className={row}>
+            <span className={label}>キャスト</span>
+            <select value={motivationCastId ?? ''} onChange={e => setMotivationCastId(e.target.value ? Number(e.target.value) : null)}
+              className="input-field flex-1 text-sm py-1.5">
+              <option value="">選択してください</option>
+              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {needsNote && (
+          <div className={row}>
+            <span className={label}>紹介者</span>
+            <input type="text" value={motivationNote} onChange={e => setMotivationNote(e.target.value)}
+              placeholder="紹介者名を入力"
+              className="input-field flex-1 text-sm py-1.5" />
+          </div>
+        )}
+
+        <div className="flex gap-3 pt-1">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => onSubmit(tableNo, guestCount, planType, visitType)} className="btn-primary flex-1">開始</button>
+          <button onClick={() => onSubmit({
+            tableNo, guestCount, planType, visitType,
+            visitMotivation: motivation || undefined,
+            motivationCastId: needsCast ? motivationCastId : null,
+            motivationNote: needsNote ? motivationNote : undefined,
+          })} className="btn-primary flex-1">開始</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
+  storeId: number
+  currentId: number | null
+  onSelect: (id: number | null) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const { data: customers = [] } = useQuery({
+    queryKey: ['customers', storeId],
+    queryFn: () => apiClient.get('/api/customers', { params: { store_id: storeId } }).then(r => r.data),
+  })
+  const filtered = (customers as any[]).filter((c: any) =>
+    !q || c.name?.includes(q) || c.alias?.includes(q) || c.phone?.includes(q)
+  ).slice(0, 30)
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">顧客を選択</h3>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="名前・電話番号で検索"
+          className="input-field w-full text-sm" autoFocus />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {currentId && (
+            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
+              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
+              未設定に戻す
+            </button>
+          )}
+          {filtered.map((c: any) => (
+            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.id === currentId ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+              <span className="font-medium">{c.name}</span>
+              {c.alias && <span className="text-gray-400 text-xs ml-2">({c.alias})</span>}
+              {c.phone && <span className="text-gray-500 text-xs ml-2">{c.phone}</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
+  storeId: number
+  currentCastName: string | null
+  onSelect: (id: number | null) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">担当キャストを設定</h3>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="キャスト名で検索"
+          className="input-field w-full text-sm" autoFocus />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {currentCastName && (
+            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
+              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
+              担当を外す
+            </button>
+          )}
+          {filtered.map((c: any) => (
+            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.stage_name === currentCastName ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+              <span className="font-medium">{c.stage_name}</span>
+              {c.rank && <span className="text-gray-400 text-xs ml-2">{c.rank}</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ChampagneMenuModal({ onSelect, onClose }: {
+  onSelect: (name: string, price: number) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-white">シャンパン選択</h3>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-1.5 max-h-[70vh] overflow-y-auto pr-1">
+          {CHAMPAGNE_MENU.map(({ name, price }) => (
+            <button key={name} onClick={e => { e.stopPropagation(); onSelect(name, price) }}
+              className="w-full flex justify-between items-center px-3 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors">
+              <span className="text-gray-200">{name}</span>
+              <span className="text-pink-400 font-medium">¥{price.toLocaleString()}</span>
+            </button>
+          ))}
         </div>
       </div>
     </div>
@@ -388,33 +2226,44 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   const [castId, setCastId] = useState<number | null>(null)
   // 複数選択＋割合（シャンパン）
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [ratios, setRatios] = useState<Record<number, number>>({}) // castId -> 割合(1-10)
+  const [ratios, setRatios] = useState<Record<number, number>>({}) // castId -> %(10,20,...,100)
+
+  const redistributeRatios = (ids: Set<number>) => {
+    const arr = Array.from(ids)
+    if (arr.length === 0) { setRatios({}); return }
+    const base = Math.floor(100 / arr.length)
+    const remainder = 100 - base * arr.length
+    const newRatios: Record<number, number> = {}
+    arr.forEach((id, i) => { newRatios[id] = base + (i === 0 ? remainder : 0) })
+    setRatios(newRatios)
+  }
 
   const toggleCast = (id: number) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) {
         next.delete(id)
-        setRatios(r => { const nr = { ...r }; delete nr[id]; return nr })
       } else {
         next.add(id)
-        setRatios(r => ({ ...r, [id]: 1 }))
       }
+      redistributeRatios(next)
       return next
     })
   }
 
-  const canSubmit = isChampagne ? selectedIds.size > 0 : castId !== null
+  const totalRatio = isChampagne ? Array.from(selectedIds).reduce((sum, id) => sum + (ratios[id] || 10), 0) : 0
+  const ratioOver = isChampagne && totalRatio > 100
+  const canSubmit = isChampagne ? selectedIds.size > 0 && !ratioOver : castId !== null
 
   const handleSubmit = () => {
     if (isChampagne) {
       const selections = casts
         .filter((c: any) => selectedIds.has(c.id))
-        .map((c: any) => ({ castId: c.id, castName: c.stage_name, ratio: ratios[c.id] || 1 }))
+        .map((c: any) => ({ castId: c.id, castName: c.stage_name, ratio: ratios[c.id] || 10 }))
       onSubmit(selections)
     } else {
       const cast = casts.find((c: any) => c.id === castId)
-      if (cast) onSubmit([{ castId: cast.id, castName: cast.stage_name, ratio: 10 }])
+      if (cast) onSubmit([{ castId: cast.id, castName: cast.stage_name, ratio: 100 }])
     }
   }
 
@@ -434,23 +2283,31 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
                   {c.stage_name}
                 </button>
                 {selectedIds.has(c.id) && (
-                  <select value={ratios[c.id] || 1} onChange={e => setRatios(r => ({ ...r, [c.id]: Number(e.target.value) }))}
-                    className="input-field text-sm w-20 shrink-0">
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
-                      <option key={n} value={n}>{n}割</option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input type="number" min={1} max={100} value={ratios[c.id] ?? 10}
+                      onChange={e => setRatios(r => ({ ...r, [c.id]: Math.min(100, Math.max(1, Number(e.target.value))) }))}
+                      className="input-field text-sm w-16 text-center" />
+                    <span className="text-gray-400 text-sm">%</span>
+                  </div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <div>
-            <label className="text-sm text-gray-400 block mb-1.5">担当キャスト</label>
-            <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)} className="input-field w-full">
-              <option value="">選択してください</option>
-              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
-            </select>
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {casts.map((c: any) => (
+              <button key={c.id} onClick={() => setCastId(c.id)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${castId === c.id ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+                <span className="font-medium">{c.stage_name}</span>
+                {c.rank && <span className="text-gray-400 text-xs ml-2">{c.rank}</span>}
+              </button>
+            ))}
+            {casts.length === 0 && <p className="text-center text-gray-500 text-sm py-4">キャストが見つかりません</p>}
+          </div>
+        )}
+        {isChampagne && selectedIds.size > 0 && (
+          <div className={`text-sm text-center font-bold ${ratioOver ? 'text-red-400' : 'text-gray-400'}`}>
+            合計: {totalRatio}% {ratioOver && '（100%を超えています）'}
           </div>
         )}
         <div className="flex gap-3">
@@ -468,12 +2325,42 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [aiAdvice, setAiAdvice] = useState('')
   const [loadingAI, setLoadingAI] = useState(false)
   const [castSelectItem, setCastSelectItem] = useState<{ type: string; label: string; price: number } | null>(null)
-  const prevSetIntervalRef = useRef<number | null>(null)
+  const [showChampagneMenu, setShowChampagneMenu] = useState(false)
+  const [showOtherInput, setShowOtherInput] = useState(false)
+  const [otherName, setOtherName] = useState('')
+  const [otherPrice, setOtherPrice] = useState('')
+  const [editingStartTime, setEditingStartTime] = useState(false)
+  const [editStartHour, setEditStartHour] = useState(0)
+  const [editStartMin, setEditStartMin] = useState(0)
+  const [timeChangeOperator, setTimeChangeOperator] = useState('')
+  const [timeChangeReason, setTimeChangeReason] = useState('')
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null)
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null)
+  const [editingQty, setEditingQty] = useState(1)
+  const [actionMode, setActionMode] = useState<'add' | 'delete' | 'edit'>('add')
+  const [editingGroupMaxQty, setEditingGroupMaxQty] = useState(1)
+  const [editingGroupItemIds, setEditingGroupItemIds] = useState<number[]>([])
+  const [operatorName, setOperatorName] = useState('')
+  const [operatorReason, setOperatorReason] = useState('')
+  const [actionPos, setActionPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [showCustomerSearch, setShowCustomerSearch] = useState(false)
+  const [showCastSearch, setShowCastSearch] = useState(false)
+  const [showJoinModal, setShowJoinModal] = useState(false)
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [showWarikanModal, setShowWarikanModal] = useState(false)
+  const [showSenkaikeiModal, setShowSenkaikeiModal] = useState(false)
+  const [showSentaitenModal, setShowSentaitenModal] = useState(false)
+  const [showDiscountModal, setShowDiscountModal] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+
+  const confirmCheckout = (fn: () => void) => setPendingAction(() => fn)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketId],
     queryFn: () => apiClient.get(`/api/tickets/${ticketId}`).then(r => r.data),
-    refetchInterval: 10000,
+    staleTime: 0,
+    refetchInterval: (query) => (query.state.data?.is_closed ? false : 10000),
   })
 
   const { data: castsAll = [] } = useQuery({
@@ -485,7 +2372,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   )
 
   const addOrderMutation = useMutation({
-    mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null }) =>
+    mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) =>
       apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
@@ -493,9 +2380,62 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     },
   })
 
+  const cancelOrderMutation = useMutation({
+    mutationFn: ({ itemId, operator, reason }: { itemId: number; operator: string; reason: string }) =>
+      apiClient.post(`/api/tickets/orders/${itemId}/cancel`, { operator_name: operator || null, reason: reason || null }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+      setSelectedOrderId(null)
+      setOperatorName('')
+      setOperatorReason('')
+    },
+  })
+
+  const updateOrderMutation = useMutation({
+    mutationFn: ({ itemId, quantity, operator, reason }: { itemId: number; quantity: number; operator: string; reason: string }) =>
+      apiClient.patch(`/api/tickets/orders/${itemId}`, { quantity, operator_name: operator || null, reason: reason || null }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+      setEditingOrderId(null)
+      setSelectedOrderId(null)
+      setOperatorName('')
+      setOperatorReason('')
+    },
+  })
+
+  // グループ編集: バックエンドで一括アトミック処理
+  const groupReduceMutation = useMutation({
+    mutationFn: ({ item, targetQty, operator, reason }: { item: any; targetQty: number; operator: string; reason: string }) =>
+      apiClient.post(`/api/tickets/${ticketId}/reduce-group`, {
+        item_type: item.item_type,
+        item_name: item.item_name ?? null,
+        unit_price: item.unit_price,
+        target_quantity: targetQty,
+        operator_name: operator || null,
+        reason: reason || null,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+      setEditingOrderId(null)
+      setSelectedOrderId(null)
+      setOperatorName('')
+      setOperatorReason('')
+    },
+  })
+
   const closeMutation = useMutation({
     mutationFn: (data: any) => apiClient.post(`/api/tickets/${ticketId}/close`, data).then(r => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tickets', storeId] }); onClose() },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      onClose()
+    },
   })
 
   const setStartMutation = useMutation({
@@ -508,37 +2448,63 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     onSuccess: () => qc.invalidateQueries({ queryKey: ['ticket', ticketId] }),
   })
 
-  // 40分ごと自動延長（人数分）
-  useEffect(() => {
-    if (!ticket || ticket.set_is_paused || !ticket.set_started_at) return
-    const setElapsed = calcSetElapsed(ticket, now)
-    if (setElapsed === null) return
-    const intervalNum = calcSetInterval(setElapsed)
+  const setCustomerMutation = useMutation({
+    mutationFn: (customerId: number | null) =>
+      apiClient.post(`/api/tickets/${ticketId}/set-customer`, { customer_id: customerId }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      setShowCustomerSearch(false)
+    },
+  })
 
-    // 初回マウント時は現在のインターバル番号をセットするだけ（過去分は加算しない）
-    if (prevSetIntervalRef.current === null) {
-      prevSetIntervalRef.current = intervalNum
-      return
-    }
+  const setCastMutation = useMutation({
+    mutationFn: (castId: number | null) =>
+      apiClient.post(`/api/tickets/${ticketId}/set-cast`, { cast_id: castId }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      setShowCastSearch(false)
+    },
+  })
 
-    if (intervalNum > prevSetIntervalRef.current) {
-      prevSetIntervalRef.current = intervalNum
-      const guestCount = ticket.guest_count || 1
-      apiClient.get(`/api/stores/${ticket.store_id}`).then(r => {
-        const extPrice = r.data.extension_price || 2700
-        for (let i = 0; i < guestCount; i++) {
-          addOrderMutation.mutate({ item_type: 'extension', unit_price: extPrice, quantity: 1 })
-        }
-      })
-    }
-  }, [ticket, now])
+  const joinMutation = useMutation({
+    mutationFn: (data: any) => apiClient.post(`/api/tickets/${ticketId}/join`, data).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      setShowJoinModal(false)
+    },
+  })
+
+  const mergeMutation = useMutation({
+    mutationFn: (targetId: number) =>
+      apiClient.post(`/api/tickets/${ticketId}/merge`, { target_ticket_id: targetId }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      onClose()
+    },
+  })
 
   const handleItemClick = (type: string, label: string, price: number) => {
-    if (CAST_SELECT_TYPES.has(type)) {
+    if (type === 'other') {
+      setShowOtherInput(v => !v)
+    } else if (type === 'champagne') {
+      setShowChampagneMenu(true)
+    } else if (CAST_SELECT_TYPES.has(type)) {
       setCastSelectItem({ type, label, price })
     } else {
       addOrderMutation.mutate({ item_type: type, unit_price: price, quantity: 1 })
     }
+  }
+
+  const handleOtherAdd = () => {
+    const price = parseInt(otherPrice, 10)
+    if (!otherPrice || isNaN(price) || price <= 0) return
+    addOrderMutation.mutate({ item_type: 'other', item_name: otherName || 'その他', unit_price: price, quantity: 1 })
+    setOtherName('')
+    setOtherPrice('')
+    setShowOtherInput(false)
   }
 
   const fetchAI = async () => {
@@ -556,11 +2522,21 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     </div>
   )
 
-  const elapsed = calcElapsed(ticket.set_started_at || ticket.started_at, now)
-  const setElapsed = calcSetElapsed(ticket, now)
-  const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, now) : null
+  const isClosed = !!ticket.is_closed
+  // クローズ済みは ended_at を基準に固定、オープン中は now でカウント
+  const refTime = isClosed ? (toUtcMs(ticket.ended_at) ?? now) : now
+  const elapsed = calcElapsed(ticket.set_started_at || ticket.started_at, refTime)
+  const setElapsed = isClosed ? null : calcSetElapsed(ticket, now)
+  const eElapsed = ticket.e_started_at ? calcElapsed(ticket.e_started_at, refTime) : null
   const startedAtMs = toUtcMs(ticket.started_at)
   const startedAt = startedAtMs ? new Date(startedAtMs) : new Date()
+
+  // 先会計: 小計には含めず、合計（税サ込み）からのみ差し引く
+  const senkaikeiTotal = (ticket.order_items || [])
+    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
+    .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+  const subtotal = ticket.total_amount + senkaikeiTotal
+  const grandTotal = Math.round(subtotal * 1.21) - senkaikeiTotal
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4">
@@ -581,10 +2557,43 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   </span>
                 )}
                 {ticket.guest_count > 0 && <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>}
+                {ticket.visit_motivation && (
+                  <span className="badge text-xs bg-teal-900/40 text-teal-400">
+                    {ticket.visit_motivation}
+                    {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
+                    {ticket.motivation_note && `／${ticket.motivation_note}`}
+                  </span>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <p className="text-xl font-bold text-primary-400">¥{ticket.total_amount.toLocaleString()}</p>
+            <div className="flex items-center gap-2">
+              {!isClosed && (
+                <>
+                  <button onClick={() => setShowSentaitenModal(true)}
+                    className="text-xs px-3 py-1.5 bg-orange-900/60 hover:bg-orange-800/70 text-orange-300 rounded-lg transition-colors">
+                    先退店
+                  </button>
+                  <button onClick={() => setShowMergeModal(true)}
+                    className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
+                    合算
+                  </button>
+                  <button onClick={() => setShowSenkaikeiModal(true)}
+                    className="text-xs px-3 py-1.5 bg-blue-900/60 hover:bg-blue-800/70 text-blue-300 rounded-lg transition-colors">
+                    先会計
+                  </button>
+                  <button onClick={() => setShowWarikanModal(true)}
+                    className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">
+                    割り勘
+                  </button>
+                </>
+              )}
+              <p className="text-xl font-bold text-primary-400 ml-2">¥{grandTotal.toLocaleString()}</p>
+              <button
+                onClick={() => setShowLog(true)}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 rounded-lg px-2 py-1 transition-colors"
+              >
+                <ClipboardList className="w-3.5 h-3.5" />ログ
+              </button>
               <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
           </div>
@@ -592,67 +2601,161 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           {/* タイマー行 */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div className="flex gap-2 text-xs">
-              <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
-              <span className="text-gray-600">/</span>
-              <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
+              {!isClosed ? (
+                <>
+                  <button onClick={() => setShowCustomerSearch(true)}
+                    className="text-gray-400 hover:text-white underline decoration-dotted transition-colors">
+                    {ticket.customer_name || '顧客未設定'}
+                  </button>
+                  <span className="text-gray-600">/</span>
+                  <button onClick={() => setShowCastSearch(true)}
+                    className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
+                    {ticket.current_cast_name || '担当未設定'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
+                  <span className="text-gray-600">/</span>
+                  <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-1 font-mono text-sm">
               <span className="text-gray-500 text-xs">経過</span>
               <span className="text-green-400">{fmtTime(elapsed)}</span>
             </div>
-            <div className="flex items-center gap-1 font-mono text-sm">
-              <span className="text-gray-500 text-xs">E</span>
-              <span className={eElapsed !== null ? 'text-orange-400' : 'text-gray-600'}>{eElapsed !== null ? fmtTime(eElapsed) : '—'}</span>
-            </div>
+            {eElapsed !== null && (
+              <div className="flex items-center gap-1 font-mono text-sm">
+                <span className="text-gray-500 text-xs">E</span>
+                <span className="text-orange-400">{fmtTime(eElapsed)}</span>
+              </div>
+            )}
+            {isClosed && ticket.ended_at && (() => {
+              const endMs = toUtcMs(ticket.ended_at)
+              const endDate = endMs ? new Date(endMs) : null
+              return endDate ? (
+                <span className="text-xs text-gray-500 ml-auto">
+                  {toBarHour(endDate.getHours()).toString().padStart(2,'0')}:{endDate.getMinutes().toString().padStart(2,'0')} 退店
+                  <span className="ml-2 text-green-600">{PAYMENT_LABELS[ticket.payment_method] ?? ''}</span>
+                </span>
+              ) : null
+            })()}
 
-            {/* セットタイマー（残り時間カウントダウン） */}
-            <div className="flex items-center gap-2 ml-auto">
-              {!ticket.set_started_at ? (
-                <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
-                  className="flex items-center gap-2 px-5 py-2 bg-green-700 hover:bg-green-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50">
-                  <Play className="w-4 h-4" />伝票開始
-                </button>
-              ) : (
-                <>
-                  {(() => {
-                    const countdown = calcSetCountdown(setElapsed)
-                    const urgent = countdown !== null && countdown <= 5 * 60
-                    const intervalNum = calcSetInterval(setElapsed)
-                    return (
-                      <>
-                        <span className="text-xs text-gray-500">セット残り</span>
-                        <span className={`text-lg font-bold font-mono ${ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}`}>
-                          {countdown !== null ? fmtTime(countdown) : '—'}
-                        </span>
-                        {intervalNum > 0 && <span className="badge bg-night-700 text-gray-400 text-xs">{intervalNum}延長済</span>}
-                      </>
-                    )
-                  })()}
-
-                  <button onClick={() => setToggleMutation.mutate()} disabled={setToggleMutation.isPending}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors ${
-                      ticket.set_is_paused ? 'bg-green-800/50 hover:bg-green-700/50 text-green-300' : 'bg-yellow-800/50 hover:bg-yellow-700/50 text-yellow-300'
-                    }`}>
-                    {ticket.set_is_paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-                    {ticket.set_is_paused ? '再開' : '一時停止'}
+            {/* セットタイマー（オープン中のみ） */}
+            {!isClosed && (
+              <div className="flex items-center gap-2 ml-auto">
+                {!ticket.set_started_at ? (
+                  <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
+                    className="flex items-center gap-2 px-5 py-2 bg-green-700 hover:bg-green-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50">
+                    <Play className="w-4 h-4" />伝票開始
                   </button>
-                </>
-              )}
-            </div>
+                ) : (
+                  <>
+                    {(() => {
+                      const countdown = calcSetCountdown(setElapsed)
+                      const urgent = countdown !== null && countdown <= 5 * 60
+                      const intervalNum = calcSetInterval(setElapsed)
+                      const nowMs = Date.now()
+                      const joinItems = (ticket.order_items || []).filter((i: any) =>
+                        i.item_name && i.item_name.includes('合流') && i.created_at
+                      )
+                      return (
+                        <>
+                          {joinItems.map((item: any) => {
+                            const startMs = new Date(item.created_at.endsWith('Z') ? item.created_at : item.created_at + 'Z').getTime()
+                            const elapsed = nowMs - startMs
+                            const remaining = JOIN_DURATION - (elapsed % JOIN_DURATION)
+                            const joinUrgent = remaining <= 5 * 60 * 1000
+                            return (
+                              <span key={item.id} className="flex items-center gap-1">
+                                <span className="text-xs text-gray-500">合流</span>
+                                <span className={`text-lg font-bold font-mono ${joinUrgent ? 'text-red-400' : 'text-blue-400'}`}>{fmtTime(Math.floor(remaining / 1000))}</span>
+                              </span>
+                            )
+                          })}
+                          <span className="text-xs text-gray-500">セット残り</span>
+                          <span className={`text-lg font-bold font-mono ${ticket.set_is_paused ? 'text-yellow-400' : urgent ? 'text-red-400' : 'text-green-400'}`}>
+                            {countdown !== null ? fmtTime(countdown) : '—'}
+                          </span>
+                          {intervalNum > 0 && <span className="badge bg-night-700 text-gray-400 text-xs">{intervalNum}延長済</span>}
+                        </>
+                      )
+                    })()}
+                    <button onClick={() => setToggleMutation.mutate()} disabled={setToggleMutation.isPending}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors ${
+                        ticket.set_is_paused ? 'bg-green-800/50 hover:bg-green-700/50 text-green-300' : 'bg-yellow-800/50 hover:bg-yellow-700/50 text-yellow-300'
+                      }`}>
+                      {ticket.set_is_paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+                      {ticket.set_is_paused ? '再開' : '一時停止'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* D時間（ドリンク別） */}
-          <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} />
+          {/* D時間（オープン中のみ） */}
+          {!isClosed && (
+            <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticketId}
+              onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
+          )}
         </div>
 
         {/* 本体: 左(伝票) + 右(操作) */}
         <div className="flex flex-1 overflow-hidden">
-          {/* 左: 伝票 */}
-          <div className="w-1/2 border-r border-night-600 flex flex-col overflow-hidden">
+          {/* 左: 伝票（クローズ済みは全幅） */}
+          <div className={`${isClosed ? 'w-full' : 'w-1/2 border-r border-night-600'} flex flex-col overflow-hidden`}>
             <div className="px-4 py-2 border-b border-night-700">
-              <p className="text-xs text-gray-500">
-                {startedAt.getHours().toString().padStart(2,'0')}:{startedAt.getMinutes().toString().padStart(2,'0')} 入店
-              </p>
+              {editingStartTime ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <select value={editStartHour} onChange={e => setEditStartHour(Number(e.target.value))} className="input-field text-xs py-0.5 px-1 w-16">
+                      {BAR_HOURS.map(n => <option key={n} value={n}>{String(n).padStart(2,'0')}</option>)}
+                    </select>
+                    <span className="text-gray-500 text-xs">:</span>
+                    <select value={editStartMin} onChange={e => setEditStartMin(Number(e.target.value))} className="input-field text-xs py-0.5 px-1 w-14">
+                      {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{i.toString().padStart(2,'0')}</option>)}
+                    </select>
+                  </div>
+                  <input type="text" placeholder="担当者名（必須）" value={timeChangeOperator}
+                    onChange={e => setTimeChangeOperator(e.target.value)}
+                    className="input-field w-full text-xs py-0.5" />
+                  <input type="text" placeholder="理由（任意）" value={timeChangeReason}
+                    onChange={e => setTimeChangeReason(e.target.value)}
+                    className="input-field w-full text-xs py-0.5" />
+                  <div className="flex gap-1">
+                    <button
+                      disabled={!timeChangeOperator.trim()}
+                      onClick={() => {
+                        const base = new Date(startedAt)
+                        base.setHours(fromBarHour(editStartHour), editStartMin, 0, 0)
+                        const utcIso = base.toISOString()
+                        apiClient.patch(`/api/tickets/${ticketId}`, {
+                          started_at: utcIso,
+                          operator_name: timeChangeOperator || null,
+                          reason: timeChangeReason || null,
+                        }).then(() => {
+                          qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+                          qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+                          qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+                        })
+                        setEditingStartTime(false)
+                        setTimeChangeOperator('')
+                        setTimeChangeReason('')
+                      }}
+                      className="text-xs bg-primary-600 hover:bg-primary-500 text-white px-2 py-0.5 rounded disabled:opacity-40">保存</button>
+                    <button onClick={() => { setEditingStartTime(false); setTimeChangeOperator(''); setTimeChangeReason('') }}
+                      className="text-xs text-gray-500">×</button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 inline-flex items-center gap-1"
+                  onClick={() => { setEditStartHour(toBarHour(startedAt.getHours())); setEditStartMin(startedAt.getMinutes()); setEditingStartTime(true) }}>
+                  {toBarHour(startedAt.getHours()).toString().padStart(2,'0')}:{startedAt.getMinutes().toString().padStart(2,'0')} 入店
+                  <span className="text-primary-500 text-xs">✎</span>
+                </p>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto">
               <table className="w-full text-sm">
@@ -665,47 +2768,159 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   </tr>
                 </thead>
                 <tbody>
-                  {ticket.order_items?.map((item: any) => (
-                    <tr key={item.id} className="border-b border-night-700/50">
-                      <td className="px-4 py-2 text-gray-200">{displayItemName(item, castMap)}</td>
-                      <td className="text-center px-2 py-2 text-gray-400">{item.quantity}</td>
-                      <td className="text-right px-2 py-2 text-gray-400">¥{item.unit_price.toLocaleString()}</td>
-                      <td className="text-right px-4 py-2 text-white font-medium">¥{item.amount.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                  {(!ticket.order_items || ticket.order_items.length === 0) && (
+                  {(() => {
+                    // 同一品目（同item_type・同item_name・同unit_price）の未キャンセル行をまとめて表示
+                    const raw = (ticket.order_items || []).filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0))
+                    const grouped: any[] = []
+                    for (const item of raw) {
+                      if (item.canceled_at) { grouped.push(item); continue }
+                      const canMerge = item.item_type !== 'join' && item.item_type !== 'set'
+                        && !item.item_name?.startsWith('先会計') && !item.item_name?.startsWith('分割清算') && !item.item_name?.startsWith('先退店') && !item.item_name?.startsWith('値引き')
+                      if (canMerge) {
+                        const key = `${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
+                        const existing = grouped.find((g: any) => !g.canceled_at && g._groupKey === key)
+                        if (existing) { existing.quantity += item.quantity; existing.amount += item.amount; continue }
+                        grouped.push({ ...item, _groupKey: key })
+                      } else {
+                        grouped.push(item)
+                      }
+                    }
+                    return grouped
+                  })().map((item: any) => {
+                    const isCanceled = !!item.canceled_at
+                    const isSelected = selectedOrderId === item.id
+                    const isEditing = editingOrderId === item.id
+                    return (
+                      <tr key={item.id}
+                        className={`border-b border-night-700/50 ${!isCanceled ? 'cursor-pointer hover:bg-night-700/30' : ''} ${isSelected ? 'bg-night-700/50' : ''}`}
+                        onClick={e => {
+                          if (isCanceled) return
+                          if (isEditing) return
+                          if (isSelected) {
+                            setSelectedOrderId(null)
+                            setEditingOrderId(null)
+                            setActionPos(null)
+                          } else {
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                            setActionPos({ top: rect.bottom, left: rect.left, width: rect.width })
+                            setSelectedOrderId(item.id)
+                            setEditingOrderId(null)
+                            setActionMode('add')
+                            setOperatorName('')
+                          }
+                        }}>
+                        <td className={`px-4 py-2 ${isCanceled ? 'line-through text-gray-500' : 'text-gray-200'}`}>{displayItemName(item, castMap)}</td>
+                        <td className={`text-center px-2 py-2 ${isCanceled ? 'line-through text-gray-600' : 'text-gray-400'}`}>
+                          {item.quantity}
+                        </td>
+                        <td className={`text-right px-2 py-2 ${isCanceled ? 'text-gray-600' : 'text-gray-400'}`}>¥{item.unit_price.toLocaleString()}</td>
+                        <td className={`text-right px-4 py-2 font-medium ${isCanceled ? 'line-through text-gray-600' : (item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算')) ? 'text-blue-400' : item.item_name?.startsWith('値引き') ? 'text-orange-400' : 'text-white'}`}>
+                          {(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算') || item.item_name?.startsWith('値引き')) ? `-¥${Math.abs(item.amount).toLocaleString()}` : `¥${item.amount.toLocaleString()}`}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(!ticket.order_items || ticket.order_items.filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0) && !i.canceled_at).length === 0) && (
                     <tr><td colSpan={4} className="text-center text-gray-600 py-8 text-sm">注文なし</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-            <div className="border-t border-night-600 px-4 py-3 flex justify-between items-center">
-              <span className="text-gray-400 text-sm">合計</span>
-              <span className="text-primary-400 font-bold text-lg">¥{ticket.total_amount.toLocaleString()}</span>
+
+
+            <div className="border-t border-night-600 px-4 py-3 space-y-1 shrink-0">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500 text-xs">小計</span>
+                <span className="text-gray-400 text-sm">¥{subtotal.toLocaleString()}</span>
+              </div>
+              {(() => {
+                const senkaikei = (ticket.order_items || []).filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算')) && !i.canceled_at).reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+                const discount  = (ticket.order_items || []).filter((i: any) => i.item_name?.startsWith('値引き') && !i.canceled_at).reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+                return <>
+                  {senkaikei > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-blue-400 text-xs">先会計</span>
+                      <span className="text-blue-400 text-sm">-¥{senkaikei.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {discount > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-orange-400 text-xs">値引き</span>
+                      <span className="text-orange-400 text-sm">-¥{discount.toLocaleString()}</span>
+                    </div>
+                  )}
+                </>
+              })()}
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-xs">（サービス料10％／消費税10％）合計</span>
+                {!isClosed ? (
+                  <button onClick={() => setShowDiscountModal(true)}
+                    className="text-primary-400 font-bold text-lg hover:text-primary-300 transition-colors active:scale-95">
+                    ¥{grandTotal.toLocaleString()}
+                  </button>
+                ) : (
+                  <span className="text-primary-400 font-bold text-lg">¥{grandTotal.toLocaleString()}</span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* 右: 操作 */}
-          <div className="w-1/2 flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              <p className="text-xs text-gray-500">注文追加</p>
-              <div className="grid grid-cols-2 gap-2">
-                {ITEM_TYPES.map(({ type, label, defaultPrice }) => (
-                  <button key={type}
-                    onClick={() => handleItemClick(type, label, defaultPrice)}
-                    className={`btn-secondary text-sm py-3 ${CAST_SELECT_TYPES.has(type) ? 'border-primary-700/50' : ''}`}
-                  >
-                    {label}
-                    {defaultPrice > 0 && <span className="block text-xs text-gray-500">¥{defaultPrice.toLocaleString()}</span>}
-                    {CAST_SELECT_TYPES.has(type) && <span className="block text-xs text-primary-500">キャスト選択</span>}
-                  </button>
-                ))}
+          {/* 右: 操作（オープン中のみ） */}
+          {!isClosed && <div className="w-1/2 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              <p className="text-xs text-gray-500 px-1">注文追加</p>
+              <div className="grid grid-cols-2 gap-1">
+                {ITEM_TYPES.map(({ type, label, defaultPrice }) => {
+                  const price = type === 'extension'
+                    ? (ticket.plan_type === 'premium' ? 4000 : 3000)
+                    : defaultPrice
+                  return (
+                    <button key={type}
+                      onClick={() => handleItemClick(type, label, price)}
+                      className={`btn-secondary text-xs py-1.5 leading-tight ${CAST_SELECT_TYPES.has(type) ? 'border-primary-700/50' : ''}`}
+                    >
+                      {label}
+                      {price > 0 && <span className="block text-[10px] text-gray-500">¥{price.toLocaleString()}</span>}
+                      {CAST_SELECT_TYPES.has(type) && <span className="block text-[10px] text-primary-500">キャスト選択</span>}
+                    </button>
+                  )
+                })}
               </div>
 
-              <div className="border-t border-night-700 pt-2">
+              {showOtherInput && (
+                <div className="bg-night-700 rounded-lg p-3 space-y-2">
+                  <p className="text-xs text-gray-400 font-medium">その他 — 詳細入力</p>
+                  <input
+                    type="text"
+                    placeholder="品目名（任意）"
+                    value={otherName}
+                    onChange={e => setOtherName(e.target.value)}
+                    className="input-field w-full text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      placeholder="金額"
+                      value={otherPrice}
+                      onChange={e => setOtherPrice(e.target.value)}
+                      className="input-field flex-1 text-sm"
+                      min={1}
+                    />
+                    <button onClick={handleOtherAdd} disabled={!otherPrice || Number(otherPrice) <= 0}
+                      className="btn-primary px-4 text-sm disabled:opacity-40">追加</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-night-700 pt-1.5">
+                <button onClick={() => setShowJoinModal(true)}
+                  className="btn-secondary w-full text-xs py-1.5">合流</button>
+              </div>
+
+              <div className="border-t border-night-700 pt-1.5">
                 <button onClick={fetchAI} disabled={loadingAI}
-                  className="flex items-center gap-2 text-primary-400 text-sm font-medium disabled:opacity-50">
-                  <Bot className="w-4 h-4" />
+                  className="flex items-center gap-1.5 text-primary-400 text-xs font-medium disabled:opacity-50">
+                  <Bot className="w-3.5 h-3.5" />
                   {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
                 </button>
                 {aiAdvice && (
@@ -714,19 +2929,67 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               </div>
             </div>
 
-            <div className="border-t border-night-600 p-3 grid grid-cols-2 gap-3 shrink-0">
-              <button onClick={() => closeMutation.mutate({ payment_method: 'cash', cash_amount: ticket.total_amount })}
-                className="btn-secondary flex items-center justify-center gap-2 py-3">
-                <Banknote className="w-4 h-4" />現金会計
+            <div className="border-t border-night-600 p-3 grid grid-cols-3 gap-2 shrink-0">
+              <button onClick={() => confirmCheckout(() => closeMutation.mutate({ payment_method: 'cash', cash_amount: ticket.total_amount }))}
+                className="btn-secondary flex items-center justify-center gap-1.5 py-3 text-sm">
+                <Banknote className="w-4 h-4 shrink-0" />現金決済
               </button>
-              <button onClick={() => closeMutation.mutate({ payment_method: 'card', card_amount: ticket.total_amount })}
-                className="btn-primary flex items-center justify-center gap-2 py-3">
-                <CreditCard className="w-4 h-4" />カード会計
+              <button onClick={() => confirmCheckout(() => closeMutation.mutate({ payment_method: 'card', card_amount: ticket.total_amount }))}
+                className="btn-primary flex items-center justify-center gap-1.5 py-3 text-sm">
+                <CreditCard className="w-4 h-4 shrink-0" />カード決済
               </button>
+              <button onClick={() => confirmCheckout(() => closeMutation.mutate({ payment_method: 'code', code_amount: ticket.total_amount }))}
+                className="bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-1.5 py-3 text-sm">
+                <QrCode className="w-4 h-4 shrink-0" />コード決済
+              </button>
+            </div>
+          </div>}
+        </div>
+      </div>
+
+      {/* 会計確認ダイアログ */}
+      {pendingAction && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]">
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-6 w-72 space-y-4 shadow-xl">
+            <p className="text-white text-center text-lg font-bold">会計済みですか？</p>
+            <div className="flex gap-3">
+              <button onClick={() => setPendingAction(null)} className="btn-secondary flex-1">いいえ</button>
+              <button onClick={() => { pendingAction(); setPendingAction(null) }} className="btn-primary flex-1">はい</button>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* 顧客検索モーダル */}
+      {showCustomerSearch && (
+        <CustomerSearchModal
+          storeId={storeId}
+          currentId={ticket.customer_id}
+          onSelect={id => setCustomerMutation.mutate(id)}
+          onClose={() => setShowCustomerSearch(false)}
+        />
+      )}
+
+      {/* キャスト選択モーダル（担当設定用） */}
+      {showCastSearch && (
+        <CastAssignModal
+          storeId={storeId}
+          currentCastName={ticket.current_cast_name}
+          onSelect={id => setCastMutation.mutate(id)}
+          onClose={() => setShowCastSearch(false)}
+        />
+      )}
+
+      {/* シャンパンメニュー */}
+      {showChampagneMenu && (
+        <ChampagneMenuModal
+          onSelect={(name, price) => {
+            setShowChampagneMenu(false)
+            setCastSelectItem({ type: 'champagne', label: name, price })
+          }}
+          onClose={() => setShowChampagneMenu(false)}
+        />
+      )}
 
       {/* キャスト選択モーダル */}
       {castSelectItem && (
@@ -735,11 +2998,26 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           itemLabel={castSelectItem.label}
           storeId={storeId}
           onSubmit={(selections) => {
-            for (const { castId, castName, ratio } of selections) {
-              const ratioLabel = castSelectItem.type === 'champagne' ? `${ratio}割` : ''
-              const itemName = ratioLabel
-                ? `${castSelectItem.label}［${castName} ${ratioLabel}］`
-                : `${castSelectItem.label}［${castName}］`
+            const isChampagne = castSelectItem.type === 'champagne'
+            if (isChampagne && selections.length > 0) {
+              const castsStr = selections.map(s => `${s.castName} ${s.ratio}%`).join('・')
+              const itemName = `${castSelectItem.label}［${castsStr}］`
+              // 最初のキャストに全額、残りは0円マーカー（D時間追跡用）
+              const orders = selections.map((s, i) => ({
+                item_type: 'champagne',
+                item_name: itemName,
+                unit_price: i === 0 ? castSelectItem.price : 0,
+                quantity: 1,
+                cast_id: s.castId,
+              }))
+              Promise.all(orders.map(o => apiClient.post(`/api/tickets/${ticketId}/orders`, o).then(r => r.data)))
+                .then(() => {
+                  qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+                  qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+                })
+            } else if (!isChampagne && selections.length > 0) {
+              const { castId, castName } = selections[0]
+              const itemName = `${castSelectItem.label}［${castName}］`
               addOrderMutation.mutate({ item_type: castSelectItem.type, item_name: itemName, unit_price: castSelectItem.price, quantity: 1, cast_id: castId })
             }
             setCastSelectItem(null)
@@ -747,6 +3025,1688 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           onClose={() => setCastSelectItem(null)}
         />
       )}
+
+      {/* 合流モーダル */}
+      {showJoinModal && (
+        <JoinModal
+          storeId={storeId}
+          onSubmit={data => joinMutation.mutate(data)}
+          onClose={() => setShowJoinModal(false)}
+          isPending={joinMutation.isPending}
+        />
+      )}
+
+      {/* 先退店モーダル */}
+      {showSentaitenModal && (
+        <SentaitenModal
+          currentGuestCount={ticket.guest_count || 1}
+          onSubmit={leaveCount => {
+            const newCount = (ticket.guest_count || 1) - leaveCount
+            apiClient.patch(`/api/tickets/${ticketId}`, { guest_count: newCount }).then(() => {
+              qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+              qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+            })
+            addOrderMutation.mutate({
+              item_type: 'other',
+              item_name: `先退店（${leaveCount}名）`,
+              unit_price: 0,
+              quantity: 1,
+            })
+            setShowSentaitenModal(false)
+          }}
+          onClose={() => setShowSentaitenModal(false)}
+        />
+      )}
+
+      {/* 値引きモーダル */}
+      {showDiscountModal && (
+        <DiscountModal
+          onSubmit={(amount, reason, operator) => {
+            setShowDiscountModal(false)
+            addOrderMutation.mutate({
+              item_type: 'other',
+              item_name: `値引き（${reason}）`,
+              unit_price: -amount,
+              quantity: 1,
+            })
+          }}
+          onClose={() => setShowDiscountModal(false)}
+        />
+      )}
+
+      {/* 先会計モーダル */}
+      {showSenkaikeiModal && (
+        <SenkaikeiModal
+          onSubmit={(amount, paymentMethod) => {
+            const methodLabel = { cash: '現金', card: 'カード', code: 'コード決済' }[paymentMethod] ?? paymentMethod
+            setShowSenkaikeiModal(false)
+            confirmCheckout(() => addOrderMutation.mutate({
+              item_type: 'other',
+              item_name: `先会計（${methodLabel}）`,
+              unit_price: -amount,
+              quantity: 1,
+            }))
+          }}
+          onClose={() => setShowSenkaikeiModal(false)}
+          isPending={addOrderMutation.isPending}
+        />
+      )}
+
+      {/* 割り勘モーダル */}
+      {showWarikanModal && (
+        <WarikanModal
+          totalAmount={grandTotal}
+          onSubmit={payments => {
+            setShowWarikanModal(false)
+            confirmCheckout(() => {
+              apiClient.post(`/api/tickets/${ticketId}/warikan`, {
+                payments: payments.map(({ amount, method }) => ({ amount, method })),
+              }).then((res) => {
+                // バックエンドで合計0になり自動クローズ済みの場合はcloseを呼ばない
+                if (res.data?.is_closed) {
+                  qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+                  qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+                  onClose()
+                } else {
+                  const cashTotal = payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0)
+                  const cardTotal = payments.filter(p => p.method === 'card').reduce((s, p) => s + p.amount, 0)
+                  const uniqueMethods = [...new Set(payments.map(p => p.method))]
+                  const paymentMethod = uniqueMethods.length === 1 ? uniqueMethods[0] : 'mixed'
+                  closeMutation.mutate({ payment_method: paymentMethod, cash_amount: cashTotal, card_amount: cardTotal })
+                }
+              }).catch(err => console.error('Warikan failed:', err))
+            })
+          }}
+          onClose={() => setShowWarikanModal(false)}
+        />
+      )}
+
+      {/* 合算モーダル */}
+      {showMergeModal && (
+        <MergeModal
+          storeId={storeId}
+          currentTicketId={ticketId}
+          onSubmit={targetId => mergeMutation.mutate(targetId)}
+          onClose={() => setShowMergeModal(false)}
+          isPending={mergeMutation.isPending}
+        />
+      )}
+
+      {/* 注文アクションパネル（selected行の直下にfixedオーバーレイ） */}
+      {(selectedOrderId || editingOrderId) && actionPos && (() => {
+        const item = ticket?.order_items?.find((i: any) => i.id === (editingOrderId || selectedOrderId))
+        if (!item) return null
+        const closePanel = () => { setEditingOrderId(null); setSelectedOrderId(null); setActionPos(null); setOperatorName(''); setOperatorReason(''); setActionMode('add') }
+        return (
+          <div
+            style={{ position: 'fixed', top: actionPos.top, left: actionPos.left, width: actionPos.width, zIndex: 200 }}
+            className="bg-night-800 border border-night-600 border-t-0 rounded-b-xl shadow-2xl px-4 py-3 space-y-2"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* タブ（編集確定入力中は非表示） */}
+            {!editingOrderId && (
+              <div className="flex gap-1.5">
+                <button onClick={() => {
+                  addOrderMutation.mutate({
+                    item_type: item.item_type,
+                    item_name: item.item_name || undefined,
+                    unit_price: item.unit_price,
+                    quantity: 1,
+                    cast_id: item.cast_id,
+                  }, { onSuccess: closePanel })
+                }}
+                  disabled={addOrderMutation.isPending}
+                  className="flex-1 text-xs py-1.5 rounded-lg transition-colors font-medium bg-primary-700 text-white hover:bg-primary-600 disabled:opacity-50">
+                  追加
+                </button>
+                <button onClick={() => setActionMode('delete')}
+                  className={`flex-1 text-xs py-1.5 rounded-lg transition-colors font-medium ${actionMode === 'delete' ? 'bg-red-800/80 text-red-200' : 'bg-night-700 text-gray-400 hover:bg-night-600'}`}>
+                  削除
+                </button>
+                <button onClick={() => {
+                  setActionMode('edit')
+                  const groupItems = (ticket?.order_items || []).filter((i: any) =>
+                    !i.canceled_at &&
+                    i.item_type === item.item_type &&
+                    (i.item_name ?? '') === (item.item_name ?? '') &&
+                    i.unit_price === item.unit_price
+                  )
+                  const groupQty = groupItems.reduce((s: number, i: any) => s + i.quantity, 0)
+                  setEditingGroupMaxQty(groupQty)
+                  setEditingGroupItemIds(groupItems.map((i: any) => i.id))
+                  setEditingQty(groupQty)
+                  setEditingOrderId(selectedOrderId)
+                  setOperatorName('')
+                  setOperatorReason('')
+                }}
+                  className={`flex-1 text-xs py-1.5 rounded-lg transition-colors font-medium ${actionMode === 'edit' ? 'bg-gray-600 text-white' : 'bg-night-700 text-gray-400 hover:bg-night-600'}`}>
+                  編集
+                </button>
+                <button onClick={closePanel}
+                  className="flex-1 text-xs py-1.5 rounded-lg bg-night-700 text-gray-500 hover:bg-night-600 transition-colors">
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* 削除・編集モード（operator入力） */}
+            {((!editingOrderId && actionMode === 'delete') || editingOrderId) && (
+              <>
+                {editingOrderId && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 shrink-0">数量</span>
+                    <input type="number" min={1} max={editingGroupMaxQty} value={editingQty}
+                      onChange={e => setEditingQty(Math.min(editingGroupMaxQty, Math.max(1, Number(e.target.value))))}
+                      className="input-field w-20 text-center text-sm py-1" />
+                    <span className="text-xs text-gray-500">/ {editingGroupMaxQty}</span>
+                  </div>
+                )}
+                <input type="text" placeholder="担当者名（必須）" value={operatorName}
+                  onChange={e => setOperatorName(e.target.value)}
+                  className="input-field w-full text-xs py-1" autoFocus />
+                <input type="text" placeholder="理由（任意）" value={operatorReason}
+                  onChange={e => setOperatorReason(e.target.value)}
+                  className="input-field w-full text-xs py-1" />
+                <div className="flex gap-2 justify-end">
+                  {!editingOrderId ? (
+                    <button
+                      onClick={() => cancelOrderMutation.mutate({ itemId: selectedOrderId!, operator: operatorName, reason: operatorReason })}
+                      disabled={!operatorName.trim() || cancelOrderMutation.isPending}
+                      className="text-xs px-3 py-1.5 bg-red-800/60 hover:bg-red-700/70 text-red-300 rounded-lg transition-colors disabled:opacity-40">
+                      削除する
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (editingGroupItemIds.length > 1) {
+                          groupReduceMutation.mutate({ item, targetQty: editingQty, operator: operatorName, reason: operatorReason })
+                        } else {
+                          updateOrderMutation.mutate({ itemId: editingOrderId!, quantity: editingQty, operator: operatorName, reason: operatorReason })
+                        }
+                      }}
+                      disabled={!operatorName.trim() || updateOrderMutation.isPending || groupReduceMutation.isPending}
+                      className="text-xs px-3 py-1.5 bg-primary-700 hover:bg-primary-600 text-white rounded-lg transition-colors disabled:opacity-50">
+                      確定
+                    </button>
+                  )}
+                  <button onClick={closePanel}
+                    className="text-xs px-3 py-1.5 bg-night-600 hover:bg-night-500 text-gray-400 rounded-lg transition-colors">
+                    キャンセル
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })()}
+
+      {showLog && ticket && (
+        <TicketLogModal ticket={ticket} onClose={() => setShowLog(false)} />
+      )}
     </div>
   )
+}
+
+function JoinModal({ storeId, onSubmit, onClose, isPending }: {
+  storeId: number
+  onSubmit: (data: {
+    guest_count: number
+    visit_type: string
+    customer_name?: string
+    visit_motivation?: string
+    motivation_cast_id?: number | null
+    motivation_note?: string
+    plan_type: string
+  }) => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  const [guestCount, setGuestCount] = useState(1)
+  const [visitType, setVisitType] = useState('N')
+  const [customerName, setCustomerName] = useState('')
+  const [motivation, setMotivation] = useState('')
+  const [motivationCastId, setMotivationCastId] = useState<number | null>(null)
+  const [motivationNote, setMotivationNote] = useState('')
+  const [planType, setPlanType] = useState('standard')
+
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+
+  const needsCast = MOTIVATION_CAST_REQUIRED.has(motivation)
+  const needsNote = motivation === '紹介'
+
+  const row = "flex items-center gap-2"
+  const label = "text-xs text-gray-400 w-20 shrink-0"
+
+  const handleSubmit = () => {
+    onSubmit({
+      guest_count: guestCount,
+      visit_type: visitType,
+      customer_name: customerName || undefined,
+      visit_motivation: motivation || undefined,
+      motivation_cast_id: needsCast ? motivationCastId : null,
+      motivation_note: needsNote ? motivationNote : undefined,
+      plan_type: planType,
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
+      <div className="card w-full max-w-sm space-y-2.5">
+        <div className="flex justify-between items-center mb-1">
+          <h3 className="font-bold text-white">合流</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className={row}>
+          <span className={label}>人数</span>
+          <select value={guestCount} onChange={e => setGuestCount(Number(e.target.value))} className="input-field flex-1 text-sm py-1.5">
+            {Array.from({length: 20}, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}名</option>)}
+          </select>
+        </div>
+
+        <div className={row}>
+          <span className={label}>区分</span>
+          <div className="flex gap-1.5 flex-1">
+            {['N', 'R'].map(v => (
+              <button key={v} onClick={() => setVisitType(v)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${visitType === v ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={row}>
+          <span className={label}>顧客名</span>
+          <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)}
+            placeholder="顧客名（任意）"
+            className="input-field flex-1 text-sm py-1.5" />
+        </div>
+
+        <div className={row}>
+          <span className={label}>来店動機</span>
+          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastId(null); setMotivationNote('') }}
+            className="input-field flex-1 text-sm py-1.5">
+            <option value="">未選択</option>
+            {MOTIVATION_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+
+        {needsCast && (
+          <div className={row}>
+            <span className={label}>キャスト</span>
+            <select value={motivationCastId ?? ''} onChange={e => setMotivationCastId(e.target.value ? Number(e.target.value) : null)}
+              className="input-field flex-1 text-sm py-1.5">
+              <option value="">選択してください</option>
+              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {needsNote && (
+          <div className={row}>
+            <span className={label}>紹介者</span>
+            <input type="text" value={motivationNote} onChange={e => setMotivationNote(e.target.value)}
+              placeholder="紹介者名を入力"
+              className="input-field flex-1 text-sm py-1.5" />
+          </div>
+        )}
+
+        <div className={row}>
+          <span className={label}>プラン</span>
+          <div className="flex gap-1.5 flex-1">
+            {['standard', 'premium'].map(p => (
+              <button key={p} onClick={() => setPlanType(p)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${planType === p ? 'bg-primary-600 text-white' : 'btn-secondary'}`}>
+                {p === 'premium' ? 'プレミアム' : 'スタンダード'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={handleSubmit} disabled={isPending}
+            className="btn-primary flex-1 disabled:opacity-50">合流追加</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: {
+  storeId: number
+  currentTicketId: number
+  onSubmit: (targetId: number) => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  const { data: tickets = [] } = useQuery({
+    queryKey: ['tickets', storeId, 'open'],
+    queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
+  })
+
+  const others = (tickets as any[]).filter((t: any) => t.id !== currentTicketId)
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
+      <div className="card w-full max-w-sm space-y-3">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">合算 — 伝票を選択</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <p className="text-xs text-gray-400">選択した伝票の注文をすべてこの伝票に移動し、元の伝票を閉じます。</p>
+        <div className="space-y-1.5 max-h-72 overflow-y-auto">
+          {others.map((t: any) => (
+            <button key={t.id} onClick={() => onSubmit(t.id)} disabled={isPending}
+              className="w-full text-left px-3 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors disabled:opacity-50">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white">{t.table_no || '—'}</span>
+                  {t.visit_type && <span className={`badge text-xs ${t.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{t.visit_type}</span>}
+                  <span className="text-gray-400 text-xs">{t.guest_count}名</span>
+                  {t.customer_name && <span className="text-gray-400 text-xs truncate">{t.customer_name}</span>}
+                </div>
+                <span className="text-pink-400 font-medium shrink-0">¥{calcTicketGrandTotal(t).toLocaleString()}</span>
+              </div>
+            </button>
+          ))}
+          {others.length === 0 && (
+            <p className="text-center text-gray-500 text-sm py-6">合算できる伝票がありません</p>
+          )}
+        </div>
+        <button onClick={onClose} className="btn-secondary w-full">キャンセル</button>
+      </div>
+    </div>
+  )
+}
+
+function DiscountModal({ onSubmit, onClose }: {
+  onSubmit: (amount: number, reason: string, operator: string) => void
+  onClose: () => void
+}) {
+  const [input, setInput] = useState('')
+  const [reasonType, setReasonType] = useState<'端数カット' | 'その他'>('端数カット')
+  const [customReason, setCustomReason] = useState('')
+  const [operator, setOperator] = useState('')
+
+  const amount = parseInt(input, 10) || 0
+  const reason = reasonType === 'その他' ? (customReason.trim() || 'その他') : '端数カット'
+  const canSubmit = amount > 0 && operator.trim()
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
+      <div className="card w-full max-w-sm space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">値引き</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">値引き金額</label>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400">¥</span>
+            <input type="number" min={1} value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="0"
+              className="input-field flex-1 text-lg text-right"
+              autoFocus />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">理由</label>
+          <select value={reasonType} onChange={e => setReasonType(e.target.value as any)}
+            className="input-field w-full">
+            <option value="端数カット">端数カット</option>
+            <option value="その他">その他</option>
+          </select>
+          {reasonType === 'その他' && (
+            <input type="text" placeholder="理由を入力" value={customReason}
+              onChange={e => setCustomReason(e.target.value)}
+              className="input-field w-full mt-2 text-sm" />
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">担当者名</label>
+          <input type="text" placeholder="担当者名（必須）" value={operator}
+            onChange={e => setOperator(e.target.value)}
+            className="input-field w-full text-sm" />
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button
+            onClick={() => { if (canSubmit) onSubmit(amount, reason, operator) }}
+            disabled={!canSubmit}
+            className="btn-primary flex-1 disabled:opacity-40">
+            実行
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SenkaikeiModal({ onSubmit, onClose, isPending }: {
+  onSubmit: (amount: number, paymentMethod: string) => void
+  onClose: () => void
+  isPending: boolean
+}) {
+  const [input, setInput] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<string | null>(null)
+  const amount = parseInt(input, 10) || 0
+  const canSubmit = amount > 0 && paymentMethod !== null && !isPending
+
+  const PAYMENT_METHODS = [
+    { key: 'cash', label: '現金' },
+    { key: 'card', label: 'カード' },
+    { key: 'code', label: 'コード決済' },
+  ]
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
+      <div className="card w-full max-w-xs space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">先会計</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* 支払方法 */}
+        <div>
+          <p className="text-xs text-gray-400 mb-2">支払方法</p>
+          <div className="flex gap-2">
+            {PAYMENT_METHODS.map(m => (
+              <button key={m.key} onClick={() => setPaymentMethod(m.key)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${paymentMethod === m.key ? 'bg-primary-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 金額入力 */}
+        <div>
+          <p className="text-xs text-gray-400 mb-2">金額</p>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">¥</span>
+            <input
+              type="number"
+              min={1}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="0"
+              className="input-field w-full text-lg pl-8"
+              autoFocus
+            />
+          </div>
+        </div>
+
+        {amount > 0 && paymentMethod && (
+          <div className="bg-blue-900/20 border border-blue-700/40 rounded-xl px-4 py-2 text-center">
+            <span className="text-blue-300 font-bold text-lg">¥{amount.toLocaleString()}</span>
+            <span className="text-blue-400 text-xs ml-2">
+              {PAYMENT_METHODS.find(m => m.key === paymentMethod)?.label}で先会計
+            </span>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button
+            onClick={() => { if (canSubmit) onSubmit(amount, paymentMethod!) }}
+            disabled={!canSubmit}
+            className="btn-primary flex-1 disabled:opacity-40">
+            会計実行
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const WARIKAN_PAYMENT_OPTIONS = [
+  { key: '', label: '支払方法' },
+  { key: 'cash', label: '現金' },
+  { key: 'card', label: 'カード決済' },
+  { key: 'code', label: 'コード決済' },
+]
+
+function WarikanModal({ totalAmount, onSubmit, onClose }: {
+  totalAmount: number
+  onSubmit: (payments: { amount: number; method: string }[]) => void
+  onClose: () => void
+}) {
+  const [count, setCount] = useState(2)
+  const [amounts, setAmounts] = useState<string[]>(Array(2).fill(''))
+  const [methods, setMethods] = useState<string[]>(Array(2).fill(''))
+
+  const handleCountChange = (n: number) => {
+    setCount(n)
+    setAmounts(prev => {
+      const next = Array(n).fill('')
+      for (let i = 0; i < Math.min(prev.length, n); i++) next[i] = prev[i]
+      return next
+    })
+    setMethods(prev => {
+      const next = Array(n).fill('')
+      for (let i = 0; i < Math.min(prev.length, n); i++) next[i] = prev[i]
+      return next
+    })
+  }
+
+  const entered = amounts.reduce((s, v) => s + (parseInt(v, 10) || 0), 0)
+  const remaining = Math.round(totalAmount - entered)
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
+      <div className="card w-full max-w-sm space-y-3">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">割り勘</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* 合計表示 */}
+        <div className="bg-night-700 rounded-xl px-4 py-2 flex justify-between items-center">
+          <span className="text-xs text-gray-400">合計金額</span>
+          <span className="font-bold text-primary-400">¥{totalAmount.toLocaleString()}</span>
+        </div>
+
+        {/* 人数選択 */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400 w-16 shrink-0">人数</span>
+          <div className="flex gap-1.5 flex-wrap flex-1">
+            {[2,3,4,5,6,7,8,9,10].map(n => (
+              <button key={n} onClick={() => handleCountChange(n)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${count === n ? 'bg-primary-600 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
+                {n}名
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 各人の金額入力 */}
+        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+          {amounts.map((v, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 w-10 shrink-0 text-right">{i + 1}人目</span>
+              <div className="relative w-28 shrink-0">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-sm">¥</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={v}
+                  onChange={e => setAmounts(prev => { const next = [...prev]; next[i] = e.target.value; return next })}
+                  placeholder="0"
+                  className="input-field w-full text-sm pl-6 py-1.5"
+                />
+              </div>
+              <select
+                value={methods[i]}
+                onChange={e => setMethods(prev => { const next = [...prev]; next[i] = e.target.value; return next })}
+                className="input-field flex-1 text-xs py-1.5">
+                {WARIKAN_PAYMENT_OPTIONS.map(o => (
+                  <option key={o.key} value={o.key} disabled={o.key === ''}>{o.label}</option>
+                ))}
+              </select>
+              {remaining > 0 && (
+                <button
+                  onClick={() => setAmounts(prev => {
+                    const next = [...prev]
+                    next[i] = String((parseInt(prev[i], 10) || 0) + remaining)
+                    return next
+                  })}
+                  className="text-xs text-primary-400 hover:text-primary-300 shrink-0 whitespace-nowrap">
+                  +残額
+                </button>
+              )}
+              <span className="text-xs text-gray-400 w-16 shrink-0 text-right">
+                {v ? `¥${(parseInt(v, 10) || 0).toLocaleString()}` : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* 残金額 */}
+        <div className={`rounded-xl px-4 py-2.5 flex justify-between items-center ${remaining < 0 ? 'bg-red-900/30 border border-red-700/40' : remaining === 0 ? 'bg-green-900/30 border border-green-700/40' : 'bg-night-700'}`}>
+          <span className="text-xs text-gray-400">残金額</span>
+          <span className={`font-bold text-lg ${remaining < 0 ? 'text-red-400' : remaining === 0 ? 'text-green-400' : 'text-white'}`}>
+            ¥{remaining.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button
+            onClick={() => {
+              const payments = amounts
+                .map((v, i) => ({ amount: parseInt(v, 10) || 0, method: methods[i] }))
+                .filter(p => p.amount > 0)
+              onSubmit(payments)
+            }}
+            disabled={Math.round(remaining) !== 0 || amounts.some((v, i) => (parseInt(v, 10) || 0) > 0 && !methods[i])}
+            className="btn-primary flex-1 disabled:opacity-40">
+            会計実行
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SentaitenModal({ currentGuestCount, onSubmit, onClose }: {
+  currentGuestCount: number
+  onSubmit: (leaveCount: number) => void
+  onClose: () => void
+}) {
+  const [leaveCount, setLeaveCount] = useState(1)
+  const maxLeave = currentGuestCount - 1
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
+      <div className="card w-full max-w-xs space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">先退店</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        <div className="bg-night-700 rounded-xl px-4 py-2 flex justify-between items-center">
+          <span className="text-xs text-gray-400">現在の人数</span>
+          <span className="font-bold text-white">{currentGuestCount}名</span>
+        </div>
+
+        {maxLeave <= 0 ? (
+          <p className="text-sm text-gray-500 text-center py-2">先退店できる人数がいません（1名のみ）</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400 shrink-0">退店人数</span>
+              <select
+                value={leaveCount}
+                onChange={e => setLeaveCount(Number(e.target.value))}
+                className="input-field flex-1 text-sm">
+                {Array.from({ length: maxLeave }, (_, i) => i + 1).map(n => (
+                  <option key={n} value={n}>{n}名</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="bg-orange-900/20 border border-orange-700/40 rounded-xl px-4 py-2 flex justify-between items-center">
+              <span className="text-xs text-orange-400">退店後の残り人数</span>
+              <span className="font-bold text-orange-300">{currentGuestCount - leaveCount}名</span>
+            </div>
+          </>
+        )}
+
+        <div className="flex gap-3">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button
+            onClick={() => onSubmit(leaveCount)}
+            disabled={maxLeave <= 0}
+            className="btn-primary flex-1 disabled:opacity-40">
+            実行
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────
+// キャスト勤怠
+// ─────────────────────────────────────────
+// 30分刻みの時刻スロット生成（営業時間: 19:00〜29:00）
+// label: バー表記 "24:00" 等, value: 実際の HH:MM をバックエンドへ送る
+function genTimeSlots(): { label: string; value: string }[] {
+  const slots: { label: string; value: string }[] = []
+  for (let i = 19 * 2; i <= 29 * 2; i++) {
+    const totalMins = i * 30
+    const displayH = Math.floor(totalMins / 60)
+    const displayM = totalMins % 60
+    const actualH = displayH % 24
+    const label = `${displayH.toString().padStart(2, '0')}:${displayM.toString().padStart(2, '0')}`
+    const value = `${actualH.toString().padStart(2, '0')}:${displayM.toString().padStart(2, '0')}`
+    slots.push({ label, value })
+  }
+  return slots
+}
+const TIME_SLOTS = genTimeSlots()
+
+// 実際のHH:MM → バー表記（00:00 → 24:00）
+function toBarDisplay(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const displayH = h < 12 ? h + 24 : h
+  return `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`
+}
+
+// バー表記HH:MM → 実HH:MM（"24:30" → "00:30"）
+function barToActual(bar: string): string {
+  const [h, m] = bar.split(':').map(Number)
+  if (isNaN(h) || isNaN(m)) return bar
+  return `${(h % 24).toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`
+}
+
+// 時刻選択モーダル（プルダウン＋手入力、出勤時は遅刻/当欠タブ付き）
+function TimePickerModal({ title, defaultValue, onSelect, onClose, showStatusTabs = false }: {
+  title: string
+  defaultValue: string
+  onSelect: (value: string, opts?: { is_late?: boolean; is_absent?: boolean }) => void
+  onClose: () => void
+  showStatusTabs?: boolean
+}) {
+  const nearest = TIME_SLOTS.find(s => s.value === defaultValue)?.value ?? TIME_SLOTS[0].value
+  const [selected, setSelected] = useState(nearest)
+  const [manual, setManual] = useState(toBarDisplay(nearest))
+  const [useManual, setUseManual] = useState(false)
+  const [status, setStatus] = useState<'normal' | 'late' | 'absent'>('normal')
+
+  const handleSelect = (value: string) => {
+    setSelected(value)
+    setManual(toBarDisplay(value))
+    setUseManual(false)
+  }
+
+  const handleManualChange = (v: string) => {
+    setManual(v)
+    setUseManual(true)
+    if (/^\d{1,2}:\d{2}$/.test(v)) {
+      const actual = barToActual(v)
+      const match = TIME_SLOTS.find(s => s.value === actual)
+      if (match) { setSelected(match.value); setUseManual(false) }
+    }
+  }
+
+  const handleConfirm = () => {
+    if (status === 'absent') {
+      onSelect('', { is_absent: true })
+      return
+    }
+    const time = useManual && /^\d{1,2}:\d{2}$/.test(manual) ? barToActual(manual) : selected
+    onSelect(time, { is_late: status === 'late' })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+      <div className="card w-full max-w-xs space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white text-sm">{title}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* 遅刻/当欠タブ（出勤時のみ） */}
+        {showStatusTabs && (
+          <div className="flex gap-1.5">
+            {(['normal', 'late', 'absent'] as const).map(s => (
+              <button key={s} onClick={() => setStatus(s)}
+                className={`flex-1 text-xs py-1.5 rounded-lg transition-colors font-medium ${
+                  status === s
+                    ? s === 'normal' ? 'bg-emerald-700 text-white'
+                      : s === 'late' ? 'bg-yellow-700 text-white'
+                      : 'bg-red-800 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}>
+                {s === 'normal' ? '通常' : s === 'late' ? '遅刻' : '当欠'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 当欠は時刻選択不要 */}
+        {status !== 'absent' && (
+          <>
+            <input type="text" value={manual} onChange={e => handleManualChange(e.target.value)}
+              placeholder="例: 24:30"
+              className={`input-field w-full text-center text-lg font-mono py-2 ${useManual ? 'border-primary-500' : ''}`} />
+            <select value={selected} onChange={e => handleSelect(e.target.value)}
+              className="input-field w-full text-sm py-1" size={7}>
+              {TIME_SLOTS.map(slot => (
+                <option key={slot.value} value={slot.value}>{slot.label}</option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {status === 'absent' && (
+          <div className="text-center text-red-400 text-sm py-4 bg-red-900/20 rounded-lg">
+            当欠として登録します
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={handleConfirm}
+            className={`flex-1 py-2 text-white rounded-lg text-sm font-medium transition-colors ${
+              status === 'absent' ? 'bg-red-700 hover:bg-red-600' :
+              status === 'late' ? 'bg-yellow-700 hover:bg-yellow-600' :
+              'bg-primary-700 hover:bg-primary-600'
+            }`}>
+            確定
+          </button>
+          <button onClick={onClose}
+            className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors">
+            キャンセル
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CastAttendanceView({ storeId }: { storeId: number }) {
+  const qc = useQueryClient()
+  const [showClockIn, setShowClockIn] = useState(false)
+  const [q, setQ] = useState('')
+  const [now, setNow] = useState(Date.now())
+
+  // 出勤フロー: キャスト選択 → 時刻選択
+  const [clockInCast, setClockInCast] = useState<{ id: number; name: string } | null>(null)
+
+  // 退勤フロー: 退勤ボタン → 時刻選択
+  const [clockOutShiftId, setClockOutShiftId] = useState<number | null>(null)
+
+  // 時間修正（キャスト）
+  const [editingShiftId, setEditingShiftId] = useState<number | null>(null)
+  const [editStart, setEditStart] = useState('')
+  const [editEnd, setEditEnd] = useState('')
+  const [editTarget, setEditTarget] = useState<'start' | 'end' | null>(null)
+
+  // 社員/アルバイト出勤フロー: null=非表示, 'name'=名前入力, 'time'=時刻選択
+  const [staffClockInStep, setStaffClockInStep] = useState<null | 'name' | 'time'>(null)
+  const [staffClockInName, setStaffClockInName] = useState('')
+  // 社員退勤/時間修正
+  const [staffClockOutId, setStaffClockOutId] = useState<number | null>(null)
+  const [editingStaffId, setEditingStaffId] = useState<number | null>(null)
+  const [staffEditStart, setStaffEditStart] = useState('')
+  const [staffEditEnd, setStaffEditEnd] = useState('')
+  const [staffEditTarget, setStaffEditTarget] = useState<'start' | 'end' | null>(null)
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const { data: working = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    enabled: !!storeId,
+    refetchInterval: 30000,
+  })
+
+  const { data: staffRecords = [] } = useQuery({
+    queryKey: ['staff-attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/staff-attendance/today/${storeId}`).then(r => r.data),
+    enabled: !!storeId,
+    refetchInterval: 30000,
+  })
+
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+    enabled: !!storeId,
+  })
+  const workingCastIds = new Set((working as any[]).filter((w: any) => !w.actual_end).map((w: any) => w.cast_id))
+  const filteredCasts = (castsAll as any[]).filter((c: any) =>
+    c.is_active && !workingCastIds.has(c.id) && (!q || c.stage_name?.includes(q))
+  )
+
+  // 社員/アルバイト mutations
+  const staffClockInMutation = useMutation({
+    mutationFn: ({ name, time, is_late, is_absent }: { name: string; time: string; is_late?: boolean; is_absent?: boolean }) =>
+      apiClient.post('/api/casts/staff-attendance/clock-in', {
+        store_id: storeId, name,
+        actual_start: is_absent ? undefined : (time || undefined),
+        is_late: !!is_late,
+        is_absent: !!is_absent,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+      setStaffClockInStep(null)
+      setStaffClockInName('')
+    },
+  })
+
+  const staffClockOutMutation = useMutation({
+    mutationFn: ({ id, time }: { id: number; time: string }) =>
+      apiClient.post(`/api/casts/staff-attendance/${id}/clock-out`, { actual_end: time }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+      setStaffClockOutId(null)
+    },
+  })
+
+  const staffDeleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.delete(`/api/casts/staff-attendance/${id}`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] }),
+  })
+
+  const staffUpdateTimeMutation = useMutation({
+    mutationFn: ({ id, actual_start, actual_end }: { id: number; actual_start?: string; actual_end?: string }) =>
+      apiClient.patch(`/api/casts/staff-attendance/${id}/time`, { actual_start, actual_end }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+      setEditingStaffId(null)
+      setStaffEditTarget(null)
+    },
+  })
+
+  const clockInMutation = useMutation({
+    mutationFn: ({ castId, time, is_late, is_absent }: { castId: number; time: string; is_late?: boolean; is_absent?: boolean }) =>
+      apiClient.post('/api/casts/attendance/clock-in', {
+        cast_id: castId, store_id: storeId,
+        actual_start: time || undefined,
+        is_late: !!is_late,
+        is_absent: !!is_absent,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      setShowClockIn(false)
+      setClockInCast(null)
+      setQ('')
+    },
+  })
+
+  const clockOutMutation = useMutation({
+    mutationFn: ({ shiftId, time }: { shiftId: number; time: string }) =>
+      apiClient.post(`/api/casts/attendance/${shiftId}/clock-out`, { actual_end: time }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      setClockOutShiftId(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (shiftId: number) => apiClient.post(`/api/casts/attendance/${shiftId}/remove`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['attendance', storeId] }),
+  })
+
+  const updateTimeMutation = useMutation({
+    mutationFn: ({ shiftId, actual_start, actual_end }: { shiftId: number; actual_start?: string; actual_end?: string }) =>
+      apiClient.patch(`/api/casts/attendance/${shiftId}/time`, { actual_start, actual_end }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      setEditingShiftId(null)
+      setEditTarget(null)
+    },
+  })
+
+  // ISO → 実際の HH:MM（バックエンド送信用・TIME_SLOTS の value と対応）
+  const isoToActual = (iso: string) => {
+    const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+    const jst = new Date(d.getTime() + 9 * 3600 * 1000)
+    return `${jst.getUTCHours().toString().padStart(2, '0')}:${jst.getUTCMinutes().toString().padStart(2, '0')}`
+  }
+
+  // ISO → バー表記（表示用: 00:30 → 24:30）
+  const isoToBarDisp = (iso: string) => toBarDisplay(isoToActual(iso))
+
+  // 現在時刻を30分刻みで丸めた実HH:MM
+  const nowHhmm = () => {
+    const jst = new Date(Date.now() + 9 * 3600 * 1000)
+    const h = jst.getUTCHours(), m = jst.getUTCMinutes()
+    return `${h.toString().padStart(2, '0')}:${m < 30 ? '00' : '30'}`
+  }
+
+  const fmtElapsed = (startIso: string) => {
+    const startMs = new Date(startIso.endsWith('Z') ? startIso : startIso + 'Z').getTime()
+    const sec = Math.floor((now - startMs) / 1000)
+    const h = Math.floor(sec / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    const s = sec % 60
+    return h > 0
+      ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+      : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
+
+  // キャストカード共通レンダラ
+  const renderCastCard = (w: any) => (
+    <div key={w.shift_id} className="bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-white font-medium text-sm">{w.cast_name}</span>
+            {w.is_absent
+              ? <span className="text-xs px-1.5 py-0.5 bg-red-900/60 text-red-400 rounded">当欠</span>
+              : w.actual_end
+                ? <span className="text-xs px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded">退勤済み</span>
+                : <span className="text-xs px-1.5 py-0.5 bg-emerald-900/60 text-emerald-400 rounded">勤務中</span>
+            }
+            {w.is_late && !w.is_absent && (
+              <span className="text-xs px-1.5 py-0.5 bg-yellow-900/60 text-yellow-400 rounded">遅刻</span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 mt-0.5">
+            {w.is_absent ? '当欠' : <>
+              出勤 {w.actual_start ? isoToBarDisp(w.actual_start) : '—'}
+              {w.actual_end && <> → 退勤 {isoToBarDisp(w.actual_end)}</>}
+            </>}
+          </div>
+        </div>
+        {!w.actual_end && !w.is_absent && w.actual_start && (
+          <div className="text-xs font-mono text-emerald-400 shrink-0">{fmtElapsed(w.actual_start)}</div>
+        )}
+      </div>
+      <div className="flex gap-1.5">
+        <button onClick={() => { setEditingShiftId(w.shift_id); setEditStart(w.actual_start ? isoToActual(w.actual_start) : ''); setEditEnd(w.actual_end ? isoToActual(w.actual_end) : ''); setEditTarget(null) }}
+          className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors">
+          時間修正
+        </button>
+        <button onClick={() => setClockOutShiftId(w.shift_id)}
+          disabled={!!w.actual_end || !!w.is_absent}
+          className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+          退勤
+        </button>
+        <button onClick={() => deleteMutation.mutate(w.shift_id)}
+          disabled={deleteMutation.isPending}
+          className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors disabled:opacity-40">
+          削除
+        </button>
+      </div>
+      {editingShiftId === w.shift_id && (
+        <div className="border-t border-gray-700 pt-2 space-y-2">
+          <div className="flex gap-2">
+            <button onClick={() => setEditTarget('start')}
+              className="flex-1 text-left px-2 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+              <div className="text-xs text-gray-500">出勤</div>
+              <div className="text-sm text-white font-mono">{editStart ? toBarDisplay(editStart) : '未設定'}</div>
+            </button>
+            <button onClick={() => setEditTarget('end')}
+              className="flex-1 text-left px-2 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+              <div className="text-xs text-gray-500">退勤</div>
+              <div className="text-sm text-white font-mono">{editEnd ? toBarDisplay(editEnd) : '未設定'}</div>
+            </button>
+          </div>
+          <div className="flex gap-1.5 justify-end">
+            <button onClick={() => updateTimeMutation.mutate({ shiftId: w.shift_id, actual_start: editStart || undefined, actual_end: editEnd || undefined })}
+              disabled={!editStart || updateTimeMutation.isPending}
+              className="text-xs px-3 py-1 bg-primary-700 hover:bg-primary-600 text-white rounded-lg disabled:opacity-40 transition-colors">確定</button>
+            <button onClick={() => { setEditingShiftId(null); setEditTarget(null) }}
+              className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded-lg transition-colors">キャンセル</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex gap-4 min-h-0">
+
+        {/* 左: 社員/アルバイト勤怠 */}
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white">社員/アルバイト勤怠</h2>
+            <button onClick={() => setStaffClockInStep('name')}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded-lg transition-colors">
+              <Plus className="w-3.5 h-3.5" />出勤
+            </button>
+          </div>
+          {(staffRecords as any[]).length === 0 ? (
+            <div className="text-gray-600 text-xs text-center py-12">記録はありません</div>
+          ) : (
+            <div className="space-y-2">
+              {(staffRecords as any[]).map((r: any) => (
+                <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-white font-medium text-sm">{r.name}</span>
+                        {r.is_absent
+                          ? <span className="text-xs px-1.5 py-0.5 bg-red-900/60 text-red-400 rounded">当欠</span>
+                          : r.actual_end
+                            ? <span className="text-xs px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded">退勤済み</span>
+                            : <span className="text-xs px-1.5 py-0.5 bg-blue-900/60 text-blue-400 rounded">勤務中</span>
+                        }
+                        {r.is_late && !r.is_absent && (
+                          <span className="text-xs px-1.5 py-0.5 bg-yellow-900/60 text-yellow-400 rounded">遅刻</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {r.is_absent ? '当欠' : <>
+                          出勤 {r.actual_start ? isoToBarDisp(r.actual_start) : '—'}
+                          {r.actual_end && <> → 退勤 {isoToBarDisp(r.actual_end)}</>}
+                        </>}
+                      </div>
+                    </div>
+                    {!r.actual_end && !r.is_absent && r.actual_start && (
+                      <div className="text-xs font-mono text-blue-400 shrink-0">{fmtElapsed(r.actual_start)}</div>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => { setEditingStaffId(r.id); setStaffEditStart(r.actual_start ? isoToActual(r.actual_start) : ''); setStaffEditEnd(r.actual_end ? isoToActual(r.actual_end) : ''); setStaffEditTarget(null) }}
+                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg transition-colors">
+                      時間修正
+                    </button>
+                    <button onClick={() => setStaffClockOutId(r.id)}
+                      disabled={!!r.actual_end || !!r.is_absent}
+                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                      退勤
+                    </button>
+                    <button onClick={() => staffDeleteMutation.mutate(r.id)}
+                      disabled={staffDeleteMutation.isPending}
+                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors disabled:opacity-40">
+                      削除
+                    </button>
+                  </div>
+                  {editingStaffId === r.id && (
+                    <div className="border-t border-gray-700 pt-2 space-y-2">
+                      <div className="flex gap-2">
+                        <button onClick={() => setStaffEditTarget('start')}
+                          className="flex-1 text-left px-2 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+                          <div className="text-xs text-gray-500">出勤</div>
+                          <div className="text-sm text-white font-mono">{staffEditStart ? toBarDisplay(staffEditStart) : '未設定'}</div>
+                        </button>
+                        <button onClick={() => setStaffEditTarget('end')}
+                          className="flex-1 text-left px-2 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors">
+                          <div className="text-xs text-gray-500">退勤</div>
+                          <div className="text-sm text-white font-mono">{staffEditEnd ? toBarDisplay(staffEditEnd) : '未設定'}</div>
+                        </button>
+                      </div>
+                      <div className="flex gap-1.5 justify-end">
+                        <button onClick={() => staffUpdateTimeMutation.mutate({ id: r.id, actual_start: staffEditStart || undefined, actual_end: staffEditEnd || undefined })}
+                          disabled={!staffEditStart || staffUpdateTimeMutation.isPending}
+                          className="text-xs px-3 py-1 bg-primary-700 hover:bg-primary-600 text-white rounded-lg disabled:opacity-40 transition-colors">確定</button>
+                        <button onClick={() => { setEditingStaffId(null); setStaffEditTarget(null) }}
+                          className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded-lg transition-colors">キャンセル</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 右: キャスト勤怠 */}
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white">キャスト勤怠 <span className="text-emerald-400 text-xs ml-1">{(working as any[]).filter((w: any) => !w.actual_end && !w.is_absent).length}名勤務中</span></h2>
+            <button onClick={() => setShowClockIn(true)}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs rounded-lg transition-colors">
+              <Plus className="w-3.5 h-3.5" />出勤
+            </button>
+          </div>
+          {(working as any[]).length === 0 ? (
+            <div className="text-gray-600 text-xs text-center py-12">本日の出勤記録はありません</div>
+          ) : (
+            <div className="space-y-2">
+              {(working as any[]).map(renderCastCard)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 出勤: キャスト検索モーダル */}
+      {showClockIn && !clockInCast && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setShowClockIn(false); setQ('') }}>
+          <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-white">出勤キャストを選択</h3>
+              <button onClick={() => { setShowClockIn(false); setQ('') }}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <input type="text" value={q} onChange={e => setQ(e.target.value)}
+              placeholder="キャスト名で検索" className="input-field w-full text-sm" autoFocus />
+            <div className="space-y-1 max-h-72 overflow-y-auto">
+              {filteredCasts.map((c: any) => (
+                <button key={c.id} onClick={() => setClockInCast({ id: c.id, name: c.stage_name })}
+                  className="w-full text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-emerald-900/50 text-gray-200 hover:text-emerald-300 transition-colors">
+                  <span className="font-medium">{c.stage_name}</span>
+                  {c.rank && <span className="text-gray-500 text-xs ml-2">{c.rank}</span>}
+                </button>
+              ))}
+              {filteredCasts.length === 0 && (
+                <p className="text-center text-gray-500 text-sm py-4">{q ? '該当なし' : '全員出勤中です'}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clockInCast && (
+        <TimePickerModal title={`${clockInCast.name} の出勤時間`} defaultValue={nowHhmm()} showStatusTabs={true}
+          onSelect={(time, opts) => clockInMutation.mutate({ castId: clockInCast.id, time, ...opts })}
+          onClose={() => { setClockInCast(null); setShowClockIn(false); setQ('') }} />
+      )}
+      {clockOutShiftId !== null && (
+        <TimePickerModal title="退勤時間を選択" defaultValue={nowHhmm()}
+          onSelect={time => clockOutMutation.mutate({ shiftId: clockOutShiftId, time })}
+          onClose={() => setClockOutShiftId(null)} />
+      )}
+      {editTarget === 'start' && (
+        <TimePickerModal title="出勤時間を選択" defaultValue={editStart || nowHhmm()}
+          onSelect={time => { setEditStart(time); setEditTarget(null) }}
+          onClose={() => setEditTarget(null)} />
+      )}
+      {editTarget === 'end' && (
+        <TimePickerModal title="退勤時間を選択" defaultValue={editEnd || nowHhmm()}
+          onSelect={time => { setEditEnd(time); setEditTarget(null) }}
+          onClose={() => setEditTarget(null)} />
+      )}
+      {/* 社員/アルバイト出勤: 名前入力ステップ */}
+      {staffClockInStep === 'name' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setStaffClockInStep(null); setStaffClockInName('') }}>
+          <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-white">社員/アルバイト 出勤登録</h3>
+              <button onClick={() => { setStaffClockInStep(null); setStaffClockInName('') }}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <input type="text" value={staffClockInName} onChange={e => setStaffClockInName(e.target.value)}
+              placeholder="従業員名を入力" className="input-field w-full text-sm" autoFocus
+              onKeyDown={e => { if (e.key === 'Enter' && staffClockInName.trim()) setStaffClockInStep('time') }} />
+            <button
+              disabled={!staffClockInName.trim()}
+              onClick={() => { if (staffClockInName.trim()) setStaffClockInStep('time') }}
+              className="w-full btn-primary disabled:opacity-40">
+              次へ（時刻を選択）
+            </button>
+          </div>
+        </div>
+      )}
+      {/* 社員/アルバイト出勤: 時刻選択ステップ */}
+      {staffClockInStep === 'time' && (
+        <TimePickerModal
+          title={`${staffClockInName} の出勤時間`}
+          defaultValue={nowHhmm()}
+          showStatusTabs={true}
+          onSelect={(time, opts) => staffClockInMutation.mutate({ name: staffClockInName.trim(), time, ...opts })}
+          onClose={() => { setStaffClockInStep(null); setStaffClockInName('') }}
+        />
+      )}
+      {staffClockOutId !== null && (
+        <TimePickerModal title="退勤時間を選択" defaultValue={nowHhmm()}
+          onSelect={time => staffClockOutMutation.mutate({ id: staffClockOutId, time })}
+          onClose={() => setStaffClockOutId(null)} />
+      )}
+      {staffEditTarget === 'start' && (
+        <TimePickerModal title="出勤時間を選択" defaultValue={staffEditStart || nowHhmm()}
+          onSelect={time => { setStaffEditStart(time); setStaffEditTarget(null) }}
+          onClose={() => setStaffEditTarget(null)} />
+      )}
+      {staffEditTarget === 'end' && (
+        <TimePickerModal title="退勤時間を選択" defaultValue={staffEditEnd || nowHhmm()}
+          onSelect={time => { setStaffEditEnd(time); setStaffEditTarget(null) }}
+          onClose={() => setStaffEditTarget(null)} />
+      )}
+    </div>
+  )
+}
+
+
+// ─────────────────────────────────────────
+// 日報一覧
+// ─────────────────────────────────────────
+function SessionReportList({ storeId }: { storeId: number }) {
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [openTicketId, setOpenTicketId] = useState<number | null>(null)
+  const { data: sessions = [], isLoading } = useQuery({
+    queryKey: ['session-list', storeId],
+    queryFn: () => apiClient.get('/api/sessions/list', { params: { store_id: storeId, limit: 60 } }).then(r => r.data),
+    enabled: !!storeId,
+  })
+  const selected = sessions.find((s: any) => s.id === selectedId) ?? null
+  const { data: sessionTickets = [] } = useQuery({
+    queryKey: ['session-tickets', selected?.id],
+    queryFn: () => apiClient.get(`/api/sessions/${selected.id}/tickets`).then(r => r.data),
+    enabled: !!selected?.id,
+  })
+  const { data: castDrinks = [] } = useQuery({
+    queryKey: ['session-cast-drinks', selected?.id],
+    queryFn: () => apiClient.get(`/api/sessions/${selected!.id}/cast-drinks`).then(r => r.data),
+    enabled: !!selected?.id,
+  })
+  const { data: staffAttendanceReport = [] } = useQuery({
+    queryKey: ['session-staff-attendance', selected?.id],
+    queryFn: () => apiClient.get(`/api/sessions/${selected!.id}/staff-attendance`).then(r => r.data),
+    enabled: !!selected?.id,
+  })
+
+  const DENOM_LABELS: Record<number, string> = {
+    10000: '壱万円', 5000: '五千円', 2000: '二千円', 1000: '千円',
+    500: '五百円', 100: '百円', 50: '五十円', 10: '十円', 5: '五円', 1: '一円',
+  }
+
+  return (
+    <>
+    <div className="flex flex-1 min-h-0 gap-3">
+      {/* 一覧 */}
+      <div className="w-72 shrink-0 overflow-y-auto space-y-1.5 pr-1">
+        {isLoading && <div className="text-gray-500 text-sm text-center py-8">読み込み中...</div>}
+        {!isLoading && sessions.length === 0 && (
+          <div className="text-gray-500 text-sm text-center py-8">日報データがありません</div>
+        )}
+        {sessions.map((s: any) => {
+          const diff = s.cash_diff
+          const isSel = selected?.id === s.id
+          return (
+            <button key={s.id} onClick={() => setSelectedId(s.id)}
+              className={`w-full text-left rounded-xl px-3 py-2.5 border transition-colors ${isSel ? 'border-blue-500 bg-blue-900/30' : 'border-gray-700 bg-gray-900 hover:bg-gray-800'}`}>
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-white text-sm">{s.date}</span>
+                {diff != null && diff !== 0 && (
+                  <span className={`text-xs font-medium ${diff > 0 ? 'text-blue-300' : 'text-red-400'}`}>
+                    {diff > 0 ? '+' : ''}¥{diff.toLocaleString()}
+                  </span>
+                )}
+                {diff === 0 && <span className="text-xs text-yellow-400 font-bold">PERFECT</span>}
+              </div>
+              <div className="text-xs text-gray-400 mt-0.5 flex gap-2">
+                {s.operator_name && <span>{s.operator_name}</span>}
+                <span className="text-green-400">売上 ¥{(s.sales_snapshot || 0).toLocaleString()}</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* 詳細 */}
+      <div className="flex-1 overflow-y-auto">
+        {!selected ? (
+          <div className="text-gray-500 text-sm text-center py-16">左のリストから日報を選択してください</div>
+        ) : (
+          <div className="space-y-4 max-w-2xl">
+            {/* ヘッダー */}
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-xl font-black text-white">{selected.date} 日報</h2>
+              {selected.event_name && <span className="text-pink-400 text-sm">{selected.event_name}</span>}
+            </div>
+
+            {/* サマリー */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="card space-y-2">
+                <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1">営業情報</div>
+                <Row label="担当者" value={selected.operator_name || '—'} />
+                <Row label="開始時刻" value={selected.opened_at ? fmtIsoToJstTime(selected.opened_at) : '—'} />
+                <Row label="終了時刻" value={selected.closed_at ? fmtIsoToJstTime(selected.closed_at) : '—'} />
+                <Row label="開始オペレーター" value={selected.opened_by_name || '—'} />
+                <Row label="終了オペレーター" value={selected.closed_by_name || '—'} />
+                {selected.notes && <Row label="メモ" value={selected.notes} />}
+              </div>
+              <div className="card space-y-2">
+                <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1">売上・レジ</div>
+                <Row label="本日売上" value={`¥${(selected.sales_snapshot || 0).toLocaleString()}`} highlight="green" />
+                <Row label="開始レジ金" value={`¥${(selected.opening_cash || 0).toLocaleString()}`} />
+                <Row label="終了レジ金" value={`¥${(selected.closing_cash || 0).toLocaleString()}`} />
+                <Row label="前日過不足金" value={selected.prev_day_diff ? `${selected.prev_day_diff > 0 ? '+' : ''}¥${selected.prev_day_diff.toLocaleString()}` : '±¥0'} />
+                {selected.cash_diff != null ? (
+                  <Row
+                    label="当日過不足金"
+                    value={selected.cash_diff === 0 ? 'PERFECT! ±¥0' : `${selected.cash_diff > 0 ? '+' : ''}¥${selected.cash_diff.toLocaleString()}`}
+                    highlight={selected.cash_diff === 0 ? 'yellow' : selected.cash_diff > 0 ? 'blue' : 'red'}
+                  />
+                ) : null}
+              </div>
+            </div>
+
+            {/* 金種明細 */}
+            {(selected.opening_cash_detail || selected.closing_cash_detail) && (
+              <div className="card">
+                <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">金種明細</div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="text-left py-0.5">金種</th>
+                      <th className="text-right py-0.5">開始（枚）</th>
+                      <th className="text-right py-0.5">終了（枚）</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[10000,5000,2000,1000,500,100,50,10,5,1].map(d => {
+                      const open = selected.opening_cash_detail?.[String(d)] || 0
+                      const close = selected.closing_cash_detail?.[String(d)] || 0
+                      if (open === 0 && close === 0) return null
+                      return (
+                        <tr key={d} className="border-t border-gray-800">
+                          <td className="py-0.5 text-gray-300">{DENOM_LABELS[d]} ({d.toLocaleString()})</td>
+                          <td className="py-0.5 text-right text-gray-400">{open > 0 ? open : '—'}</td>
+                          <td className="py-0.5 text-right text-white">{close > 0 ? close : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* 決済内訳 */}
+            {(selected.cash_sales != null || selected.card_sales != null || selected.code_sales != null) && (
+              <div className="card space-y-2">
+                <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1">決済内訳</div>
+                {selected.cash_sales != null && <Row label="現金決済" value={`¥${(selected.cash_sales).toLocaleString()}`} />}
+                {selected.card_sales != null && <Row label="カード決済" value={`¥${(selected.card_sales).toLocaleString()}`} highlight="blue" />}
+                {selected.code_sales != null && <Row label="コード決済" value={`¥${(selected.code_sales).toLocaleString()}`} highlight="blue" />}
+              </div>
+            )}
+
+            {/* 経費・出金 */}
+            {selected.expenses_detail && (
+              <div className="card space-y-3">
+                <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1">経費・出金</div>
+                {(selected.expenses_detail.liquor || []).filter((e: any) => e.amount > 0).length > 0 && (
+                  <div>
+                    <div className="text-xs text-orange-400 mb-1">酒類経費</div>
+                    {(selected.expenses_detail.liquor || []).filter((e: any) => e.amount > 0).map((e: any, i: number) => (
+                      <div key={i} className="flex justify-between text-xs py-0.5 border-t border-gray-800">
+                        <span className="text-gray-300">{e.category || '—'}</span>
+                        <span className="text-white">¥{e.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(selected.expenses_detail.other || []).filter((e: any) => e.amount > 0).length > 0 && (
+                  <div>
+                    <div className="text-xs text-orange-400 mb-1">その他経費</div>
+                    {(selected.expenses_detail.other || []).filter((e: any) => e.amount > 0).map((e: any, i: number) => (
+                      <div key={i} className="flex justify-between text-xs py-0.5 border-t border-gray-800">
+                        <span className="text-gray-300">{e.category || '—'}</span>
+                        <span className="text-white">¥{e.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(selected.expenses_detail.withdrawals || []).filter((w: any) => w.amount > 0).length > 0 && (
+                  <div>
+                    <div className="text-xs text-orange-400 mb-1">出金名目</div>
+                    {(selected.expenses_detail.withdrawals || []).filter((w: any) => w.amount > 0).map((w: any, i: number) => (
+                      <div key={i} className="flex justify-between text-xs py-0.5 border-t border-gray-800">
+                        <span className="text-gray-300">{w.name || '—'}</span>
+                        <span className="text-white">¥{w.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 社員/アルバイト勤務実績 */}
+            {(staffAttendanceReport as any[]).length > 0 && (() => {
+              const staffDailyPayMap: Record<string, { type: string; amount: number }[]> = {}
+              for (const w of (selected.expenses_detail?.withdrawals || [])) {
+                if ((w.type === '日払い' || w.type === 'ヘルプ日払い') && w.person_name && w.amount > 0) {
+                  if (!staffDailyPayMap[w.person_name]) staffDailyPayMap[w.person_name] = []
+                  staffDailyPayMap[w.person_name].push({ type: w.type, amount: w.amount })
+                }
+              }
+              return (
+                <div className="card">
+                  <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">社員/アルバイト勤務実績</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500">
+                        <th className="text-left py-0.5">名前</th>
+                        <th className="text-center py-0.5">出勤</th>
+                        <th className="text-center py-0.5">退勤</th>
+                        <th className="text-right py-0.5">日払い</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(staffAttendanceReport as any[]).map((s: any, i: number) => {
+                        const pays = staffDailyPayMap[s.name] || []
+                        return (
+                          <tr key={i} className="border-t border-gray-800">
+                            <td className="py-1 text-white font-medium">{s.name}</td>
+                            <td className="py-1 text-center font-mono text-xs">
+                              {s.is_absent
+                                ? <span className="text-red-400">当欠</span>
+                                : <>{s.is_late && <span className="text-yellow-400 mr-0.5">遅刻</span>}<span className="text-gray-400">{s.actual_start ?? '—'}</span></>
+                              }
+                            </td>
+                            <td className="py-1 text-center text-gray-400 font-mono text-xs">{s.is_absent ? '—' : (s.actual_end ?? '—')}</td>
+                            <td className="py-1 text-right">
+                              {pays.length > 0
+                                ? <div className="space-y-0.5">
+                                    {pays.map((p: any, j: number) => (
+                                      <div key={j} className="text-orange-400 whitespace-nowrap">
+                                        <span className="text-gray-500 mr-1">{p.type}</span>¥{p.amount.toLocaleString()}
+                                      </div>
+                                    ))}
+                                  </div>
+                                : <span className="text-gray-700">—</span>
+                              }
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
+
+            {/* キャスト別ドリンク集計 */}
+            {(castDrinks as any[]).length > 0 && (() => {
+              // キャスト名でマッチする日払い/ヘルプ日払いを抽出
+              const dailyPayMap: Record<string, { type: string; amount: number }[]> = {}
+              for (const w of (selected.expenses_detail?.withdrawals || [])) {
+                if ((w.type === '日払い' || w.type === 'ヘルプ日払い') && w.person_name && w.amount > 0) {
+                  if (!dailyPayMap[w.person_name]) dailyPayMap[w.person_name] = []
+                  dailyPayMap[w.person_name].push({ type: w.type, amount: w.amount })
+                }
+              }
+              return (
+                <div className="card">
+                  <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">キャスト勤務実績</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500">
+                        <th className="text-left py-0.5">キャスト</th>
+                        <th className="text-center py-0.5">出勤</th>
+                        <th className="text-center py-0.5">退勤</th>
+                        <th className="text-center py-0.5">S</th>
+                        <th className="text-center py-0.5">L</th>
+                        <th className="text-center py-0.5">MG</th>
+                        <th className="text-center py-0.5">ショット</th>
+                        <th className="text-center py-0.5">シャンパン</th>
+                        <th className="text-right py-0.5">合計</th>
+                        <th className="text-right py-0.5">日払い</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(castDrinks as any[]).map((c: any) => {
+                        const pays = dailyPayMap[c.cast_name] || []
+                        return (
+                          <tr key={c.cast_id} className="border-t border-gray-800">
+                            <td className="py-1 text-white font-medium">{c.cast_name}</td>
+                            <td className="py-1 text-center font-mono text-xs">
+                              {c.is_absent
+                                ? <span className="text-red-400">当欠</span>
+                                : <>{c.is_late && <span className="text-yellow-400 mr-0.5">遅刻</span>}<span className="text-gray-400">{c.actual_start ?? '—'}</span></>
+                              }
+                            </td>
+                            <td className="py-1 text-center text-gray-400 font-mono text-xs">{c.is_absent ? '—' : (c.actual_end ?? '—')}</td>
+                            <td className="py-1 text-center text-gray-300">{c.drink_s > 0 ? c.drink_s : '—'}</td>
+                            <td className="py-1 text-center text-gray-300">{c.drink_l > 0 ? c.drink_l : '—'}</td>
+                            <td className="py-1 text-center text-gray-300">{c.drink_mg > 0 ? c.drink_mg : '—'}</td>
+                            <td className="py-1 text-center text-gray-300">{c.shot_cast > 0 ? c.shot_cast : '—'}</td>
+                            <td className="py-1 text-center text-yellow-400">{c.champagne > 0 ? c.champagne : '—'}</td>
+                            <td className="py-1 text-right text-green-400 font-medium">¥{(c.total_amount || 0).toLocaleString()}</td>
+                            <td className="py-1 text-right">
+                              {pays.length > 0
+                                ? <div className="space-y-0.5">
+                                    {pays.map((p, i) => (
+                                      <div key={i} className="text-orange-400 whitespace-nowrap">
+                                        <span className="text-gray-500 mr-1">{p.type}</span>¥{p.amount.toLocaleString()}
+                                      </div>
+                                    ))}
+                                  </div>
+                                : <span className="text-gray-700">—</span>
+                              }
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
+
+            {/* 伝票一覧 */}
+            <div className="card">
+              <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">
+                伝票一覧 ({(sessionTickets as any[]).length}件)
+              </div>
+              {(sessionTickets as any[]).length === 0 ? (
+                <div className="text-gray-600 text-xs py-2 text-center">伝票データなし</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="text-left py-0.5">卓</th>
+                      <th className="text-left py-0.5">顧客</th>
+                      <th className="text-center py-0.5">名</th>
+                      <th className="text-center py-0.5">決済</th>
+                      <th className="text-right py-0.5">金額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sessionTickets as any[]).map((t: any) => (
+                      <tr key={t.id} className="border-t border-gray-800 cursor-pointer hover:bg-gray-800/50"
+                        onClick={() => setOpenTicketId(t.id)}>
+                        <td className="py-1 text-white font-medium">{t.table_no || '—'}</td>
+                        <td className="py-1 text-gray-300">{t.customer_name || '—'}</td>
+                        <td className="py-1 text-center text-gray-400">{t.guest_count}</td>
+                        <td className="py-1 text-center">
+                          <span className={`px-1.5 py-0.5 rounded text-xs ${
+                            t.payment_method === 'cash' ? 'bg-green-900/40 text-green-400' :
+                            t.payment_method === 'card' ? 'bg-blue-900/40 text-blue-400' :
+                            t.payment_method === 'code' ? 'bg-purple-900/40 text-purple-400' : 'text-gray-500'
+                          }`}>
+                            {t.payment_method === 'cash' ? '現金' : t.payment_method === 'card' ? 'カード' : t.payment_method === 'code' ? 'コード' : '—'}
+                          </span>
+                        </td>
+                        <td className="py-1 text-right text-pink-400 font-medium">¥{(t.total_amount || 0).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+    {openTicketId && (
+      <TicketDetailModal ticketId={openTicketId} storeId={storeId} onClose={() => setOpenTicketId(null)} />
+    )}
+    </>
+  )
+}
+
+function Row({ label, value, highlight }: { label: string; value: string; highlight?: 'green' | 'red' | 'blue' | 'yellow' }) {
+  const cls = highlight === 'green' ? 'text-green-400' : highlight === 'red' ? 'text-red-400' : highlight === 'blue' ? 'text-blue-300' : highlight === 'yellow' ? 'text-yellow-400 font-bold' : 'text-white'
+  return (
+    <div className="flex justify-between items-start gap-2">
+      <span className="text-xs text-gray-500 shrink-0">{label}</span>
+      <span className={`text-xs text-right ${cls}`}>{value}</span>
+    </div>
+  )
+}
+
+function fmtIsoToJstTime(isoStr: string): string {
+  const d = new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z')
+  const jst = new Date(d.getTime() + 9 * 3600 * 1000)
+  return `${jst.getUTCHours().toString().padStart(2,'0')}:${jst.getUTCMinutes().toString().padStart(2,'0')}`
 }
