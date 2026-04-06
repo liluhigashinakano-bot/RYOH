@@ -240,7 +240,7 @@ export default function CastDetail() {
           {/* 時給 */}
           <div>
             <p className="text-xs text-gray-500 mb-2">時給</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <StatCard label="基本時給" value={`¥${stats.hourly_rate.toLocaleString()}`} />
               <StatCard label="実質時給" value={`¥${stats.real_hourly_rate.toLocaleString()}`} />
               <StatCard label="ヘルプ時給" value={`¥${stats.help_hourly_rate.toLocaleString()}`} />
@@ -250,7 +250,7 @@ export default function CastDetail() {
           {/* 出勤 */}
           <div>
             <p className="text-xs text-gray-500 mb-2">出勤</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <StatCard label="月間平均出勤" value={stats.avg_monthly_shifts} unit="回" />
               <StatCard label="月間総労働時間" value={stats.avg_monthly_hours} unit="h" />
               <StatCard label="当欠率" value={stats.absent_rate} unit="%" />
@@ -278,7 +278,7 @@ export default function CastDetail() {
           {/* 1セット(40分)あたり */}
           <div>
             <p className="text-xs text-gray-500 mb-2">1セット(40分)あたり</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <StatCard label="L数" value={stats.per_set_drinks} />
               <StatCard label="MG数" value={stats.per_set_mg} />
               <StatCard label="ショット数" value={stats.per_set_shots} />
@@ -290,7 +290,7 @@ export default function CastDetail() {
           {/* 出勤1回あたり */}
           <div>
             <p className="text-xs text-gray-500 mb-2">出勤1回あたり</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <StatCard label="配布数" value={stats.per_shift_distribution} />
               <StatCard label="RT数" value={stats.per_shift_rt} />
               <StatCard label="NT数" value={stats.per_shift_nt} />
