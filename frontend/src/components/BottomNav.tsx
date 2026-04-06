@@ -5,7 +5,7 @@ const items = [
   { to: '/', icon: LayoutDashboard, label: 'ホーム', exact: true },
   { to: '/pos', icon: ShoppingCart, label: 'POS' },
   { to: '/customers', icon: Users, label: '顧客' },
-  { to: '/casts', icon: Star, label: 'キャスト' },
+  { to: '/casts', icon: Star, label: '従業員' },
   { to: '/admin', icon: Settings, label: '設定' },
 ]
 

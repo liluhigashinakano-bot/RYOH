@@ -1,9 +1,13 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Plus, X, User, ArrowUpDown } from 'lucide-react'
+import { Plus, X, User, ArrowUpDown, Briefcase, Clock } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
+
+type EmployeeTab = 'cast' | 'staff' | 'part_time'
+
+const POSITIONS = ['シニアMG', 'エリアMG', 'マスタークルー', 'クルー①', 'クルー②', '準社員']
 
 type SortKey =
   | '基本時給' | '実質時給' | '月間平均出勤' | '月間総労働時間'
@@ -75,7 +79,9 @@ export default function CastList() {
   const { stores } = useAuthStore()
   const navigate = useNavigate()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? 0)
+  const [employeeTab, setEmployeeTab] = useState<EmployeeTab>('cast')
   const [showAdd, setShowAdd] = useState(false)
+  const [showAddStaff, setShowAddStaff] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('月間総労働時間')
   const [sortAsc, setSortAsc] = useState(false)
   const qc = useQueryClient()
@@ -83,7 +89,7 @@ export default function CastList() {
   const { data: casts = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
-    enabled: !!storeId,
+    enabled: !!storeId && employeeTab === 'cast',
   })
 
   // 全キャストの統計を並列フェッチ
@@ -91,7 +97,7 @@ export default function CastList() {
     queries: casts.map((cast: any) => ({
       queryKey: ['cast-stats', storeId, cast.id],
       queryFn: () => apiClient.get(`/api/casts/${storeId}/${cast.id}/stats`).then(r => r.data),
-      enabled: !!storeId,
+      enabled: !!storeId && employeeTab === 'cast',
       staleTime: 60000,
     })),
   })
@@ -110,48 +116,75 @@ export default function CastList() {
     })
   }, [casts, statsMap, sortKey, sortAsc])
 
+  // 社員・アルバイト一覧
+  const { data: staffList = [] } = useQuery({
+    queryKey: ['staff', employeeTab, storeId],
+    queryFn: () => apiClient.get('/api/staff', { params: { employee_type: employeeTab, store_id: storeId } }).then(r => r.data),
+    enabled: employeeTab === 'staff' || employeeTab === 'part_time',
+  })
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-white">キャスト管理</h1>
+        <h1 className="text-2xl font-bold text-white">従業員管理</h1>
         <div className="flex items-center gap-2">
-          <select
-            value={sortKey}
-            onChange={e => setSortKey(e.target.value as SortKey)}
-            className="input-field text-sm py-1.5"
-          >
-            {SORT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-          <button
-            onClick={() => setSortAsc(v => !v)}
-            className="btn-secondary px-2.5 py-1.5 text-sm"
-          >
-            {sortAsc ? '↑' : '↓'}
-          </button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            キャスト追加
-          </button>
+          {employeeTab === 'cast' && (
+            <>
+              <select
+                value={sortKey}
+                onChange={e => setSortKey(e.target.value as SortKey)}
+                className="input-field text-sm py-1.5"
+              >
+                {SORT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <button
+                onClick={() => setSortAsc(v => !v)}
+                className="btn-secondary px-2.5 py-1.5 text-sm"
+              >
+                {sortAsc ? '↑' : '↓'}
+              </button>
+              <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2">
+                <Plus className="w-4 h-4" />キャスト追加
+              </button>
+            </>
+          )}
+          {(employeeTab === 'staff' || employeeTab === 'part_time') && (
+            <button onClick={() => setShowAddStaff(true)} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" />{employeeTab === 'staff' ? '社員追加' : 'アルバイト追加'}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 店舗タブ */}
-      <div className="flex gap-2 flex-wrap">
-        {stores.map(s => (
-          <button
-            key={s.id}
-            onClick={() => setStoreId(s.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-              storeId === s.id ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
-            }`}
-          >
-            {s.name}
-            <span className="ml-2 text-xs opacity-60">
-              {storeId === s.id ? `${casts.length}名` : ''}
-            </span>
+      {/* 従業員種別タブ */}
+      <div className="flex gap-1 bg-night-800 rounded-xl p-1 w-fit">
+        {([['cast', 'キャスト'], ['staff', '社員'], ['part_time', 'アルバイト']] as [EmployeeTab, string][]).map(([t, label]) => (
+          <button key={t} onClick={() => setEmployeeTab(t)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${employeeTab === t ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+            {label}
           </button>
         ))}
       </div>
+
+      {/* 店舗タブ（キャストのみ） */}
+      {employeeTab === 'cast' && (
+        <div className="flex gap-2 flex-wrap">
+          {stores.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setStoreId(s.id)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                storeId === s.id ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
+              }`}
+            >
+              {s.name}
+              <span className="ml-2 text-xs opacity-60">
+                {storeId === s.id ? `${casts.length}名` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* キャスト一覧 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -260,11 +293,62 @@ export default function CastList() {
         )}
       </div>
 
+      {/* 社員・アルバイト一覧 */}
+      {(employeeTab === 'staff' || employeeTab === 'part_time') && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {(staffList as any[]).map((m: any) => (
+            <div key={m.id} className="card space-y-2">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-full bg-night-700 border border-night-600 flex items-center justify-center flex-shrink-0">
+                    {employeeTab === 'staff' ? <Briefcase className="w-4 h-4 text-gray-500" /> : <Clock className="w-4 h-4 text-gray-500" />}
+                  </div>
+                  <div>
+                    <p className="font-bold text-white text-sm">{m.name}</p>
+                    {m.position && <p className="text-xs text-primary-400">{m.position}</p>}
+                    {m.hourly_rate && <p className="text-xs text-gray-400">¥{m.hourly_rate.toLocaleString()}/h</p>}
+                  </div>
+                </div>
+              </div>
+              {m.store_ids?.length > 0 && (
+                <div className="flex gap-1 flex-wrap">
+                  {(m.store_ids as number[]).map((sid: number) => {
+                    const s = stores.find(st => st.id === sid)
+                    return s ? <span key={sid} className="badge text-xs bg-night-700 text-gray-400">{s.name}</span> : null
+                  })}
+                </div>
+              )}
+              {m.stats && (
+                <div className="border-t border-night-700 pt-2 space-y-0.5">
+                  <StatRow label="月間平均出勤" value={fmt(m.stats.avg_monthly_shifts, '回')} />
+                  <StatRow label="当欠率" value={fmt(m.stats.absent_rate, '%')} />
+                  <StatRow label="遅刻率" value={fmt(m.stats.late_rate, '%')} />
+                  {m.stats.avg_actual_hours && <StatRow label="平均実働" value={fmt(m.stats.avg_actual_hours, 'h')} />}
+                </div>
+              )}
+            </div>
+          ))}
+          {(staffList as any[]).length === 0 && (
+            <div className="col-span-full text-center text-gray-500 py-12">
+              {employeeTab === 'staff' ? '社員がいません' : 'アルバイトがいません'}
+            </div>
+          )}
+        </div>
+      )}
+
       {showAdd && (
         <CastModal
           storeId={storeId}
           onClose={() => setShowAdd(false)}
           onSaved={() => { qc.invalidateQueries({ queryKey: ['casts', storeId] }); setShowAdd(false) }}
+        />
+      )}
+      {showAddStaff && (
+        <StaffModal
+          employeeType={employeeTab as 'staff' | 'part_time'}
+          stores={stores}
+          onClose={() => setShowAddStaff(false)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ['staff', employeeTab, storeId] }); setShowAddStaff(false) }}
         />
       )}
     </div>
@@ -326,6 +410,96 @@ function CastModal({ storeId, onClose, onSaved }: { storeId: number; onClose: ()
         <div className="flex gap-3 p-4 border-t border-night-600">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
           <button onClick={() => mutation.mutate()} disabled={!form.stage_name} className="btn-primary flex-1">保存</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StaffModal({ employeeType, stores, onClose, onSaved }: {
+  employeeType: 'staff' | 'part_time'
+  stores: { id: number; name: string }[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    name: '',
+    position: POSITIONS[0],
+    hourly_rate: 1200,
+    store_ids: [] as number[],
+    notes: '',
+  })
+
+  const mutation = useMutation({
+    mutationFn: () => apiClient.post('/api/staff', {
+      name: form.name,
+      employee_type: employeeType,
+      position: employeeType === 'staff' ? form.position : undefined,
+      hourly_rate: employeeType === 'part_time' ? form.hourly_rate : undefined,
+      store_ids: form.store_ids,
+      notes: form.notes,
+    }),
+    onSuccess: onSaved,
+  })
+
+  const toggleStore = (id: number) => {
+    setForm(prev => ({
+      ...prev,
+      store_ids: prev.store_ids.includes(id)
+        ? prev.store_ids.filter(s => s !== id)
+        : [...prev.store_ids, id],
+    }))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-night-800 border border-night-600 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center p-4 border-b border-night-600 sticky top-0 bg-night-800">
+          <h3 className="font-bold text-white">{employeeType === 'staff' ? '社員追加' : 'アルバイト追加'}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">名前 *</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" />
+          </div>
+          {employeeType === 'staff' && (
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">役職</label>
+              <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} className="input-field w-full">
+                {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+          {employeeType === 'part_time' && (
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">時給</label>
+              <input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} step={50} className="input-field w-full" />
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-gray-400 block mb-2">所属店舗</label>
+            <div className="flex gap-2 flex-wrap">
+              {stores.map(s => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => toggleStore(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${form.store_ids.includes(s.id) ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400'}`}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">備考</label>
+            <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-field w-full h-20 resize-none" />
+          </div>
+        </div>
+        <div className="flex gap-3 p-4 border-t border-night-600">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={() => mutation.mutate()} disabled={!form.name} className="btn-primary flex-1">保存</button>
         </div>
       </div>
     </div>

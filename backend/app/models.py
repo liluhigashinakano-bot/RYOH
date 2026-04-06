@@ -400,6 +400,23 @@ class CastDailyPay(Base):
 
 
 # ─────────────────────────────────────────
+# 従業員マスタ（社員/アルバイト）
+# ─────────────────────────────────────────
+class StaffMember(Base):
+    __tablename__ = "staff_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    employee_type = Column(String(20), nullable=False)  # "staff" | "part_time"
+    position = Column(String(50), nullable=True)        # 社員のみ
+    hourly_rate = Column(Integer, nullable=True)        # アルバイトのみ
+    store_ids = Column(JSON, default=[])                # 所属店舗IDリスト
+    is_active = Column(Boolean, default=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
 # 社員/アルバイト勤怠
 # ─────────────────────────────────────────
 class StaffAttendance(Base):

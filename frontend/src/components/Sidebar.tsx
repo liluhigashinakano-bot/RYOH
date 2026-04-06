@@ -6,7 +6,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'ダッシュボード', exact: true },
   { to: '/pos', icon: ShoppingCart, label: 'POS・伝票' },
   { to: '/customers', icon: Users, label: '顧客管理' },
-  { to: '/casts', icon: Star, label: 'キャスト' },
+  { to: '/casts', icon: Star, label: '従業員管理' },
   { to: '/admin', icon: Settings, label: '管理者設定' },
 ]
 
