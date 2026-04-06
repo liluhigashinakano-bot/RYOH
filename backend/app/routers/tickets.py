@@ -41,7 +41,7 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
             cid = item.cast_id
             if cid not in cast_map_local or item.created_at > cast_map_local[cid]["last_at"]:
                 cast_name = item.cast.stage_name if item.cast else f"Cast{cid}"
-                cast_map_local[cid] = {"cast_id": cid, "cast_name": cast_name, "last_at": item.created_at}
+                cast_map_local[cid] = {"cast_id": cid, "cast_name": cast_name, "last_at": item.created_at.isoformat() if item.created_at else None}
         # クリア済み（cleared_at >= last_at）のキャストを除外
         result = []
         for entry in cast_map_local.values():
