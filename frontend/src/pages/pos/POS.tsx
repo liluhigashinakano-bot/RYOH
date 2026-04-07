@@ -158,10 +158,12 @@ function AutoExtender({ ticket, storeId, extensionPrice }: { ticket: any; storeI
       if (missed > 0) {
         const guestCount = ticket.guest_count || 1
         const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
-        const adds = Array.from({ length: missed * guestCount }, () =>
-          apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: 1 })
-        )
-        Promise.all(adds).then(() => {
+        const addQty = missed * guestCount
+        const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && !oi.item_name)
+        const req = existing
+          ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + addQty })
+          : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: addQty })
+        req.then(() => {
           qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
           qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
         })
@@ -173,10 +175,11 @@ function AutoExtender({ ticket, storeId, extensionPrice }: { ticket: any; storeI
       prevSetIntervalRef.current = intervalNum
       const guestCount = ticket.guest_count || 1
       const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
-      const adds = Array.from({ length: guestCount }, () =>
-        apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: 1 })
-      )
-      Promise.all(adds).then(() => {
+      const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && !oi.item_name)
+      const req = existing
+        ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + guestCount })
+        : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: guestCount })
+      req.then(() => {
         qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
         qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
       })
@@ -214,12 +217,12 @@ function JoinAutoExtender({ ticket, storeId }: { ticket: any; storeId: number })
         firedRef.current[item.id] = intervalNum
         const isPremium = item.item_name.includes('プレミアム')
         const extPrice = isPremium ? 4000 : 3000
-        apiClient.post(`/api/tickets/${ticket.id}/orders`, {
-          item_type: 'extension',
-          item_name: isPremium ? '合流延長（プレミアム）' : '合流延長（スタンダード）',
-          unit_price: extPrice,
-          quantity: 1,
-        }).then(() => {
+        const extName = isPremium ? '合流延長（プレミアム）' : '合流延長（スタンダード）'
+        const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && oi.item_name === extName)
+        const req = existing
+          ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + 1 })
+          : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', item_name: extName, unit_price: extPrice, quantity: 1 })
+        req.then(() => {
           qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
           qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
         })
@@ -2497,8 +2500,21 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const activeMenuItems = (customMenuItems as any[]).filter((m: any) => m.is_active)
 
   const addOrderMutation = useMutation({
-    mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) =>
-      apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data),
+    mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) => {
+      const orderItems = (ticket?.order_items ?? []) as any[]
+      const targetName = item.item_name ?? null
+      const targetCastId = item.cast_id ?? null
+      const existing = orderItems.find((oi: any) =>
+        !oi.canceled_at &&
+        oi.item_type === item.item_type &&
+        (oi.item_name ?? null) === targetName &&
+        (oi.cast_id ?? null) === targetCastId
+      )
+      if (existing) {
+        return apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + item.quantity }).then(r => r.data)
+      }
+      return apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data)
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
