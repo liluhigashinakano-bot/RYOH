@@ -172,7 +172,7 @@ def get_dashboard(
             cast_list.append({
                 "cast_id": cast.id,
                 "stage_name": cast.stage_name,
-                "rank": cast.rank.value if cast.rank else None,
+                "rank": cast.rank if isinstance(cast.rank, str) else (cast.rank.value if cast.rank else None),
                 "actual_start": bar_hhmm(shift.actual_start),
                 "is_late": bool(shift.is_late),
             })
