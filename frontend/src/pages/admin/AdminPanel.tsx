@@ -178,10 +178,9 @@ function StoresTab() {
           <div key={s.id} className="card flex items-center justify-between">
             <div>
               <p className="font-medium text-white">{s.name}</p>
-              <p className="text-sm text-gray-400">セット ¥{s.set_price?.toLocaleString()} / 延長 ¥{s.extension_price?.toLocaleString()}</p>
-              {(s.open_time || s.close_time) && (
-                <p className="text-sm text-gray-400">営業時間 {s.open_time || '—'}～{s.close_time || '—'}</p>
-              )}
+              <p className="text-sm text-gray-400">
+                営業時間 {s.open_time || '—'}～{s.close_time || '—'}
+              </p>
             </div>
             <div className="flex items-center gap-2 ml-4">
               <button onClick={() => setEditStore(s)} className="text-gray-500 hover:text-primary-400 transition-colors">
