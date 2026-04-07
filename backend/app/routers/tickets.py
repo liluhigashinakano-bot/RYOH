@@ -752,6 +752,10 @@ def update_champagne_ratios(
 class TicketPatch(BaseModel):
     started_at: Optional[datetime] = None
     guest_count: Optional[int] = None
+    table_no: Optional[str] = None
+    visit_type: Optional[str] = None
+    plan_type: Optional[str] = None
+    update_header: bool = False   # True のとき table_no/visit_type/plan_type を null でも更新する
     operator_name: Optional[str] = None
     reason: Optional[str] = None
 
@@ -824,6 +828,54 @@ def patch_ticket(
     if data.guest_count is not None:
         new_guest_count = max(1, data.guest_count)
         ticket.guest_count = new_guest_count
+
+    if data.table_no is not None or data.update_header:
+        new_table_no = data.table_no or ticket.table_no
+        if new_table_no != ticket.table_no:
+            old_val = ticket.table_no or ''
+            ticket.table_no = new_table_no
+            log = models.OrderItemLog(
+                ticket_id=ticket_id,
+                order_item_id=0,
+                action='change_table_no',
+                item_name=f"卓番変更: {old_val} → {new_table_no}",
+                changed_by=current_user.id,
+                operator_name=data.operator_name,
+                reason=data.reason,
+            )
+            db.add(log)
+
+    if data.visit_type is not None or data.update_header:
+        new_visit_type = data.visit_type or None
+        if new_visit_type != ticket.visit_type:
+            old_val = ticket.visit_type or ''
+            ticket.visit_type = new_visit_type
+            log = models.OrderItemLog(
+                ticket_id=ticket_id,
+                order_item_id=0,
+                action='change_visit_type',
+                item_name=f"来店種別変更: {old_val} → {new_visit_type or '未設定'}",
+                changed_by=current_user.id,
+                operator_name=data.operator_name,
+                reason=data.reason,
+            )
+            db.add(log)
+
+    if data.plan_type is not None or data.update_header:
+        new_plan_type = data.plan_type or 'standard'
+        if new_plan_type != ticket.plan_type:
+            old_val = ticket.plan_type or ''
+            ticket.plan_type = new_plan_type
+            log = models.OrderItemLog(
+                ticket_id=ticket_id,
+                order_item_id=0,
+                action='change_plan_type',
+                item_name=f"プラン変更: {old_val} → {new_plan_type}",
+                changed_by=current_user.id,
+                operator_name=data.operator_name,
+                reason=data.reason,
+            )
+            db.add(log)
 
     db.commit()
     db.refresh(ticket)

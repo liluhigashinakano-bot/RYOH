@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, X, CreditCard, Banknote, Bot, Play, Pause, QrCode, ClipboardList } from 'lucide-react'
+import { Plus, X, CreditCard, Banknote, Bot, Play, Pause, QrCode, ClipboardList, Pencil } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -1917,17 +1917,21 @@ function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void 
   addEvent(ticket.set_started_at, 'セット開始（飲み放題）', undefined, 'text-blue-400')
   addEvent(ticket.e_started_at, '延長開始', undefined, 'text-orange-400')
 
-  // オーダーアイテム
+  // オーダーアイテム（quantity > 1 は1ユニットずつ展開）
   for (const item of ticket.order_items || []) {
     if (!item.created_at) continue
     const canceled = !!item.canceled_at
     const name = item.item_name || item.item_type || '—'
-    addEvent(
-      item.created_at,
-      canceled ? `[取消] ${name}` : name,
-      item.quantity > 1 ? `×${item.quantity}  ¥${item.amount.toLocaleString()}` : `¥${item.amount.toLocaleString()}`,
-      canceled ? 'text-gray-600 line-through' : 'text-gray-200'
-    )
+    const qty = item.quantity || 1
+    const unitPrice = item.unit_price ?? Math.round(item.amount / qty)
+    for (let i = 0; i < qty; i++) {
+      addEvent(
+        item.created_at,
+        canceled ? `[取消] ${name}` : name,
+        `¥${unitPrice.toLocaleString()}`,
+        canceled ? 'text-gray-600 line-through' : 'text-gray-200'
+      )
+    }
     if (canceled) addEvent(item.canceled_at, `取消: ${name}`, undefined, 'text-red-500')
   }
 
@@ -2453,6 +2457,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showDiscountModal, setShowDiscountModal] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+  const [showHeaderEdit, setShowHeaderEdit] = useState(false)
+  const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard' })
+  const [headerEditOperator, setHeaderEditOperator] = useState('')
 
   const confirmCheckout = (fn: () => void) => setPendingAction(() => fn)
 
@@ -2533,6 +2540,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       setOperatorReason('')
       setActionMode('add')
       setChampEditCasts([])
+    },
+  })
+
+  const patchHeaderMutation = useMutation({
+    mutationFn: (payload: { table_no?: string; guest_count?: number; visit_type?: string | null; plan_type?: string; update_header?: boolean; operator_name?: string | null }) =>
+      apiClient.patch(`/api/tickets/${ticketId}`, payload).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+      setShowHeaderEdit(false)
+      setHeaderEditOperator('')
     },
   })
 
@@ -2675,7 +2693,26 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         <div className="px-4 py-3 border-b border-night-600 shrink-0 space-y-2">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <p className="text-xl font-bold text-white">{ticket.table_no || '—'}</p>
+              <div className="flex items-center gap-1">
+                <p className="text-xl font-bold text-white">{ticket.table_no || '—'}</p>
+                {!isClosed && (
+                  <button
+                    onClick={() => {
+                      setHeaderEditForm({
+                        table_no: ticket.table_no || '',
+                        guest_count: ticket.guest_count || 1,
+                        visit_type: ticket.visit_type || '',
+                        plan_type: ticket.plan_type || 'standard',
+                      })
+                      setShowHeaderEdit(true)
+                    }}
+                    className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
+                    title="卓情報を編集"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
               <div className="flex gap-1.5 flex-wrap">
                 {ticket.visit_type && (
                   <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{ticket.visit_type}</span>
@@ -3179,6 +3216,102 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           onClose={() => setShowJoinModal(false)}
           isPending={joinMutation.isPending}
         />
+      )}
+
+      {/* 卓情報編集モーダル */}
+      {showHeaderEdit && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60]">
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-4">
+            <h3 className="text-white font-bold text-base">卓情報を編集</h3>
+            {/* 卓番 */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">卓番号</label>
+              <select
+                value={headerEditForm.table_no}
+                onChange={e => setHeaderEditForm(f => ({ ...f, table_no: e.target.value }))}
+                className="input-field w-full text-sm py-1.5"
+              >
+                {TABLE_NOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            {/* 人数 */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">人数</label>
+              <input
+                type="number"
+                min={1}
+                value={headerEditForm.guest_count}
+                onChange={e => setHeaderEditForm(f => ({ ...f, guest_count: Math.max(1, parseInt(e.target.value) || 1) }))}
+                className="input-field w-full text-sm py-1.5"
+              />
+            </div>
+            {/* N / R */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">来店種別</label>
+              <div className="flex gap-2">
+                {['N', 'R'].map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setHeaderEditForm(f => ({ ...f, visit_type: f.visit_type === v ? '' : v }))}
+                    className={`flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${
+                      headerEditForm.visit_type === v
+                        ? v === 'N' ? 'bg-blue-700 text-white' : 'bg-purple-700 text-white'
+                        : 'bg-night-700 text-gray-400 hover:bg-night-600'
+                    }`}
+                  >{v}</button>
+                ))}
+              </div>
+            </div>
+            {/* スタンダード / プレミアム */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">プラン</label>
+              <div className="flex gap-2">
+                {[{ v: 'standard', label: 'スタンダード' }, { v: 'premium', label: 'プレミアム' }].map(({ v, label }) => (
+                  <button
+                    key={v}
+                    onClick={() => setHeaderEditForm(f => ({ ...f, plan_type: v }))}
+                    className={`flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${
+                      headerEditForm.plan_type === v
+                        ? v === 'premium' ? 'bg-yellow-700 text-white' : 'bg-gray-600 text-white'
+                        : 'bg-night-700 text-gray-400 hover:bg-night-600'
+                    }`}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            {/* オペレーター名 */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">操作者名</label>
+              <input
+                type="text"
+                placeholder="名前を入力"
+                value={headerEditOperator}
+                onChange={e => setHeaderEditOperator(e.target.value)}
+                className="input-field w-full text-sm py-1.5"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setShowHeaderEdit(false); setHeaderEditOperator('') }}
+                className="flex-1 py-2 rounded-lg bg-night-700 text-gray-300 hover:bg-night-600 text-sm transition-colors"
+              >キャンセル</button>
+              <button
+                onClick={() => {
+                  patchHeaderMutation.mutate({
+                    table_no: headerEditForm.table_no || undefined,
+                    guest_count: headerEditForm.guest_count,
+                    visit_type: headerEditForm.visit_type || null,
+                    plan_type: headerEditForm.plan_type,
+                    update_header: true,
+                    operator_name: headerEditOperator || null,
+                  })
+                }}
+                disabled={patchHeaderMutation.isPending}
+                className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-sm font-bold transition-colors disabled:opacity-50"
+              >{patchHeaderMutation.isPending ? '保存中...' : '保存'}</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 先退店モーダル */}
