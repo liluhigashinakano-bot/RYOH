@@ -765,7 +765,7 @@ def patch_ticket(
         # order_item_idはNullableでないためダミー的に扱う。先に flush して ticket.id を確定
         time_log = models.OrderItemLog(
             ticket_id=ticket_id,
-            order_item_id=0,
+            order_item_id=None,
             action='change_start_time',
             item_name=f"入店時間変更: {old_started_at.strftime('%H:%M') if old_started_at else '?'} → {new_started_at.strftime('%H:%M')}",
             changed_by=current_user.id,
@@ -827,7 +827,7 @@ def patch_ticket(
             ticket.table_no = new_table_no
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
-                order_item_id=0,
+                order_item_id=None,
                 action='change_table_no',
                 item_name=f"卓番変更: {old_val} → {new_table_no}",
                 changed_by=current_user.id,
@@ -843,7 +843,7 @@ def patch_ticket(
             ticket.visit_type = new_visit_type
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
-                order_item_id=0,
+                order_item_id=None,
                 action='change_visit_type',
                 item_name=f"来店種別変更: {old_val} → {new_visit_type or '未設定'}",
                 changed_by=current_user.id,
@@ -859,7 +859,7 @@ def patch_ticket(
             ticket.plan_type = new_plan_type
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
-                order_item_id=0,
+                order_item_id=None,
                 action='change_plan_type',
                 item_name=f"プラン変更: {old_val} → {new_plan_type}",
                 changed_by=current_user.id,
