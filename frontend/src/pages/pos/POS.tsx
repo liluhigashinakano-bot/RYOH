@@ -2501,7 +2501,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
   const addOrderMutation = useMutation({
     mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) => {
-      const orderItems = (ticket?.order_items ?? []) as any[]
+      // キャッシュから最新データを取得（クロージャのticketは更新が遅延する場合があるため）
+      const latestTicket = qc.getQueryData<any>(['ticket', ticketId])
+      const orderItems = (latestTicket?.order_items ?? []) as any[]
       const targetName = item.item_name ?? null
       const targetCastId = item.cast_id ?? null
       const existing = orderItems.find((oi: any) =>
@@ -2511,7 +2513,15 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         (oi.cast_id ?? null) === targetCastId
       )
       if (existing) {
-        return apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + item.quantity }).then(r => r.data)
+        const newQty = existing.quantity + item.quantity
+        // 即時キャッシュ更新で次の追加も重複しない
+        qc.setQueryData(['ticket', ticketId], (old: any) => old ? {
+          ...old,
+          order_items: old.order_items.map((oi: any) =>
+            oi.id === existing.id ? { ...oi, quantity: newQty, amount: oi.unit_price * newQty } : oi
+          )
+        } : old)
+        return apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: newQty }).then(r => r.data)
       }
       return apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data)
     },
