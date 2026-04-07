@@ -411,7 +411,7 @@ export default function POS() {
 
       {view === 'open' ? (
         /* 伝票カード一覧：残り高さを全部使う */
-        <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start">
+        <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start [&::-webkit-scrollbar]:h-4 [&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-thumb]:bg-gray-600 [&::-webkit-scrollbar-thumb]:rounded-full">
           {tickets.map((ticket: any) => (
             <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
               onOpenCustomerModal={t => setCustomerModalTicket(t)}
