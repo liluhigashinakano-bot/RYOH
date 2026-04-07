@@ -82,6 +82,114 @@ def _save_report_file(session_data: dict) -> str:
     return filepath
 
 
+@router.get("/dashboard/{store_id}")
+def get_dashboard(
+    store_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """ダッシュボード用リアルタイムデータ"""
+    from datetime import timedelta
+
+    # アクティブセッション取得
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == False,
+    ).order_by(models.BusinessSession.opened_at.desc()).first()
+
+    # セッション境界
+    if session:
+        since = session.opened_at
+    else:
+        # セッション外でも当日営業日データを表示
+        now_jst = datetime.utcnow() + timedelta(hours=9)
+        if now_jst.hour < 12:
+            business_date = now_jst.date() - timedelta(days=1)
+        else:
+            business_date = now_jst.date()
+        since = datetime(business_date.year, business_date.month, business_date.day, 3, 0, 0)
+
+    # 会計済み伝票（セッション開始以降）
+    closed_tickets = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.ended_at >= since,
+    ).all()
+
+    # 未会計伝票（現在オープン中）
+    open_tickets = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.is_closed == False,
+    ).all()
+
+    def grand_total(t):
+        return max(0, (t.total_amount or 0) - (t.discount_amount or 0))
+
+    closed_sales = sum(grand_total(t) for t in closed_tickets)
+    open_sales = sum(grand_total(t) for t in open_tickets)
+    closed_guests = sum(t.guest_count or 0 for t in closed_tickets)
+    open_guests = sum(t.guest_count or 0 for t in open_tickets)
+
+    # 勤務中社員/アルバイト（当日セッション日付のStaffAttendance, actual_end IS NULL, not absent）
+    session_date = (since + timedelta(hours=9)).date()
+    working_staff = db.query(models.StaffAttendance).filter(
+        models.StaffAttendance.store_id == store_id,
+        models.StaffAttendance.date == session_date,
+        models.StaffAttendance.actual_start.isnot(None),
+        models.StaffAttendance.actual_end.is_(None),
+        models.StaffAttendance.is_absent == False,
+    ).all()
+
+    def bar_hhmm(dt):
+        if not dt:
+            return None
+        jst = dt + timedelta(hours=9)
+        h = jst.hour + 24 if jst.hour < 12 else jst.hour
+        return f"{h:02d}:{jst.minute:02d}"
+
+    staff_list = [
+        {
+            "name": s.name,
+            "actual_start": bar_hhmm(s.actual_start),
+            "is_late": bool(s.is_late),
+        }
+        for s in working_staff
+    ]
+
+    # 勤務中キャスト（当日セッション日付のConfirmedShift, actual_end IS NULL, not absent）
+    working_shifts = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.date == session_date,
+        models.ConfirmedShift.actual_start.isnot(None),
+        models.ConfirmedShift.actual_end.is_(None),
+        models.ConfirmedShift.is_absent == False,
+    ).all()
+
+    cast_list = []
+    for shift in working_shifts:
+        cast = shift.cast
+        if cast:
+            cast_list.append({
+                "cast_id": cast.id,
+                "stage_name": cast.stage_name,
+                "rank": cast.rank.value if cast.rank else None,
+                "actual_start": bar_hhmm(shift.actual_start),
+                "is_late": bool(shift.is_late),
+            })
+
+    return {
+        "session": _session_dict(session) if session else None,
+        "closed_sales": closed_sales,
+        "open_sales": open_sales,
+        "closed_groups": len(closed_tickets),
+        "closed_guests": closed_guests,
+        "open_groups": len(open_tickets),
+        "open_guests": open_guests,
+        "working_staff": staff_list,
+        "working_casts": cast_list,
+    }
+
+
 @router.get("/last-closed")
 def get_last_closed_session(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """前回終了した営業セッションを取得（翌日の前日過不足金表示用）"""
