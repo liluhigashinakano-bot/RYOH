@@ -2392,7 +2392,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         {isChampagne ? (
-          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+          <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
             {casts.map((c: any) => (
               <div key={c.id} className="flex items-center gap-2">
                 <button onClick={() => toggleCast(c.id)}
@@ -2411,7 +2411,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
             ))}
           </div>
         ) : (
-          <div className="space-y-1 max-h-64 overflow-y-auto">
+          <div className="space-y-1 max-h-[55vh] overflow-y-auto">
             {casts.map((c: any) => (
               <button key={c.id} onClick={() => setCastId(c.id)}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${castId === c.id ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
