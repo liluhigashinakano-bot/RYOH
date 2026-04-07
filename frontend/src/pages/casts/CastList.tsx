@@ -383,7 +383,7 @@ export default function CastList() {
                 disabled={retireMutation.isPending}
                 className="flex-1 bg-red-700 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-medium transition-colors"
               >
-                はい
+                退店
               </button>
             </div>
           </div>
