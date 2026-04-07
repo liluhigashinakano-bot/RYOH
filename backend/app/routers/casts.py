@@ -203,6 +203,17 @@ def update_cast(
     return CastResponse.from_orm_cast(cast)
 
 
+@router.delete("/staff-attendance/{record_id}")
+def delete_staff_attendance(record_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト勤怠記録を削除"""
+    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    db.delete(record)
+    db.commit()
+    return {"message": "削除しました"}
+
+
 @router.delete("/{store_id}/{cast_id}")
 def delete_cast(
     store_id: int,
@@ -825,14 +836,3 @@ def update_staff_time(record_id: int, data: StaffTimeUpdate, db: Session = Depen
         record.actual_end = _hhmm_to_utc(data.actual_end, record.date)
     db.commit()
     return {"message": "時刻を更新しました"}
-
-
-@router.delete("/staff-attendance/{record_id}")
-def delete_staff_attendance(record_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """社員/アルバイト勤怠記録を削除"""
-    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="記録が見つかりません")
-    db.delete(record)
-    db.commit()
-    return {"message": "削除しました"}

@@ -333,7 +333,7 @@ export default function POS() {
   })
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)', paddingBottom: '12px' }}>
+    <div className="flex flex-col" style={{ height: '100%', paddingBottom: '12px' }}>
       {/* ヘッダー */}
       <div className="shrink-0 pb-2 flex flex-col gap-1.5">
         {/* Row 1: 店舗・新規伝票 + 営業ボタン */}
