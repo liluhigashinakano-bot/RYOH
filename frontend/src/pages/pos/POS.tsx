@@ -963,7 +963,6 @@ function WithdrawalRow({ w, storeId, onUpdate, onRemove }: {
                   <button key={c.id} onMouseDown={() => handleSelect(c.stage_name)}
                     className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-700 transition-colors">
                     {c.stage_name}
-                    {c.rank && <span className="text-gray-500 ml-1.5">{c.rank}</span>}
                   </button>
                 ))}
               </>
@@ -2185,7 +2184,6 @@ function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
             <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
               className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.stage_name === currentCastName ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
               <span className="font-medium">{c.stage_name}</span>
-              {c.rank && <span className="text-gray-400 text-xs ml-2">{c.rank}</span>}
             </button>
           ))}
           {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
@@ -2313,7 +2311,6 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
               <button key={c.id} onClick={() => setCastId(c.id)}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${castId === c.id ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
                 <span className="font-medium">{c.stage_name}</span>
-                {c.rank && <span className="text-gray-400 text-xs ml-2">{c.rank}</span>}
               </button>
             ))}
             {casts.length === 0 && <p className="text-center text-gray-500 text-sm py-4">キャストが見つかりません</p>}
@@ -4280,7 +4277,6 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                 <button key={c.id} onClick={() => setClockInCast({ id: c.id, name: c.stage_name })}
                   className="w-full text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-emerald-900/50 text-gray-200 hover:text-emerald-300 transition-colors">
                   <span className="font-medium">{c.stage_name}</span>
-                  {c.rank && <span className="text-gray-500 text-xs ml-2">{c.rank}</span>}
                 </button>
               ))}
               {filteredCasts.length === 0 && (
