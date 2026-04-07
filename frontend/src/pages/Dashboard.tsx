@@ -32,7 +32,7 @@ export default function Dashboard() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">ダッシュボード</h1>
+          <h1 className="text-2xl font-bold text-white">リアルタイム状況</h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
           </p>

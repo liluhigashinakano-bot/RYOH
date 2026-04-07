@@ -3,7 +3,7 @@ import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal,
 import { useAuthStore } from '../store/authStore'
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'ダッシュボード', exact: true },
+  { to: '/', icon: LayoutDashboard, label: 'リアルタイム状況', exact: true },
   { to: '/pos', icon: ShoppingCart, label: 'POS・伝票' },
   { to: '/customers', icon: Users, label: '顧客管理' },
   { to: '/casts', icon: Star, label: '従業員管理' },
