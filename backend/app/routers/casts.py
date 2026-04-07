@@ -221,6 +221,26 @@ def delete_cast(
     return {"message": "キャストを削除しました"}
 
 
+@router.post("/{store_id}/{cast_id}/reinstate")
+def reinstate_cast(
+    store_id: int,
+    cast_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """退店キャストを在籍に戻す"""
+    cast = db.query(models.Cast).filter(
+        models.Cast.id == cast_id,
+        models.Cast.store_id == store_id,
+    ).first()
+    if not cast:
+        raise HTTPException(status_code=404, detail="キャストが見つかりません")
+    cast.is_retired = False
+    cast.retired_at = None
+    db.commit()
+    return {"message": "在籍に戻しました"}
+
+
 @router.post("/{store_id}/{cast_id}/retire")
 def retire_cast(
     store_id: int,

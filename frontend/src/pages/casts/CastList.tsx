@@ -88,6 +88,7 @@ export default function CastList() {
   const qc = useQueryClient()
 
   const [retireTarget, setRetireTarget] = useState<any>(null)
+  const [reinstateTarget, setReinstateTarget] = useState<any>(null)
 
   const { data: casts = [] } = useQuery({
     queryKey: ['casts', storeId],
@@ -100,6 +101,14 @@ export default function CastList() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['casts', storeId] })
       setRetireTarget(null)
+    },
+  })
+
+  const reinstateMutation = useMutation({
+    mutationFn: (castId: number) => apiClient.post(`/api/casts/${storeId}/${castId}/reinstate`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['casts', storeId] })
+      setReinstateTarget(null)
     },
   })
 
@@ -215,13 +224,20 @@ export default function CastList() {
               key={cast.id}
               className={`card text-left transition-colors space-y-3 relative ${cast.is_retired ? 'opacity-50 grayscale' : 'hover:border-primary-600/50 cursor-pointer'}`}
             >
-              {/* 退店ボタン（右上） */}
-              {!cast.is_retired && (
+              {/* 在籍/退店ボタン（右上） */}
+              {!cast.is_retired ? (
                 <button
                   onClick={e => { e.stopPropagation(); setRetireTarget(cast) }}
                   className="absolute top-2 right-2 text-xs text-gray-600 hover:text-red-400 px-2 py-0.5 rounded hover:bg-red-900/20 transition-colors"
                 >
                   在籍
+                </button>
+              ) : (
+                <button
+                  onClick={e => { e.stopPropagation(); setReinstateTarget(cast) }}
+                  className="absolute top-2 right-2 text-xs text-gray-600 hover:text-green-400 px-2 py-0.5 rounded hover:bg-green-900/20 transition-colors"
+                >
+                  退店
                 </button>
               )}
 
@@ -364,6 +380,28 @@ export default function CastList() {
               {employeeTab === 'staff' ? '社員がいません' : 'アルバイトがいません'}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 在籍復帰確認ポップアップ */}
+      {reinstateTarget && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-sm p-6 space-y-4">
+            <p className="text-white font-bold text-center">在籍確認</p>
+            <p className="text-gray-300 text-sm text-center">
+              <span className="text-white font-medium">{reinstateTarget.stage_name}</span> を在籍に戻しますか？
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setReinstateTarget(null)} className="btn-secondary flex-1">キャンセル</button>
+              <button
+                onClick={() => reinstateMutation.mutate(reinstateTarget.id)}
+                disabled={reinstateMutation.isPending}
+                className="flex-1 bg-green-700 hover:bg-green-600 text-white py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                はい
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
