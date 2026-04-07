@@ -1435,7 +1435,10 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared }: {
     if (!Array.isArray(raw) || raw.length === 0) continue
     for (const c of raw) {
       if (!c || typeof c !== 'object' || !c.last_at) continue
-      const label = c.cast_name ? `${cfg.label}${c.cast_name}` : cfg.label
+      const typeLabel = type === 'custom_menu' && c.item_name
+        ? c.item_name.replace(/\[.*?\]/g, '').trim().charAt(0)
+        : cfg.label
+      const label = c.cast_name ? `${typeLabel}${c.cast_name}` : typeLabel
       entries.push({ key: `${type}-${c.cast_id ?? 0}`, label, color: cfg.color, bg: cfg.bg, lastAt: c.last_at, castId: c.cast_id, drinkType: type })
     }
   }
