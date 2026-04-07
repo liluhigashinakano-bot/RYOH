@@ -14,7 +14,7 @@ UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "uploa
 
 router = APIRouter(prefix="/api/casts", tags=["casts"])
 
-MANAGER_ROLES = {models.UserRole.superadmin, models.UserRole.manager, models.UserRole.editor}
+MANAGER_ROLES = {models.UserRole.administrator, models.UserRole.superadmin, models.UserRole.manager, models.UserRole.editor}
 
 
 def generate_cast_code(db: Session, store_id: int) -> str:

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from ..database import get_db
 from .. import models
-from ..auth import get_current_user, require_superadmin
+from ..auth import get_current_user, require_superadmin, is_admin
 
 router = APIRouter(prefix="/api/stores", tags=["stores"])
 
@@ -50,14 +50,12 @@ def get_stores(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if current_user.role == models.UserRole.superadmin:
+    if is_admin(current_user) or not current_user.store_id:
         return db.query(models.Store).filter(models.Store.is_active == True).all()
-    if current_user.store_id:
-        return db.query(models.Store).filter(
-            models.Store.id == current_user.store_id,
-            models.Store.is_active == True
-        ).all()
-    return []
+    return db.query(models.Store).filter(
+        models.Store.id == current_user.store_id,
+        models.Store.is_active == True
+    ).all()
 
 
 @router.get("/{store_id}", response_model=StoreResponse)
