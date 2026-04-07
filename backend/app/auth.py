@@ -17,6 +17,17 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
+ADMIN_ROLES = {"administrator", "superadmin"}
+
+ALL_PERMISSIONS = {
+    "realtime": {"view": True},
+    "pos": {"view": True, "edit": True},
+    "customers": {"view": True, "edit": True},
+    "employees": {"view": True, "edit": True},
+    "accounts": {"view": True, "edit": True},
+    "menus": {"view": True, "edit": True},
+}
+
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
@@ -55,15 +66,53 @@ def get_current_user(
     return user
 
 
+def is_admin(user: models.User) -> bool:
+    return str(user.role) in ADMIN_ROLES
+
+
+def get_effective_permissions(user: models.User, db: Session) -> dict:
+    """ユーザーの実効権限を返す（administrator=全権限、ユーザー個別→ロール順でフォールバック）"""
+    if is_admin(user):
+        return ALL_PERMISSIONS
+    # ユーザー個別権限が設定されている場合はそれを使用
+    if user.permissions is not None:
+        return user.permissions
+    # ロール別デフォルト権限を使用
+    role_perm = db.query(models.RolePermission).filter_by(role=str(user.role)).first()
+    if role_perm:
+        return role_perm.permissions
+    return {}
+
+
 def require_roles(*roles: models.UserRole):
     def checker(current_user: models.User = Depends(get_current_user)):
-        if current_user.role not in roles and current_user.role != models.UserRole.superadmin:
+        if current_user.role not in roles and str(current_user.role) not in ADMIN_ROLES:
             raise HTTPException(status_code=403, detail="Permission denied")
         return current_user
     return checker
 
 
 def require_superadmin(current_user: models.User = Depends(get_current_user)):
-    if current_user.role != models.UserRole.superadmin:
-        raise HTTPException(status_code=403, detail="Superadmin required")
+    """後方互換性のため残す。administrator/superadmin の両方を受け付ける"""
+    if str(current_user.role) not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Administrator required")
     return current_user
+
+
+# 新しい名称
+require_administrator = require_superadmin
+
+
+def require_permission(page: str, perm_type: str):
+    """特定ページの権限を要求するDependency"""
+    def checker(
+        current_user: models.User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
+        if is_admin(current_user):
+            return current_user
+        perms = get_effective_permissions(current_user, db)
+        if not perms.get(page, {}).get(perm_type, False):
+            raise HTTPException(status_code=403, detail="Permission denied")
+        return current_user
+    return checker

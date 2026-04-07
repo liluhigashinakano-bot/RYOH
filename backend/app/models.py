@@ -9,7 +9,8 @@ from .database import Base
 
 
 class UserRole(str, enum.Enum):
-    superadmin = "superadmin"
+    administrator = "administrator"
+    superadmin = "superadmin"  # 後方互換性のため残す
     manager = "manager"
     editor = "editor"
     staff = "staff"
@@ -94,11 +95,21 @@ class User(Base):
     role = Column(Enum(UserRole), default=UserRole.staff)
     store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
     is_active = Column(Boolean, default=True)
+    permissions = Column(JSON, nullable=True)  # nullの場合はロール権限を使用
     last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="users")
     cast_profile = relationship("Cast", back_populates="user", uselist=False)
+
+
+class RolePermission(Base):
+    """ロール別デフォルト権限"""
+    __tablename__ = "role_permissions"
+
+    id = Column(Integer, primary_key=True)
+    role = Column(String(50), unique=True, nullable=False)
+    permissions = Column(JSON, nullable=False, default=dict)
 
 
 # ─────────────────────────────────────────

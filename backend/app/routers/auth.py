@@ -6,7 +6,7 @@ from ..database import get_db
 from .. import models
 from ..auth import (
     verify_password, create_access_token, create_refresh_token,
-    get_current_user, SECRET_KEY, ALGORITHM
+    get_current_user, get_effective_permissions, SECRET_KEY, ALGORITHM
 )
 from jose import JWTError, jwt
 
@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     name: str
     role: str
     store_id: int | None
+    permissions: dict | None = None
 
     class Config:
         from_attributes = True
@@ -76,6 +77,14 @@ def refresh(body: dict, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/me", response_model=UserResponse)
-def get_me(current_user: models.User = Depends(get_current_user)):
-    return current_user
+@router.get("/me")
+def get_me(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    perms = get_effective_permissions(current_user, db)
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "role": str(current_user.role),
+        "store_id": current_user.store_id,
+        "permissions": perms,
+    }

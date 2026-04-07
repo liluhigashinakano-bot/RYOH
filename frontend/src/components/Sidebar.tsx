@@ -1,18 +1,31 @@
 import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, LogOut } from 'lucide-react'
-import { useAuthStore } from '../store/authStore'
+import { useAuthStore, type PermPage } from '../store/authStore'
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'リアルタイム状況', exact: true },
-  { to: '/pos', icon: ShoppingCart, label: 'POS・伝票' },
-  { to: '/customers', icon: Users, label: '顧客管理' },
-  { to: '/casts', icon: Star, label: '従業員管理' },
-  { to: '/admin', icon: UserCog, label: 'アカウント管理' },
-  { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理' },
+const navItems: { to: string; icon: any; label: string; exact?: boolean; page: PermPage }[] = [
+  { to: '/', icon: LayoutDashboard, label: 'リアルタイム状況', exact: true, page: 'realtime' },
+  { to: '/pos', icon: ShoppingCart, label: 'POS・伝票', page: 'pos' },
+  { to: '/customers', icon: Users, label: '顧客管理', page: 'customers' },
+  { to: '/casts', icon: Star, label: '従業員管理', page: 'employees' },
+  { to: '/admin', icon: UserCog, label: 'アカウント管理', page: 'accounts' },
+  { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理', page: 'menus' },
 ]
 
+const ROLE_LABELS: Record<string, string> = {
+  administrator: 'administrator',
+  superadmin: 'administrator',
+  manager: '管理者',
+  editor: '編集者',
+  staff: '従業員',
+  order: 'オーダー端末',
+  cast: 'キャスト',
+  readonly: '閲覧のみ',
+}
+
 export default function Sidebar() {
-  const { user, logout } = useAuthStore()
+  const { user, logout, hasPermission } = useAuthStore()
+
+  const visibleItems = navItems.filter(item => hasPermission(item.page, 'view'))
 
   return (
     <aside className="fixed top-0 left-0 h-screen w-60 bg-gray-900 border-r border-gray-700 flex flex-col z-40">
@@ -22,7 +35,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
-        {navItems.map(({ to, icon: Icon, label, exact }) => (
+        {visibleItems.map(({ to, icon: Icon, label, exact }) => (
           <NavLink
             key={to}
             to={to}
@@ -46,7 +59,7 @@ export default function Sidebar() {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-            <p className="text-xs text-gray-500">{user?.role}</p>
+            <p className="text-xs text-gray-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</p>
           </div>
         </div>
         <button onClick={logout} className="flex items-center gap-2 text-gray-500 hover:text-white text-sm transition-colors w-full">

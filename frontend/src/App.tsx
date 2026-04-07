@@ -53,6 +53,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function PermRoute({ page, children }: { page: import('./store/authStore').PermPage; children: React.ReactNode }) {
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+  if (!hasPermission(page, 'view')) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 function AppRoutes() {
   const { isLoggedIn, fetchMe } = useAuthStore()
 
@@ -64,14 +70,14 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={isLoggedIn ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Dashboard />} />
-        <Route path="pos" element={<POS />} />
-        <Route path="customers" element={<CustomerList />} />
-        <Route path="customers/:id" element={<CustomerDetail />} />
-        <Route path="casts" element={<CastList />} />
-        <Route path="casts/:id" element={<CastDetail />} />
-        <Route path="admin" element={<AdminPanel />} />
-        <Route path="settings" element={<AdminSettings />} />
+        <Route index element={<PermRoute page="realtime"><Dashboard /></PermRoute>} />
+        <Route path="pos" element={<PermRoute page="pos"><POS /></PermRoute>} />
+        <Route path="customers" element={<PermRoute page="customers"><CustomerList /></PermRoute>} />
+        <Route path="customers/:id" element={<PermRoute page="customers"><CustomerDetail /></PermRoute>} />
+        <Route path="casts" element={<PermRoute page="employees"><CastList /></PermRoute>} />
+        <Route path="casts/:id" element={<PermRoute page="employees"><CastDetail /></PermRoute>} />
+        <Route path="admin" element={<PermRoute page="accounts"><AdminPanel /></PermRoute>} />
+        <Route path="settings" element={<PermRoute page="menus"><AdminSettings /></PermRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -21,6 +21,9 @@ def _run_migrations(engine):
         # ConfirmedShift: cast_id をnullable化・ヘルプキャスト名追加
         "ALTER TABLE confirmed_shifts ALTER COLUMN cast_id DROP NOT NULL",
         "ALTER TABLE confirmed_shifts ADD COLUMN IF NOT EXISTS help_cast_name VARCHAR(100)",
+        # User: permissions 列追加・superadmin → administrator 移行
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSON",
+        "UPDATE users SET role = 'administrator' WHERE role = 'superadmin'",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -29,6 +32,75 @@ def _run_migrations(engine):
             except Exception as e:
                 print(f"[MIGRATION SKIP] {sql[:60]}... → {e}")
         conn.commit()
+
+
+ALL_PERMISSIONS = {
+    "realtime": {"view": True},
+    "pos": {"view": True, "edit": True},
+    "customers": {"view": True, "edit": True},
+    "employees": {"view": True, "edit": True},
+    "accounts": {"view": True, "edit": True},
+    "menus": {"view": True, "edit": True},
+}
+
+DEFAULT_ROLE_PERMISSIONS = {
+    "manager": {
+        "realtime": {"view": True},
+        "pos": {"view": True, "edit": True},
+        "customers": {"view": True, "edit": True},
+        "employees": {"view": True, "edit": True},
+        "accounts": {"view": True, "edit": True},
+        "menus": {"view": True, "edit": True},
+    },
+    "editor": {
+        "realtime": {"view": True},
+        "pos": {"view": True, "edit": True},
+        "customers": {"view": True, "edit": True},
+        "employees": {"view": True, "edit": False},
+        "accounts": {"view": False, "edit": False},
+        "menus": {"view": True, "edit": False},
+    },
+    "staff": {
+        "realtime": {"view": True},
+        "pos": {"view": True, "edit": True},
+        "customers": {"view": True, "edit": False},
+        "employees": {"view": False, "edit": False},
+        "accounts": {"view": False, "edit": False},
+        "menus": {"view": False, "edit": False},
+    },
+    "order": {
+        "realtime": {"view": False},
+        "pos": {"view": True, "edit": True},
+        "customers": {"view": False, "edit": False},
+        "employees": {"view": False, "edit": False},
+        "accounts": {"view": False, "edit": False},
+        "menus": {"view": False, "edit": False},
+    },
+    "cast": {
+        "realtime": {"view": False},
+        "pos": {"view": False, "edit": False},
+        "customers": {"view": False, "edit": False},
+        "employees": {"view": False, "edit": False},
+        "accounts": {"view": False, "edit": False},
+        "menus": {"view": False, "edit": False},
+    },
+    "readonly": {
+        "realtime": {"view": True},
+        "pos": {"view": True, "edit": False},
+        "customers": {"view": True, "edit": False},
+        "employees": {"view": True, "edit": False},
+        "accounts": {"view": False, "edit": False},
+        "menus": {"view": True, "edit": False},
+    },
+}
+
+
+def _seed_role_permissions(db):
+    for role, perms in DEFAULT_ROLE_PERMISSIONS.items():
+        existing = db.query(models.RolePermission).filter_by(role=role).first()
+        if not existing:
+            db.add(models.RolePermission(role=role, permissions=perms))
+    db.commit()
 
 
 def init_db():
@@ -74,6 +146,9 @@ def init_db():
             existing_admin.password_hash = get_password_hash("trust1234")
             db.commit()
             print("Superadmin password rehashed: admin@trust.com / trust1234")
+
+        # ロール別デフォルト権限のシード
+        _seed_role_permissions(db)
 
         print("Database initialized successfully")
 

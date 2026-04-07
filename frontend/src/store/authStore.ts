@@ -2,12 +2,25 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import apiClient from '../api/client'
 
+export type PermPage = 'realtime' | 'pos' | 'customers' | 'employees' | 'accounts' | 'menus'
+export type PermType = 'view' | 'edit'
+
+export interface Permissions {
+  realtime?: { view?: boolean }
+  pos?: { view?: boolean; edit?: boolean }
+  customers?: { view?: boolean; edit?: boolean }
+  employees?: { view?: boolean; edit?: boolean }
+  accounts?: { view?: boolean; edit?: boolean }
+  menus?: { view?: boolean; edit?: boolean }
+}
+
 interface User {
   id: number
   email: string
   name: string
   role: string
   store_id: number | null
+  permissions: Permissions | null
 }
 
 interface Store {
@@ -27,6 +40,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   fetchMe: () => Promise<void>
+  hasPermission: (page: PermPage, type: PermType) => boolean
+  isAdministrator: () => boolean
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -36,6 +51,20 @@ export const useAuthStore = create<AuthState>()(
       stores: [],
       isLoggedIn: false,
       isLoading: false,
+
+      isAdministrator: () => {
+        const role = get().user?.role
+        return role === 'administrator' || role === 'superadmin'
+      },
+
+      hasPermission: (page: PermPage, type: PermType) => {
+        const user = get().user
+        if (!user) return false
+        if (user.role === 'administrator' || user.role === 'superadmin') return true
+        const perms = user.permissions
+        if (!perms) return false
+        return !!(perms[page] as any)?.[type]
+      },
 
       login: async (email, password) => {
         set({ isLoading: true })
@@ -65,7 +94,6 @@ export const useAuthStore = create<AuthState>()(
       fetchMe: async () => {
         const token = localStorage.getItem('access_token')
         if (!token) {
-          // トークンなしでisLoggedInが残っていたらクリア（ループ防止）
           if (get().isLoggedIn) get().logout()
           return
         }
@@ -76,7 +104,6 @@ export const useAuthStore = create<AuthState>()(
           ])
           set({ user, stores, isLoggedIn: true })
         } catch (e: any) {
-          // 401のみログアウト。ネットワークエラー等では状態を保持
           if (e?.response?.status === 401) {
             get().logout()
           }
