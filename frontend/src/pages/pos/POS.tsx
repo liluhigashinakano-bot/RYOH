@@ -339,7 +339,16 @@ export default function POS() {
             {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           {view === 'open' && (
-            <button onClick={() => setShowNewTicket(true)} className="btn-primary flex items-center gap-1 text-xs px-2.5 py-1.5 whitespace-nowrap shrink-0">
+            <button
+              onClick={() => {
+                if (!currentSession) {
+                  alert('営業が開始されていません。\n先に「営業開始」を行ってください。')
+                  return
+                }
+                setShowNewTicket(true)
+              }}
+              className="btn-primary flex items-center gap-1 text-xs px-2.5 py-1.5 whitespace-nowrap shrink-0"
+            >
               <Plus className="w-3.5 h-3.5" />新規伝票
             </button>
           )}
