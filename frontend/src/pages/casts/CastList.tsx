@@ -187,7 +187,7 @@ export default function CastList() {
       )}
 
       {/* キャスト一覧 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+      {employeeTab === 'cast' && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {sortedCasts.map((cast: any) => {
           const stats = statsMap[cast.id]
           const birthday = cast.birthday
@@ -291,7 +291,7 @@ export default function CastList() {
         {casts.length === 0 && (
           <div className="col-span-full text-center text-gray-500 py-12">キャストがいません</div>
         )}
-      </div>
+      </div>}
 
       {/* 社員・アルバイト一覧 */}
       {(employeeTab === 'staff' || employeeTab === 'part_time') && (
