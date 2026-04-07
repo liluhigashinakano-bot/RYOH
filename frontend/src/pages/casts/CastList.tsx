@@ -221,7 +221,7 @@ export default function CastList() {
                   onClick={e => { e.stopPropagation(); setRetireTarget(cast) }}
                   className="absolute top-2 right-2 text-xs text-gray-600 hover:text-red-400 px-2 py-0.5 rounded hover:bg-red-900/20 transition-colors"
                 >
-                  退店
+                  在籍
                 </button>
               )}
 
