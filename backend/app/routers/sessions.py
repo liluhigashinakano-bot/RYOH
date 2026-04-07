@@ -526,6 +526,15 @@ def get_session_tickets(session_id: int, db: Session = Depends(get_db), current_
     tickets = query.order_by(models.Ticket.ended_at).all()
     result = []
     for t in tickets:
+        # 先会計・分割清算で支払い済みの金額（負の注文として記録されている）
+        senkaikei_paid = sum(
+            abs(i.amount) for i in (t.order_items or [])
+            if i.canceled_at is None
+            and i.item_name
+            and (i.item_name.startswith('先会計') or i.item_name.startswith('分割清算'))
+        )
+        # 実際の支払い総額 = クローズ時の支払い + 先会計済み額
+        actual_paid = (t.cash_amount or 0) + (t.card_amount or 0) + (t.code_amount or 0) + senkaikei_paid
         result.append({
             "id": t.id,
             "table_no": t.table_no,
@@ -534,6 +543,7 @@ def get_session_tickets(session_id: int, db: Session = Depends(get_db), current_
             "visit_type": t.visit_type,
             "customer_name": t.customer.name if t.customer else None,
             "total_amount": t.total_amount,
+            "actual_paid": actual_paid,
             "payment_method": t.payment_method.value if t.payment_method else None,
             "cash_amount": t.cash_amount or 0,
             "card_amount": t.card_amount or 0,

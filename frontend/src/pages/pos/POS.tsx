@@ -4883,7 +4883,7 @@ function SessionReportList({ storeId }: { storeId: number }) {
                             {t.payment_method === 'cash' ? '現金' : t.payment_method === 'card' ? 'カード' : t.payment_method === 'code' ? 'コード' : '—'}
                           </span>
                         </td>
-                        <td className="py-1 text-right text-pink-400 font-medium">¥{((t.cash_amount || 0) + (t.card_amount || 0) + (t.code_amount || 0) || Math.round(Math.round((t.total_amount || 0) * 1.1) * 1.1)).toLocaleString()}</td>
+                        <td className="py-1 text-right text-pink-400 font-medium">¥{(t.actual_paid ?? Math.round(Math.round((t.total_amount || 0) * 1.1) * 1.1)).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
