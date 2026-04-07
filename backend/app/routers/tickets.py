@@ -738,6 +738,8 @@ class TicketPatch(BaseModel):
     table_no: Optional[str] = None
     visit_type: Optional[str] = None
     plan_type: Optional[str] = None
+    visit_motivation: Optional[str] = None
+    motivation_cast_id: Optional[int] = None
     update_header: bool = False   # True のとき table_no/visit_type/plan_type を null でも更新する
     operator_name: Optional[str] = None
     reason: Optional[str] = None
@@ -812,6 +814,12 @@ def patch_ticket(
         new_guest_count = max(1, data.guest_count)
         ticket.guest_count = new_guest_count
 
+    if data.visit_motivation is not None or data.update_header:
+        new_motivation = data.visit_motivation or None
+        if new_motivation != ticket.visit_motivation:
+            ticket.visit_motivation = new_motivation
+            ticket.motivation_cast_id = data.motivation_cast_id if new_motivation else None
+
     if data.table_no is not None or data.update_header:
         new_table_no = data.table_no or ticket.table_no
         if new_table_no != ticket.table_no:
@@ -845,9 +853,9 @@ def patch_ticket(
             db.add(log)
 
     if data.plan_type is not None or data.update_header:
-        new_plan_type = data.plan_type or 'standard'
-        if new_plan_type != ticket.plan_type:
-            old_val = ticket.plan_type or ''
+        new_plan_type = data.plan_type if data.plan_type is not None else (ticket.plan_type or 'standard')
+        if new_plan_type != (ticket.plan_type or 'standard'):
+            old_val = ticket.plan_type or 'standard'
             ticket.plan_type = new_plan_type
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
@@ -859,6 +867,25 @@ def patch_ticket(
                 reason=data.reason,
             )
             db.add(log)
+
+    # セット料金の自動更新（guest_count または plan_type が変わった場合）
+    if data.update_header and (data.guest_count is not None or data.plan_type is not None):
+        final_guest = ticket.guest_count or 1
+        final_plan = ticket.plan_type or 'standard'
+        SET_PRICES = {'premium': 3500, 'standard': 2500}
+        new_unit = SET_PRICES.get(final_plan, 2500)
+        new_total = new_unit * final_guest
+        set_item = next(
+            (i for i in (ticket.order_items or [])
+             if i.item_type == 'set' and i.item_name == 'セット料金' and i.canceled_at is None),
+            None
+        )
+        if set_item:
+            old_total = set_item.amount
+            set_item.quantity = final_guest
+            set_item.unit_price = new_unit
+            set_item.amount = new_total
+            ticket.total_amount += (new_total - old_total)
 
     db.commit()
     db.refresh(ticket)

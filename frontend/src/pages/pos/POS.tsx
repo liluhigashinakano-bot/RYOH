@@ -2457,8 +2457,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showLog, setShowLog] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
-  const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard' })
+  const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null })
   const [headerEditOperator, setHeaderEditOperator] = useState('')
+  const [headerEditError, setHeaderEditError] = useState('')
 
   const confirmCheckout = (fn: () => void) => setPendingAction(() => fn)
 
@@ -2543,13 +2544,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   const patchHeaderMutation = useMutation({
-    mutationFn: (payload: { table_no?: string; guest_count?: number; visit_type?: string | null; plan_type?: string; update_header?: boolean; operator_name?: string | null }) =>
+    mutationFn: (payload: any) =>
       apiClient.patch(`/api/tickets/${ticketId}`, payload).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
       setShowHeaderEdit(false)
       setHeaderEditOperator('')
+      setHeaderEditError('')
+    },
+    onError: (e: any) => {
+      setHeaderEditError(e.response?.data?.detail || '保存に失敗しました')
     },
   })
 
@@ -2702,7 +2707,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                         guest_count: ticket.guest_count || 1,
                         visit_type: ticket.visit_type || '',
                         plan_type: ticket.plan_type || 'standard',
+                        visit_motivation: ticket.visit_motivation || '',
+                        motivation_cast_id: ticket.motivation_cast_id || null,
                       })
+                      setHeaderEditError('')
                       setShowHeaderEdit(true)
                     }}
                     className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
@@ -3278,6 +3286,35 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 ))}
               </div>
             </div>
+            {/* 来店動機 */}
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400">来店動機</label>
+              <div className="flex flex-wrap gap-1.5">
+                {['', ...MOTIVATION_OPTIONS].map(m => (
+                  <button
+                    key={m || 'none'}
+                    onClick={() => setHeaderEditForm(f => ({ ...f, visit_motivation: m, motivation_cast_id: null }))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      headerEditForm.visit_motivation === m
+                        ? 'bg-teal-700 text-white'
+                        : 'bg-night-700 text-gray-400 hover:bg-night-600'
+                    }`}
+                  >{m || '未設定'}</button>
+                ))}
+              </div>
+              {MOTIVATION_CAST_REQUIRED.has(headerEditForm.visit_motivation) && (
+                <select
+                  value={headerEditForm.motivation_cast_id ?? ''}
+                  onChange={e => setHeaderEditForm(f => ({ ...f, motivation_cast_id: e.target.value ? Number(e.target.value) : null }))}
+                  className="input-field w-full text-sm py-1 mt-1"
+                >
+                  <option value="">キャスト選択</option>
+                  {(castsAll as any[]).filter((c: any) => c.is_active).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.stage_name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
             {/* オペレーター名 */}
             <div className="space-y-1">
               <label className="text-xs text-gray-400">操作者名</label>
@@ -3289,9 +3326,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 className="input-field w-full text-sm py-1.5"
               />
             </div>
+            {headerEditError && <p className="text-red-400 text-xs">{headerEditError}</p>}
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => { setShowHeaderEdit(false); setHeaderEditOperator('') }}
+                onClick={() => { setShowHeaderEdit(false); setHeaderEditOperator(''); setHeaderEditError('') }}
                 className="flex-1 py-2 rounded-lg bg-night-700 text-gray-300 hover:bg-night-600 text-sm transition-colors"
               >キャンセル</button>
               <button
@@ -3301,6 +3339,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     guest_count: headerEditForm.guest_count,
                     visit_type: headerEditForm.visit_type || null,
                     plan_type: headerEditForm.plan_type,
+                    visit_motivation: headerEditForm.visit_motivation || null,
+                    motivation_cast_id: headerEditForm.motivation_cast_id || null,
                     update_header: true,
                     operator_name: headerEditOperator || null,
                   })
