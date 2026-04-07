@@ -39,9 +39,10 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         cast_map_local: dict = {}
         for item in orders:
             cid = item.cast_id
-            if cid not in cast_map_local or item.created_at > cast_map_local[cid]["last_at"]:
+            last_at_iso = item.created_at.isoformat() if item.created_at else None
+            if cid not in cast_map_local or (last_at_iso and last_at_iso > (cast_map_local[cid]["last_at"] or "")):
                 cast_name = item.cast.stage_name if item.cast else f"Cast{cid}"
-                cast_map_local[cid] = {"cast_id": cid, "cast_name": cast_name, "last_at": item.created_at.isoformat() if item.created_at else None}
+                cast_map_local[cid] = {"cast_id": cid, "cast_name": cast_name, "last_at": last_at_iso}
         # クリア済み（cleared_at >= last_at）のキャストを除外
         result = []
         for entry in cast_map_local.values():
@@ -379,36 +380,18 @@ def add_order(
 
     amount = data.quantity * data.unit_price
 
-    # 同じ品目（item_type・item_name・unit_price・cast_id）が未キャンセルで存在すれば数量を加算
-    # setは個別行として管理するため統合しない
-    existing = None
-    if data.item_type != 'set':
-        existing = next((
-            i for i in (ticket.order_items or [])
-            if i.canceled_at is None
-            and i.item_type == data.item_type
-            and (i.item_name or '') == (data.item_name or '')
-            and i.unit_price == data.unit_price
-            and i.cast_id == data.cast_id
-        ), None)
-
-    if existing:
-        existing.quantity += data.quantity
-        existing.amount += amount
-        existing.created_at = datetime.utcnow()  # D時間リセット
-        item_id = existing.id
-    else:
-        item = models.OrderItem(
-            ticket_id=ticket_id,
-            item_type=data.item_type,
-            item_name=data.item_name,
-            quantity=data.quantity,
-            unit_price=data.unit_price,
-            amount=amount,
-            cast_id=data.cast_id,
-        )
-        db.add(item)
-        item_id = None  # commit後に取得
+    # 常に新規レコードを作成（個別タイムスタンプ保持のため）
+    item = models.OrderItem(
+        ticket_id=ticket_id,
+        item_type=data.item_type,
+        item_name=data.item_name,
+        quantity=data.quantity,
+        unit_price=data.unit_price,
+        amount=amount,
+        cast_id=data.cast_id,
+    )
+    db.add(item)
+    item_id = None
 
     ticket.total_amount += amount
 
