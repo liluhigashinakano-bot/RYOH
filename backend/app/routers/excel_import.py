@@ -486,250 +486,252 @@ async def import_daily_sheets(
     except Exception:
         pass
 
-    visits, cast_records = parse_daily_sheets(wb, year, month)
+    try:
+        visits, cast_records = parse_daily_sheets(wb, year, month)
 
-    # 店舗別フォルダにCSV保存
-    store_dir = os.path.join(IMPORTS_DIR, store_name)
-    os.makedirs(store_dir, exist_ok=True)
-    csv_filename = f"{year}{month:02d}_visits.csv"
-    csv_path = os.path.join(store_dir, csv_filename)
+        # 店舗別フォルダにCSV保存
+        store_dir = os.path.join(IMPORTS_DIR, store_name)
+        os.makedirs(store_dir, exist_ok=True)
+        csv_filename = f"{year}{month:02d}_visits.csv"
+        csv_path = os.path.join(store_dir, csv_filename)
 
-    fieldnames = ["date", "customer_name", "is_repeat", "table_no",
-                  "in_time", "out_time", "extensions", "course",
-                  "set_l", "set_shot", "set_mg", "group_size",
-                  "payment_cash", "payment_card", "total_payment", "arrival_source"]
-    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(visits)
+        fieldnames = ["date", "customer_name", "is_repeat", "table_no",
+                      "in_time", "out_time", "extensions", "course",
+                      "set_l", "set_shot", "set_mg", "group_size",
+                      "payment_cash", "payment_card", "total_payment", "arrival_source"]
+        with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(visits)
 
-    # 顧客DBに登録・更新
-    created = updated = 0
-    seen_names: set[str] = set()
+        # 顧客DBに登録・更新
+        created = updated = 0
+        seen_names: set[str] = set()
 
-    # 店舗を取得（顧客コード生成用）
-    store_obj_for_customer = db.query(models.Store).filter(models.Store.name == store_name).first()
-    customer_store_id = store_obj_for_customer.id if store_obj_for_customer else 1
+        # 店舗を取得（顧客コード生成用）
+        store_obj_for_customer = db.query(models.Store).filter(models.Store.name == store_name).first()
+        customer_store_id = store_obj_for_customer.id if store_obj_for_customer else 1
 
-    day_labels = ["月", "火", "水", "木", "金", "土", "日"]
+        day_labels = ["月", "火", "水", "木", "金", "土", "日"]
 
-    for v in visits:
-        name = v["customer_name"]
-        if not name or name in seen_names:
-            continue
-        seen_names.add(name)
-
-        customer_visits = [x for x in visits if x["customer_name"] == name]
-        visit_dates = sorted([date.fromisoformat(x["date"]) for x in customer_visits])
-
-        # 今回のファイルの月キー（YYYY-MM）
-        month_key = f"{year}-{month:02d}"
-
-        # 今回ファイル分の月別集計データ
-        this_month_data = {
-            "visits": len(customer_visits),
-            "spend": sum(x["total_payment"] for x in customer_visits),
-            "extensions": sum(x["extensions"] for x in customer_visits),
-            "persons": sum(x["group_size"] for x in customer_visits),
-            "set_l": sum(x["set_l"] for x in customer_visits),
-            "set_mg": sum(x["set_mg"] for x in customer_visits),
-            "set_shot": sum(x.get("set_shot", 0) for x in customer_visits),
-            "in_mins": [(t // 100) * 60 + (t % 100) for x in customer_visits if (t := x["in_time"])],
-            "arrival_source": {},
-            "day_prefs": {},
-        }
-        # 来店動機（空は"不明"）
-        for x in customer_visits:
-            src = x["arrival_source"] if x["arrival_source"] else "不明"
-            this_month_data["arrival_source"][src] = this_month_data["arrival_source"].get(src, 0) + 1
-        # 曜日別
-        for vd in visit_dates:
-            label = day_labels[vd.weekday()]
-            this_month_data["day_prefs"][label] = this_month_data["day_prefs"].get(label, 0) + 1
-
-        existing = db.query(models.Customer).filter(
-            models.Customer.name == name,
-            models.Customer.is_active == True,
-        ).first()
-
-        if existing:
-            old_prefs = existing.preferences or {}
-            # monthly_data: 月別データを保持（同じ月を再インポートしたら上書き）
-            monthly_data: dict = old_prefs.get("monthly_data", {})
-            monthly_data[month_key] = this_month_data
-
-            # 全月分から再集計
-            all_prefs = _calc_prefs_from_monthly(monthly_data, day_labels)
-            # 手動設定項目は保持
-            for keep_key in ["ng_notes", "anniversary_date", "assigned_casts"]:
-                if keep_key in old_prefs:
-                    all_prefs[keep_key] = old_prefs[keep_key]
-            all_prefs["monthly_data"] = monthly_data
-            existing.preferences = all_prefs
-            flag_modified(existing, "preferences")
-
-            # first/last_visit_date も全月から算出
-            fv = visit_dates[0] if visit_dates else None
-            lv = visit_dates[-1] if visit_dates else None
-            if fv and (not existing.first_visit_date or fv < existing.first_visit_date):
-                existing.first_visit_date = fv
-            if lv and (not existing.last_visit_date or lv > existing.last_visit_date):
-                existing.last_visit_date = lv
-            existing.total_visits = all_prefs["_total_visits"]
-            existing.total_spend = all_prefs["_total_spend"]
-            customer_obj = existing
-            updated += 1
-        else:
-            monthly_data = {month_key: this_month_data}
-            all_prefs = _calc_prefs_from_monthly(monthly_data, day_labels)
-            all_prefs["monthly_data"] = monthly_data
-            customer_obj = models.Customer(
-                store_id=customer_store_id,
-                name=name,
-                total_visits=all_prefs["_total_visits"],
-                total_spend=all_prefs["_total_spend"],
-                last_visit_date=visit_dates[-1] if visit_dates else None,
-                first_visit_date=visit_dates[0] if visit_dates else None,
-                preferences=all_prefs,
-            )
-            db.add(customer_obj)
-            db.flush()  # IDを確定
-            customer_obj.customer_code = generate_customer_code(db, customer_store_id)
-            created += 1
-
-        # 来店履歴をCustomerVisitに保存（同月同店舗は削除→再挿入）
-        if customer_obj.id and visit_dates:
-            db.query(models.CustomerVisit).filter(
-                models.CustomerVisit.customer_id == customer_obj.id,
-                models.CustomerVisit.store_name == store_name,
-                models.CustomerVisit.date >= visit_dates[0],
-                models.CustomerVisit.date <= visit_dates[-1],
-            ).delete(synchronize_session=False)
-        if customer_obj.id:
-            for v in customer_visits:
-                db.add(models.CustomerVisit(
-                    customer_id=customer_obj.id,
-                    date=date.fromisoformat(v["date"]),
-                    store_name=store_name,
-                    is_repeat=v["is_repeat"],
-                    in_time=v.get("in_time"),
-                    out_time=v.get("out_time"),
-                    total_payment=v.get("total_payment", 0),
-                    raw_data=v.get("raw_data", {}),
-                ))
-
-    db.commit()
-
-    # ─── キャスト出勤データを登録 ────────────────────────────────────────────
-    # 店舗を名前で検索
-    store_obj = db.query(models.Store).filter(models.Store.name == store_name).first()
-    cast_shifts_saved = 0
-
-    if store_obj and cast_records:
-        # キャスト名→Cast オブジェクトのキャッシュ
-        cast_cache: dict[str, models.Cast | None] = {}
-
-        for rec in cast_records:
-            sname = rec["stage_name"]
-            if sname not in cast_cache:
-                found = db.query(models.Cast).filter(
-                    models.Cast.stage_name == sname,
-                    models.Cast.store_id == store_obj.id,
-                    models.Cast.is_active == True,
-                ).first()
-                if not found:
-                    # 未登録キャストは自動作成（キャストコードも自動付与）
-                    cast_code = generate_cast_code(db, store_obj.id)
-                    found = models.Cast(
-                        store_id=store_obj.id,
-                        stage_name=sname,
-                        cast_code=cast_code,
-                    )
-                    db.add(found)
-                    db.flush()
-                cast_cache[sname] = found
-            cast_obj = cast_cache[sname]
-            if not cast_obj:
+        for v in visits:
+            name = v["customer_name"]
+            if not name or name in seen_names:
                 continue
+            seen_names.add(name)
 
-            shift_date = date.fromisoformat(rec["date"])
+            customer_visits = [x for x in visits if x["customer_name"] == name]
+            visit_dates = sorted([date.fromisoformat(x["date"]) for x in customer_visits])
 
-            # 同日のシフトがあれば上書き
-            existing_shift = db.query(models.ConfirmedShift).filter(
-                models.ConfirmedShift.cast_id == cast_obj.id,
-                models.ConfirmedShift.store_id == store_obj.id,
-                models.ConfirmedShift.date == shift_date,
+            # 今回のファイルの月キー（YYYY-MM）
+            month_key = f"{year}-{month:02d}"
+
+            # 今回ファイル分の月別集計データ
+            this_month_data = {
+                "visits": len(customer_visits),
+                "spend": sum(x["total_payment"] for x in customer_visits),
+                "extensions": sum(x["extensions"] for x in customer_visits),
+                "persons": sum(x["group_size"] for x in customer_visits),
+                "set_l": sum(x["set_l"] for x in customer_visits),
+                "set_mg": sum(x["set_mg"] for x in customer_visits),
+                "set_shot": sum(x.get("set_shot", 0) for x in customer_visits),
+                "in_mins": [(t // 100) * 60 + (t % 100) for x in customer_visits if (t := x["in_time"])],
+                "arrival_source": {},
+                "day_prefs": {},
+            }
+            # 来店動機（空は"不明"）
+            for x in customer_visits:
+                src = x["arrival_source"] if x["arrival_source"] else "不明"
+                this_month_data["arrival_source"][src] = this_month_data["arrival_source"].get(src, 0) + 1
+            # 曜日別
+            for vd in visit_dates:
+                label = day_labels[vd.weekday()]
+                this_month_data["day_prefs"][label] = this_month_data["day_prefs"].get(label, 0) + 1
+
+            existing = db.query(models.Customer).filter(
+                models.Customer.name == name,
+                models.Customer.is_active == True,
             ).first()
 
-            shift_data_payload = {
-                "set_l": rec["set_l"],
-                "set_mg": rec["set_mg"],
-                "set_shot": rec["set_shot"],
-                "set_s": rec["set_s"],
-                "champagne_count": rec["champagne_count"],
-                "champagne_back": rec["champagne_back"],
-                "drink_count": rec["drink_count"],
-                "drink_back": rec["drink_back"],
-                "daily_payment": rec["daily_payment"],
-                "rt_count": rec["rt_count"],
-                "nt_count": rec["nt_count"],
-                "distribution_count": rec["distribution_count"],
-                "help_store": rec["help_store"],
-                "help_hourly_rate": rec["help_hourly_rate"],
-                "working_hours": rec["working_hours"],
-            }
+            if existing:
+                old_prefs = existing.preferences or {}
+                # monthly_data: 月別データを保持（同じ月を再インポートしたら上書き）
+                monthly_data: dict = old_prefs.get("monthly_data", {})
+                monthly_data[month_key] = this_month_data
 
-            actual_start = datetime.fromisoformat(rec["actual_start"]) if rec["actual_start"] else None
-            actual_end = datetime.fromisoformat(rec["actual_end"]) if rec["actual_end"] else None
+                # 全月分から再集計
+                all_prefs = _calc_prefs_from_monthly(monthly_data, day_labels)
+                # 手動設定項目は保持
+                for keep_key in ["ng_notes", "anniversary_date", "assigned_casts"]:
+                    if keep_key in old_prefs:
+                        all_prefs[keep_key] = old_prefs[keep_key]
+                all_prefs["monthly_data"] = monthly_data
+                existing.preferences = all_prefs
+                flag_modified(existing, "preferences")
 
-            if existing_shift:
-                existing_shift.is_late = rec["is_late"]
-                existing_shift.is_absent = rec["is_absent"]
-                existing_shift.actual_start = actual_start
-                existing_shift.actual_end = actual_end
-                existing_shift.shift_data = shift_data_payload
-                shift = existing_shift
+                # first/last_visit_date も全月から算出
+                fv = visit_dates[0] if visit_dates else None
+                lv = visit_dates[-1] if visit_dates else None
+                if fv and (not existing.first_visit_date or fv < existing.first_visit_date):
+                    existing.first_visit_date = fv
+                if lv and (not existing.last_visit_date or lv > existing.last_visit_date):
+                    existing.last_visit_date = lv
+                existing.total_visits = all_prefs["_total_visits"]
+                existing.total_spend = all_prefs["_total_spend"]
+                customer_obj = existing
+                updated += 1
             else:
-                shift = models.ConfirmedShift(
-                    cast_id=cast_obj.id,
-                    store_id=store_obj.id,
-                    date=shift_date,
-                    is_late=rec["is_late"],
-                    is_absent=rec["is_absent"],
-                    actual_start=actual_start,
-                    actual_end=actual_end,
-                    shift_data=shift_data_payload,
+                monthly_data = {month_key: this_month_data}
+                all_prefs = _calc_prefs_from_monthly(monthly_data, day_labels)
+                all_prefs["monthly_data"] = monthly_data
+                customer_obj = models.Customer(
+                    store_id=customer_store_id,
+                    name=name,
+                    total_visits=all_prefs["_total_visits"],
+                    total_spend=all_prefs["_total_spend"],
+                    last_visit_date=visit_dates[-1] if visit_dates else None,
+                    first_visit_date=visit_dates[0] if visit_dates else None,
+                    preferences=all_prefs,
                 )
-                db.add(shift)
-                db.flush()
+                db.add(customer_obj)
+                db.flush()  # IDを確定
+                customer_obj.customer_code = generate_customer_code(db, customer_store_id)
+                created += 1
 
-            # CastDailyPay（日払い・バック）
-            existing_pay = db.query(models.CastDailyPay).filter(
-                models.CastDailyPay.shift_id == shift.id,
-            ).first() if shift.id else None
+            # 来店履歴をCustomerVisitに保存（同月同店舗は削除→再挿入）
+            if customer_obj.id and visit_dates:
+                db.query(models.CustomerVisit).filter(
+                    models.CustomerVisit.customer_id == customer_obj.id,
+                    models.CustomerVisit.store_name == store_name,
+                    models.CustomerVisit.date >= visit_dates[0],
+                    models.CustomerVisit.date <= visit_dates[-1],
+                ).delete(synchronize_session=False)
+            if customer_obj.id:
+                for v in customer_visits:
+                    db.add(models.CustomerVisit(
+                        customer_id=customer_obj.id,
+                        date=date.fromisoformat(v["date"]),
+                        store_name=store_name,
+                        is_repeat=v["is_repeat"],
+                        in_time=v.get("in_time"),
+                        out_time=v.get("out_time"),
+                        total_payment=v.get("total_payment", 0),
+                        raw_data=v.get("raw_data", {}),
+                    ))
 
-            if existing_pay:
-                existing_pay.drink_back = rec["drink_back"]
-                existing_pay.champagne_back = rec["champagne_back"]
-                existing_pay.total_pay = rec["drink_back"] + rec["champagne_back"]
-            else:
-                db.add(models.CastDailyPay(
-                    shift_id=shift.id,
-                    drink_back=rec["drink_back"],
-                    champagne_back=rec["champagne_back"],
-                    total_pay=rec["drink_back"] + rec["champagne_back"],
-                ))
-            cast_shifts_saved += 1
+        db.commit()
 
-    db.commit()
-    return DailyImportResult(
-        visits_extracted=len(visits),
-        customers_created=created,
-        customers_updated=updated,
-        cast_shifts_saved=cast_shifts_saved,
-        csv_saved=f"{store_name}/{csv_filename}",
-        store_name=store_name,
-    )
+        # ─── キャスト出勤データを登録 ────────────────────────────────────────────
+        store_obj = db.query(models.Store).filter(models.Store.name == store_name).first()
+        cast_shifts_saved = 0
+
+        if store_obj and cast_records:
+            cast_cache: dict[str, models.Cast | None] = {}
+
+            for rec in cast_records:
+                sname = rec["stage_name"]
+                if sname not in cast_cache:
+                    found = db.query(models.Cast).filter(
+                        models.Cast.stage_name == sname,
+                        models.Cast.store_id == store_obj.id,
+                        models.Cast.is_active == True,
+                    ).first()
+                    if not found:
+                        cast_code = generate_cast_code(db, store_obj.id)
+                        found = models.Cast(
+                            store_id=store_obj.id,
+                            stage_name=sname,
+                            cast_code=cast_code,
+                        )
+                        db.add(found)
+                        db.flush()
+                    cast_cache[sname] = found
+                cast_obj = cast_cache[sname]
+                if not cast_obj:
+                    continue
+
+                shift_date = date.fromisoformat(rec["date"])
+
+                existing_shift = db.query(models.ConfirmedShift).filter(
+                    models.ConfirmedShift.cast_id == cast_obj.id,
+                    models.ConfirmedShift.store_id == store_obj.id,
+                    models.ConfirmedShift.date == shift_date,
+                ).first()
+
+                shift_data_payload = {
+                    "set_l": rec["set_l"],
+                    "set_mg": rec["set_mg"],
+                    "set_shot": rec["set_shot"],
+                    "set_s": rec["set_s"],
+                    "champagne_count": rec["champagne_count"],
+                    "champagne_back": rec["champagne_back"],
+                    "drink_count": rec["drink_count"],
+                    "drink_back": rec["drink_back"],
+                    "daily_payment": rec["daily_payment"],
+                    "rt_count": rec["rt_count"],
+                    "nt_count": rec["nt_count"],
+                    "distribution_count": rec["distribution_count"],
+                    "help_store": rec["help_store"],
+                    "help_hourly_rate": rec["help_hourly_rate"],
+                    "working_hours": rec["working_hours"],
+                }
+
+                actual_start = datetime.fromisoformat(rec["actual_start"]) if rec["actual_start"] else None
+                actual_end = datetime.fromisoformat(rec["actual_end"]) if rec["actual_end"] else None
+
+                if existing_shift:
+                    existing_shift.is_late = rec["is_late"]
+                    existing_shift.is_absent = rec["is_absent"]
+                    existing_shift.actual_start = actual_start
+                    existing_shift.actual_end = actual_end
+                    existing_shift.shift_data = shift_data_payload
+                    shift = existing_shift
+                else:
+                    shift = models.ConfirmedShift(
+                        cast_id=cast_obj.id,
+                        store_id=store_obj.id,
+                        date=shift_date,
+                        is_late=rec["is_late"],
+                        is_absent=rec["is_absent"],
+                        actual_start=actual_start,
+                        actual_end=actual_end,
+                        shift_data=shift_data_payload,
+                    )
+                    db.add(shift)
+                    db.flush()
+
+                existing_pay = db.query(models.CastDailyPay).filter(
+                    models.CastDailyPay.shift_id == shift.id,
+                ).first() if shift.id else None
+
+                if existing_pay:
+                    existing_pay.drink_back = rec["drink_back"]
+                    existing_pay.champagne_back = rec["champagne_back"]
+                    existing_pay.total_pay = rec["drink_back"] + rec["champagne_back"]
+                else:
+                    db.add(models.CastDailyPay(
+                        shift_id=shift.id,
+                        drink_back=rec["drink_back"],
+                        champagne_back=rec["champagne_back"],
+                        total_pay=rec["drink_back"] + rec["champagne_back"],
+                    ))
+                cast_shifts_saved += 1
+
+        db.commit()
+        return DailyImportResult(
+            visits_extracted=len(visits),
+            customers_created=created,
+            customers_updated=updated,
+            cast_shifts_saved=cast_shifts_saved,
+            csv_saved=f"{store_name}/{csv_filename}",
+            store_name=store_name,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        import traceback
+        raise HTTPException(status_code=500, detail=f"インポート処理エラー: {type(e).__name__}: {str(e)}\n{traceback.format_exc()[-500:]}")
 
 
 @router.get("/imports")

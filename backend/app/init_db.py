@@ -11,6 +11,8 @@ def _run_migrations(engine):
         "ALTER TABLE incentive_configs ADD COLUMN IF NOT EXISTS fixed_amount INTEGER",
         # MenuItemConfig: has_incentive 列追加
         "ALTER TABLE menu_item_configs ADD COLUMN IF NOT EXISTS has_incentive BOOLEAN DEFAULT false",
+        # CustomerVisit: raw_data 列追加
+        "ALTER TABLE customer_visits ADD COLUMN IF NOT EXISTS raw_data JSON",
     ]
     with engine.connect() as conn:
         for sql in migrations:
