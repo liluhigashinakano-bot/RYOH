@@ -702,6 +702,53 @@ def reduce_group(
     return resp
 
 
+class ChampagneRatioUpdate(BaseModel):
+    old_item_name: str
+    new_item_name: str
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@router.patch("/{ticket_id}/update-champagne")
+def update_champagne_ratios(
+    ticket_id: int,
+    data: ChampagneRatioUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """シャンパンのキャスト配分率を一括更新（item_nameを書き換え）"""
+    items = db.query(models.OrderItem).filter(
+        models.OrderItem.ticket_id == ticket_id,
+        models.OrderItem.item_name == data.old_item_name,
+        models.OrderItem.item_type == 'champagne',
+        models.OrderItem.canceled_at == None,
+    ).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="シャンパン注文が見つかりません")
+
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    for item in items:
+        log = models.OrderItemLog(
+            ticket_id=ticket_id,
+            order_item_id=item.id,
+            action='update_ratio',
+            item_type=item.item_type,
+            item_name=data.new_item_name,
+            old_quantity=item.quantity,
+            new_quantity=item.quantity,
+            old_amount=item.amount,
+            new_amount=item.amount,
+            changed_by=current_user.id,
+            operator_name=data.operator_name,
+            reason=data.reason,
+        )
+        db.add(log)
+        item.item_name = data.new_item_name
+
+    db.commit()
+    return {"ok": True, "total_amount": ticket.total_amount if ticket else None}
+
+
 class TicketPatch(BaseModel):
     started_at: Optional[datetime] = None
     guest_count: Optional[int] = None

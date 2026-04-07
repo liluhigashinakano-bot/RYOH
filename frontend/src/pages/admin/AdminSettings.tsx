@@ -160,6 +160,7 @@ function MenuSection({ storeId }: { storeId: number }) {
 
 function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any; onClose: () => void }) {
   const qc = useQueryClient()
+  const [errorMsg, setErrorMsg] = useState('')
   const [form, setForm] = useState({
     label: item?.label || '',
     price: item?.price ?? 0,
@@ -176,6 +177,10 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
       qc.invalidateQueries({ queryKey: ['menu-items', storeId] })
       qc.invalidateQueries({ queryKey: ['incentives', storeId] })
       onClose()
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail || err?.message || '保存に失敗しました'
+      setErrorMsg(String(msg))
     },
   })
 
@@ -200,11 +205,11 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
             <label className="text-xs text-gray-400 block mb-1">単価（円）</label>
             <input
               type="number"
-              value={form.price}
-              onChange={e => setForm({ ...form, price: Number(e.target.value) })}
-              onFocus={e => e.target.select()}
+              value={form.price === 0 ? '' : form.price}
+              onChange={e => setForm({ ...form, price: e.target.value === '' ? 0 : parseInt(e.target.value, 10) || 0 })}
               className="input-field w-full"
               min={0}
+              placeholder="0"
             />
           </div>
           <div>
@@ -256,14 +261,19 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
             />
           </div>
         </div>
+        {errorMsg && (
+          <p className="text-xs text-red-400 bg-red-900/20 border border-red-800/40 rounded-lg px-3 py-2">
+            エラー: {errorMsg}
+          </p>
+        )}
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
           <button
-            onClick={() => mutation.mutate()}
-            disabled={!form.label || mutation.isPending}
+            onClick={() => { setErrorMsg(''); mutation.mutate() }}
+            disabled={!form.label.trim() || mutation.isPending}
             className="btn-primary flex-1 disabled:opacity-40"
           >
-            {item ? '更新' : '追加'}
+            {mutation.isPending ? '保存中...' : item ? '更新' : '追加'}
           </button>
         </div>
       </div>

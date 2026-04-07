@@ -3,8 +3,27 @@ from . import models
 from .auth import get_password_hash
 
 
+def _run_migrations(engine):
+    """既存テーブルへの列追加マイグレーション（create_allは既存テーブルに列を追加しないため）"""
+    migrations = [
+        # IncentiveConfig: incentive_mode / fixed_amount 列追加
+        "ALTER TABLE incentive_configs ADD COLUMN IF NOT EXISTS incentive_mode VARCHAR(10) DEFAULT 'percent'",
+        "ALTER TABLE incentive_configs ADD COLUMN IF NOT EXISTS fixed_amount INTEGER",
+        # MenuItemConfig: has_incentive 列追加
+        "ALTER TABLE menu_item_configs ADD COLUMN IF NOT EXISTS has_incentive BOOLEAN DEFAULT false",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(__import__('sqlalchemy').text(sql))
+            except Exception as e:
+                print(f"[MIGRATION SKIP] {sql[:60]}... → {e}")
+        conn.commit()
+
+
 def init_db():
     models.Base.metadata.create_all(bind=engine)
+    _run_migrations(engine)
 
     db = SessionLocal()
     try:

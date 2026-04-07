@@ -2440,6 +2440,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [editingGroupItemIds, setEditingGroupItemIds] = useState<number[]>([])
   const [operatorName, setOperatorName] = useState('')
   const [operatorReason, setOperatorReason] = useState('')
+  const [champEditCasts, setChampEditCasts] = useState<{ castName: string; ratio: number }[]>([])
   const [actionPos, setActionPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [showCastSearch, setShowCastSearch] = useState(false)
@@ -2502,6 +2503,28 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       setSelectedOrderId(null)
       setOperatorName('')
       setOperatorReason('')
+    },
+  })
+
+  const updateChampagneMutation = useMutation({
+    mutationFn: ({ oldName, newName, operator, reason }: { oldName: string; newName: string; operator: string; reason: string }) =>
+      apiClient.patch(`/api/tickets/${ticketId}/update-champagne`, {
+        old_item_name: oldName,
+        new_item_name: newName,
+        operator_name: operator || null,
+        reason: reason || null,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+      setEditingOrderId(null)
+      setSelectedOrderId(null)
+      setActionPos(null)
+      setOperatorName('')
+      setOperatorReason('')
+      setActionMode('add')
+      setChampEditCasts([])
     },
   })
 
@@ -3235,7 +3258,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       {(selectedOrderId || editingOrderId) && actionPos && (() => {
         const item = ticket?.order_items?.find((i: any) => i.id === (editingOrderId || selectedOrderId))
         if (!item) return null
-        const closePanel = () => { setEditingOrderId(null); setSelectedOrderId(null); setActionPos(null); setOperatorName(''); setOperatorReason(''); setActionMode('add') }
+        const closePanel = () => { setEditingOrderId(null); setSelectedOrderId(null); setActionPos(null); setOperatorName(''); setOperatorReason(''); setActionMode('add'); setChampEditCasts([]) }
         return (
           <div
             style={{ position: 'fixed', top: actionPos.top, left: actionPos.left, width: actionPos.width, zIndex: 200 }}
@@ -3277,6 +3300,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   setEditingOrderId(selectedOrderId)
                   setOperatorName('')
                   setOperatorReason('')
+                  // シャンパンの場合: item_name からキャスト配分を解析
+                  if (item.item_type === 'champagne') {
+                    const inner = (item.item_name || '').match(/[［\[](.+?)[］\]]/)?.[1] || ''
+                    const parsed = inner.split('・').map((p: string) => {
+                      const m = p.match(/^(.+?)\s+(\d+)%$/)
+                      return m ? { castName: m[1], ratio: parseInt(m[2]) } : { castName: p, ratio: 0 }
+                    }).filter((c: { castName: string; ratio: number }) => c.castName)
+                    setChampEditCasts(parsed)
+                  } else {
+                    setChampEditCasts([])
+                  }
                 }}
                   className={`flex-1 text-xs py-1.5 rounded-lg transition-colors font-medium ${actionMode === 'edit' ? 'bg-gray-600 text-white' : 'bg-night-700 text-gray-400 hover:bg-night-600'}`}>
                   編集
@@ -3291,7 +3325,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             {/* 削除・編集モード（operator入力） */}
             {((!editingOrderId && actionMode === 'delete') || editingOrderId) && (
               <>
-                {editingOrderId && (
+                {editingOrderId && item.item_type !== 'champagne' && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400 shrink-0">数量</span>
                     <input type="number" min={1} max={editingGroupMaxQty} value={editingQty}
@@ -3300,6 +3334,32 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <span className="text-xs text-gray-500">/ {editingGroupMaxQty}</span>
                   </div>
                 )}
+                {/* シャンパン: キャスト配分率編集 */}
+                {editingOrderId && item.item_type === 'champagne' && champEditCasts.length > 0 && (() => {
+                  const totalRatio = champEditCasts.reduce((s, c) => s + c.ratio, 0)
+                  return (
+                    <div className="space-y-1.5 p-2 bg-night-700 rounded-lg">
+                      <p className="text-xs text-gray-400 font-medium">インセンティブ配分</p>
+                      {champEditCasts.map((c, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-xs text-gray-300 flex-1">{c.castName}</span>
+                          <input
+                            type="number" min={1} max={100} value={c.ratio}
+                            onFocus={e => e.target.select()}
+                            onChange={e => setChampEditCasts(prev => prev.map((x, i) =>
+                              i === idx ? { ...x, ratio: Math.min(100, Math.max(1, Number(e.target.value) || 1)) } : x
+                            ))}
+                            className="input-field w-16 text-center text-xs py-0.5"
+                          />
+                          <span className="text-gray-400 text-xs">%</span>
+                        </div>
+                      ))}
+                      <p className={`text-xs text-right font-medium ${totalRatio === 100 ? 'text-green-400' : 'text-red-400'}`}>
+                        合計 {totalRatio}%{totalRatio !== 100 && ' ← 100%にしてください'}
+                      </p>
+                    </div>
+                  )
+                })()}
                 <input type="text" placeholder="担当者名（必須）" value={operatorName}
                   onChange={e => setOperatorName(e.target.value)}
                   className="input-field w-full text-xs py-1" autoFocus />
@@ -3317,13 +3377,27 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   ) : (
                     <button
                       onClick={() => {
-                        if (editingGroupItemIds.length > 1) {
+                        if (item.item_type === 'champagne' && champEditCasts.length > 0) {
+                          // シャンパン: キャスト配分率をitem_nameに反映して一括更新
+                          const baseName = (item.item_name || '').replace(/[［\[].*[］\]]/, '').trim()
+                          const useBracket = (item.item_name || '').includes('［') ? '［' : '['
+                          const closeBracket = useBracket === '［' ? '］' : ']'
+                          const castsStr = champEditCasts.map(c => `${c.castName} ${c.ratio}%`).join('・')
+                          const newItemName = `${baseName}${useBracket}${castsStr}${closeBracket}`
+                          updateChampagneMutation.mutate({ oldName: item.item_name, newName: newItemName, operator: operatorName, reason: operatorReason })
+                        } else if (editingGroupItemIds.length > 1) {
                           groupReduceMutation.mutate({ item, targetQty: editingQty, operator: operatorName, reason: operatorReason })
                         } else {
                           updateOrderMutation.mutate({ itemId: editingOrderId!, quantity: editingQty, operator: operatorName, reason: operatorReason })
                         }
                       }}
-                      disabled={!operatorName.trim() || updateOrderMutation.isPending || groupReduceMutation.isPending}
+                      disabled={
+                        !operatorName.trim() ||
+                        updateOrderMutation.isPending ||
+                        groupReduceMutation.isPending ||
+                        updateChampagneMutation.isPending ||
+                        (item.item_type === 'champagne' && champEditCasts.reduce((s, c) => s + c.ratio, 0) !== 100)
+                      }
                       className="text-xs px-3 py-1.5 bg-primary-700 hover:bg-primary-600 text-white rounded-lg transition-colors disabled:opacity-50">
                       確定
                     </button>
