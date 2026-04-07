@@ -203,6 +203,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
               type="number"
               value={form.price}
               onChange={e => setForm({ ...form, price: Number(e.target.value) })}
+              onFocus={e => e.target.select()}
               className="input-field w-full"
               min={0}
             />
@@ -232,6 +233,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
               type="number"
               value={form.sort_order}
               onChange={e => setForm({ ...form, sort_order: Number(e.target.value) })}
+              onFocus={e => e.target.select()}
               className="input-field w-full"
               min={0}
             />
