@@ -11,7 +11,7 @@ export default function AdminSettings() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-white">管理設定</h1>
+        <h1 className="text-2xl font-bold text-white">メニュー管理</h1>
         <select
           value={selectedStoreId}
           onChange={e => setSelectedStoreId(Number(e.target.value))}

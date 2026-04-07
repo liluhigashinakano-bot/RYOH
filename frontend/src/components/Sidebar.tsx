@@ -8,7 +8,7 @@ const navItems = [
   { to: '/customers', icon: Users, label: '顧客管理' },
   { to: '/casts', icon: Star, label: '従業員管理' },
   { to: '/admin', icon: UserCog, label: 'アカウント管理' },
-  { to: '/settings', icon: SlidersHorizontal, label: '管理設定' },
+  { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理' },
 ]
 
 export default function Sidebar() {

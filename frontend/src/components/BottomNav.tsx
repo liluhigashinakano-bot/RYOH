@@ -7,7 +7,7 @@ const items = [
   { to: '/customers', icon: Users, label: '顧客' },
   { to: '/casts', icon: Star, label: '従業員' },
   { to: '/admin', icon: UserCog, label: 'アカウント' },
-  { to: '/settings', icon: SlidersHorizontal, label: '管理設定' },
+  { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理' },
 ]
 
 export default function BottomNav() {
