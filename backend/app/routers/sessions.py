@@ -167,12 +167,20 @@ def get_dashboard(
 
     cast_list = []
     for shift in working_shifts:
-        cast = shift.cast
-        if cast:
+        if shift.cast_id is not None and shift.cast:
+            cast = shift.cast
             cast_list.append({
                 "cast_id": cast.id,
                 "stage_name": cast.stage_name,
                 "rank": cast.rank if isinstance(cast.rank, str) else (cast.rank.value if cast.rank else None),
+                "actual_start": bar_hhmm(shift.actual_start),
+                "is_late": bool(shift.is_late),
+            })
+        elif shift.help_cast_name:
+            cast_list.append({
+                "cast_id": None,
+                "stage_name": f"[ヘルプ]{shift.help_cast_name}",
+                "rank": None,
                 "actual_start": bar_hhmm(shift.actual_start),
                 "is_late": bool(shift.is_late),
             })
@@ -331,12 +339,23 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
     # クリア前に勤怠スナップショットを expenses_detail に埋め込んで保存
     snap: dict = {}
     for shift in shifts_to_clear:
-        snap[str(shift.cast_id)] = {
-            "actual_start": _dt_to_bar_hhmm_snap(shift.actual_start) if shift.actual_start else None,
-            "actual_end": _dt_to_bar_hhmm_snap(shift.actual_end) if shift.actual_end else None,
-            "is_late": bool(shift.is_late),
-            "is_absent": bool(shift.is_absent),
-        }
+        if shift.cast_id is not None:
+            key = str(shift.cast_id)
+            snap[key] = {
+                "actual_start": _dt_to_bar_hhmm_snap(shift.actual_start) if shift.actual_start else None,
+                "actual_end": _dt_to_bar_hhmm_snap(shift.actual_end) if shift.actual_end else None,
+                "is_late": bool(shift.is_late),
+                "is_absent": bool(shift.is_absent),
+            }
+        elif shift.help_cast_name:
+            key = f"h_{shift.id}"
+            snap[key] = {
+                "help_cast_name": shift.help_cast_name,
+                "actual_start": _dt_to_bar_hhmm_snap(shift.actual_start) if shift.actual_start else None,
+                "actual_end": _dt_to_bar_hhmm_snap(shift.actual_end) if shift.actual_end else None,
+                "is_late": bool(shift.is_late),
+                "is_absent": bool(shift.is_absent),
+            }
     # 社員/アルバイト勤怠もクリア前にスナップショット
     staff_to_clear = db.query(models.StaffAttendance).filter(
         models.StaffAttendance.store_id == session.store_id,
@@ -508,27 +527,36 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
     # expenses_detail の "_attendance" キーに保存されている
     snap: dict = (session.expenses_detail or {}).get("_attendance", {})
 
+    def _empty_cast_entry(cast_id, cast_name):
+        return {
+            "cast_id": cast_id,
+            "cast_name": cast_name,
+            "drink_s": 0,
+            "drink_l": 0,
+            "drink_mg": 0,
+            "shot_cast": 0,
+            "champagne": 0,
+            "champagne_amount": 0,
+        }
+
     if session.is_closed and snap:
         # スナップショットから勤怠があるがドリンクがないキャストを追加
-        for cast_id_str, att in snap.items():
-            cid = int(cast_id_str)
-            if cid not in cast_map:
-                # キャスト名を DB から取得
-                cast_obj = db.query(models.Cast).filter(models.Cast.id == cid).first()
-                cast_name = cast_obj.stage_name if cast_obj else f"Cast{cid}"
-                cast_map[cid] = {
-                    "cast_id": cid,
-                    "cast_name": cast_name,
-                    "drink_s": 0,
-                    "drink_l": 0,
-                    "drink_mg": 0,
-                    "shot_cast": 0,
-                    "champagne": 0,
-                    "champagne_amount": 0,
-                }
+        for snap_key, att in snap.items():
+            if snap_key.startswith("h_"):
+                # ヘルプキャスト
+                help_name = att.get("help_cast_name", "ヘルプ")
+                cast_name = f"[ヘルプ]{help_name}"
+                if snap_key not in cast_map:
+                    cast_map[snap_key] = _empty_cast_entry(None, cast_name)
+            else:
+                cid = int(snap_key)
+                if cid not in cast_map:
+                    cast_obj = db.query(models.Cast).filter(models.Cast.id == cid).first()
+                    cast_name = cast_obj.stage_name if cast_obj else f"Cast{cid}"
+                    cast_map[cid] = _empty_cast_entry(cid, cast_name)
 
         # 合計金額と勤怠情報を付与
-        for cid, entry in cast_map.items():
+        for key, entry in cast_map.items():
             entry["total_amount"] = (
                 _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
                 + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
@@ -536,7 +564,8 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
                 + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
                 + entry["champagne_amount"]
             )
-            att = snap.get(str(cid), {})
+            snap_key = f"h_{key}" if key is None or (isinstance(key, str) and key.startswith("h_")) else str(key)
+            att = snap.get(snap_key, snap.get(str(key), {}))
             entry["actual_start"] = att.get("actual_start")
             entry["actual_end"] = att.get("actual_end")
             entry["is_late"] = att.get("is_late", False)
@@ -560,22 +589,22 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
             return f"{display_h:02d}:{m:02d}"
 
         for shift in shifts:
-            cid = shift.cast_id
-            if cid not in cast_map:
-                cast_name = shift.cast.stage_name if shift.cast else f"Cast{cid}"
-                cast_map[cid] = {
-                    "cast_id": cid,
-                    "cast_name": cast_name,
-                    "drink_s": 0,
-                    "drink_l": 0,
-                    "drink_mg": 0,
-                    "shot_cast": 0,
-                    "champagne": 0,
-                    "champagne_amount": 0,
-                }
+            if shift.cast_id is not None:
+                cid = shift.cast_id
+                if cid not in cast_map:
+                    cast_name = shift.cast.stage_name if shift.cast else f"Cast{cid}"
+                    cast_map[cid] = _empty_cast_entry(cid, cast_name)
+            elif shift.help_cast_name:
+                key = f"h_{shift.id}"
+                if key not in cast_map:
+                    cast_map[key] = _empty_cast_entry(None, f"[ヘルプ]{shift.help_cast_name}")
 
-        shift_map = {s.cast_id: s for s in shifts}
-        for cid, entry in cast_map.items():
+        # cast_id → shift のマップ（通常キャスト用）
+        shift_map = {s.cast_id: s for s in shifts if s.cast_id is not None}
+        # help shift: key → shift
+        help_shift_map = {f"h_{s.id}": s for s in shifts if s.cast_id is None}
+
+        for key, entry in cast_map.items():
             entry["total_amount"] = (
                 _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
                 + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
@@ -583,7 +612,10 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
                 + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
                 + entry["champagne_amount"]
             )
-            shift = shift_map.get(cid)
+            if isinstance(key, str) and key.startswith("h_"):
+                shift = help_shift_map.get(key)
+            else:
+                shift = shift_map.get(key)
             entry["actual_start"] = _dt_to_bar_hhmm(shift.actual_start) if shift and shift.actual_start else None
             entry["actual_end"] = _dt_to_bar_hhmm(shift.actual_end) if shift and shift.actual_end else None
             entry["is_late"] = bool(shift.is_late) if shift else False

@@ -366,7 +366,7 @@ class ConfirmedShift(Base):
     __tablename__ = "confirmed_shifts"
 
     id = Column(Integer, primary_key=True, index=True)
-    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=False)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)
     store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
     date = Column(Date, nullable=False)
     planned_start = Column(String(10))
@@ -376,6 +376,7 @@ class ConfirmedShift(Base):
     is_late = Column(Boolean, default=False)
     is_absent = Column(Boolean, default=False)
     help_from_store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    help_cast_name = Column(String(100), nullable=True)
     notes = Column(Text)
     shift_data = Column(JSON)   # Excelインポート分の実績（set_l, mg, drink_back等）
 

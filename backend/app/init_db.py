@@ -18,6 +18,9 @@ def _run_migrations(engine):
         # Cast: 退店フラグ追加
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS is_retired BOOLEAN DEFAULT false",
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS retired_at DATE",
+        # ConfirmedShift: cast_id をnullable化・ヘルプキャスト名追加
+        "ALTER TABLE confirmed_shifts ALTER COLUMN cast_id DROP NOT NULL",
+        "ALTER TABLE confirmed_shifts ADD COLUMN IF NOT EXISTS help_cast_name VARCHAR(100)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

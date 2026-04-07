@@ -521,16 +521,56 @@ def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: m
     )
     result = []
     for s in shifts:
+        if s.cast_id is not None:
+            cast_name = s.cast.stage_name if s.cast else f"Cast{s.cast_id}"
+        elif s.help_cast_name:
+            cast_name = f"[ヘルプ]{s.help_cast_name}"
+        else:
+            cast_name = "不明"
         result.append({
             "shift_id": s.id,
             "cast_id": s.cast_id,
-            "cast_name": s.cast.stage_name if s.cast else f"Cast{s.cast_id}",
+            "cast_name": cast_name,
             "actual_start": s.actual_start.isoformat() if s.actual_start else None,
             "actual_end": s.actual_end.isoformat() if s.actual_end else None,
             "is_late": bool(s.is_late),
             "is_absent": bool(s.is_absent),
         })
     return result
+
+
+class HelpClockInRequest(BaseModel):
+    store_id: int
+    help_from_store_id: int
+    help_cast_name: str
+    actual_start: Optional[str] = None  # "HH:MM" JST
+
+
+@router.post("/attendance/help-clock-in")
+def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """ヘルプ出勤打刻: cast_id なしで ConfirmedShift を作成"""
+    from datetime import timedelta
+    today = date.today()
+
+    if data.actual_start:
+        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
+        d = today if h >= 12 else today + timedelta(days=1)
+        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+    else:
+        now = datetime.utcnow()
+
+    shift = models.ConfirmedShift(
+        cast_id=None,
+        store_id=data.store_id,
+        date=today,
+        help_from_store_id=data.help_from_store_id,
+        help_cast_name=data.help_cast_name,
+        actual_start=now,
+    )
+    db.add(shift)
+    db.commit()
+    db.refresh(shift)
+    return {"shift_id": shift.id, "message": "ヘルプ出勤しました"}
 
 
 @router.post("/attendance/clock-in")

@@ -4459,16 +4459,14 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
 
   const helpClockInMutation = useMutation({
     mutationFn: ({ name, fromStoreId, time }: { name: string; fromStoreId: number; time: string }) =>
-      apiClient.post('/api/casts/staff-attendance/clock-in', {
+      apiClient.post('/api/casts/attendance/help-clock-in', {
         store_id: storeId,
-        name: `[ヘルプ:${name}]`,
+        help_from_store_id: fromStoreId,
+        help_cast_name: name,
         actual_start: time || undefined,
-        is_late: false,
-        is_absent: false,
-        notes: `ヘルプ元店舗ID:${fromStoreId}`,
       }).then(r => r.data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+      qc.invalidateQueries({ queryKey: ['attendance', storeId] })
       setShowClockIn(false)
       setHelpCastName('')
       setHelpStoreId('')
