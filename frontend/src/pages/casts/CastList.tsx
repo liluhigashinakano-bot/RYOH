@@ -82,6 +82,7 @@ export default function CastList() {
   const [employeeTab, setEmployeeTab] = useState<EmployeeTab>('cast')
   const [showAdd, setShowAdd] = useState(false)
   const [showAddStaff, setShowAddStaff] = useState(false)
+  const [editingStaff, setEditingStaff] = useState<any>(null)
   const [sortKey, setSortKey] = useState<SortKey>('月間総労働時間')
   const [sortAsc, setSortAsc] = useState(false)
   const qc = useQueryClient()
@@ -297,7 +298,11 @@ export default function CastList() {
       {(employeeTab === 'staff' || employeeTab === 'part_time') && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {(staffList as any[]).map((m: any) => (
-            <div key={m.id} className="card space-y-2">
+            <button
+              key={m.id}
+              onClick={() => setEditingStaff(m)}
+              className="card space-y-2 text-left hover:border-primary-600/50 transition-colors w-full"
+            >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-full bg-night-700 border border-night-600 flex items-center justify-center flex-shrink-0">
@@ -318,15 +323,14 @@ export default function CastList() {
                   })}
                 </div>
               )}
-              {m.stats && (
+              {m.monthly_stats && (
                 <div className="border-t border-night-700 pt-2 space-y-0.5">
-                  <StatRow label="月間平均出勤" value={fmt(m.stats.avg_monthly_shifts, '回')} />
-                  <StatRow label="当欠率" value={fmt(m.stats.absent_rate, '%')} />
-                  <StatRow label="遅刻率" value={fmt(m.stats.late_rate, '%')} />
-                  {m.stats.avg_actual_hours && <StatRow label="平均実働" value={fmt(m.stats.avg_actual_hours, 'h')} />}
+                  <StatRow label="当月合計勤務時間" value={`${m.monthly_stats.monthly_hours}h`} />
+                  <StatRow label="当月欠勤回数" value={`${m.monthly_stats.monthly_absent}回`} />
+                  <StatRow label="当月遅刻回数" value={`${m.monthly_stats.monthly_late}回`} />
                 </div>
               )}
-            </div>
+            </button>
           ))}
           {(staffList as any[]).length === 0 && (
             <div className="col-span-full text-center text-gray-500 py-12">
@@ -349,6 +353,15 @@ export default function CastList() {
           stores={stores}
           onClose={() => setShowAddStaff(false)}
           onSaved={() => { qc.invalidateQueries({ queryKey: ['staff', employeeTab, storeId] }); setShowAddStaff(false) }}
+        />
+      )}
+      {editingStaff && (
+        <StaffEditModal
+          staff={editingStaff}
+          stores={stores}
+          onClose={() => setEditingStaff(null)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ['staff', employeeTab, storeId] }); setEditingStaff(null) }}
+          onDeleted={() => { qc.invalidateQueries({ queryKey: ['staff', employeeTab, storeId] }); setEditingStaff(null) }}
         />
       )}
     </div>
@@ -410,6 +423,117 @@ function CastModal({ storeId, onClose, onSaved }: { storeId: number; onClose: ()
         <div className="flex gap-3 p-4 border-t border-night-600">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
           <button onClick={() => mutation.mutate()} disabled={!form.stage_name} className="btn-primary flex-1">保存</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StaffEditModal({ staff, stores, onClose, onSaved, onDeleted }: {
+  staff: any
+  stores: { id: number; name: string }[]
+  onClose: () => void
+  onSaved: () => void
+  onDeleted: () => void
+}) {
+  const [form, setForm] = useState({
+    name: staff.name ?? '',
+    position: staff.position ?? POSITIONS[0],
+    hourly_rate: staff.hourly_rate ?? 1200,
+    store_ids: staff.store_ids ?? [] as number[],
+    notes: staff.notes ?? '',
+  })
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const updateMutation = useMutation({
+    mutationFn: () => apiClient.put(`/api/staff/${staff.id}`, {
+      name: form.name,
+      position: staff.employee_type === 'staff' ? form.position : undefined,
+      hourly_rate: staff.employee_type === 'part_time' ? form.hourly_rate : undefined,
+      store_ids: form.store_ids,
+      notes: form.notes,
+    }),
+    onSuccess: onSaved,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => apiClient.delete(`/api/staff/${staff.id}`),
+    onSuccess: onDeleted,
+  })
+
+  const toggleStore = (id: number) => {
+    setForm(prev => ({
+      ...prev,
+      store_ids: prev.store_ids.includes(id)
+        ? prev.store_ids.filter((s: number) => s !== id)
+        : [...prev.store_ids, id],
+    }))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-night-800 border border-night-600 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center p-4 border-b border-night-600 sticky top-0 bg-night-800">
+          <h3 className="font-bold text-white">
+            {staff.employee_type === 'staff' ? '社員' : 'アルバイト'}編集
+          </h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">名前 *</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" />
+          </div>
+          {staff.employee_type === 'staff' && (
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">役職</label>
+              <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} className="input-field w-full">
+                {POSITIONS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+          {staff.employee_type === 'part_time' && (
+            <div>
+              <label className="text-sm text-gray-400 block mb-1">時給</label>
+              <input type="number" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} step={50} className="input-field w-full" />
+            </div>
+          )}
+          <div>
+            <label className="text-sm text-gray-400 block mb-2">所属店舗</label>
+            <div className="flex gap-2 flex-wrap">
+              {stores.map(s => (
+                <button key={s.id} type="button" onClick={() => toggleStore(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${form.store_ids.includes(s.id) ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400'}`}>
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">備考</label>
+            <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="input-field w-full h-20 resize-none" />
+          </div>
+
+          {/* 削除 */}
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} className="w-full text-red-400 text-sm py-2 border border-red-900/40 rounded-lg hover:bg-red-900/20 transition-colors">
+              削除する
+            </button>
+          ) : (
+            <div className="bg-red-900/20 border border-red-800 rounded-lg p-3 space-y-2">
+              <p className="text-red-300 text-sm text-center">本当に削除しますか？</p>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmDelete(false)} className="btn-secondary flex-1 text-sm py-1.5">キャンセル</button>
+                <button onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending} className="flex-1 bg-red-700 hover:bg-red-600 text-white text-sm py-1.5 rounded-lg transition-colors">
+                  削除
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="flex gap-3 p-4 border-t border-night-600">
+          <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
+          <button onClick={() => updateMutation.mutate()} disabled={!form.name || updateMutation.isPending} className="btn-primary flex-1">保存</button>
         </div>
       </div>
     </div>

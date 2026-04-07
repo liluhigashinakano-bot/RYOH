@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 
 from ..database import get_db
 from .. import models
@@ -92,6 +92,72 @@ def calc_stats(name: str, store_ids: List[int], db: Session):
     }
 
 
+def calc_monthly_stats(name: str, store_ids: list, db: Session) -> dict:
+    """当月の勤務時間・欠勤・遅刻を集計（セッションスナップショット＋ライブ記録）"""
+    jst_now = datetime.utcnow() + timedelta(hours=9)
+    month_start = jst_now.date().replace(day=1)
+
+    total_minutes = 0.0
+    absent_count = 0
+    late_count = 0
+
+    def parse_bar_hhmm(s: str) -> int:
+        """バー形式 "HH:MM"（HH>=24あり）を分単位に変換"""
+        try:
+            h, m = s.split(':')
+            return int(h) * 60 + int(m)
+        except Exception:
+            return 0
+
+    # 当月の終了済みセッションのスナップショットから集計
+    if store_ids:
+        sessions = db.query(models.BusinessSession).filter(
+            models.BusinessSession.store_id.in_(store_ids),
+            models.BusinessSession.is_closed == True,
+            models.BusinessSession.date >= month_start,
+        ).all()
+        for session in sessions:
+            detail = session.expenses_detail or {}
+            for entry in detail.get('_staff_attendance', []):
+                if entry.get('name') != name:
+                    continue
+                if entry.get('is_absent'):
+                    absent_count += 1
+                else:
+                    s_str = entry.get('actual_start')
+                    e_str = entry.get('actual_end')
+                    if s_str and e_str:
+                        diff = parse_bar_hhmm(e_str) - parse_bar_hhmm(s_str)
+                        if diff > 0:
+                            total_minutes += diff
+                    if entry.get('is_late'):
+                        late_count += 1
+
+    # 現在ライブのStaffAttendance（当月分）
+    live_q = db.query(models.StaffAttendance).filter(
+        models.StaffAttendance.name == name,
+        models.StaffAttendance.date >= month_start,
+    )
+    if store_ids:
+        live_q = live_q.filter(models.StaffAttendance.store_id.in_(store_ids))
+    for r in live_q.all():
+        if r.is_absent:
+            absent_count += 1
+        else:
+            if r.actual_start and r.actual_end:
+                diff = (r.actual_end - r.actual_start).total_seconds() / 60
+                if diff > 0:
+                    total_minutes += diff
+            if r.is_late:
+                late_count += 1
+
+    return {
+        'monthly_hours': round(total_minutes / 60, 1),
+        'monthly_absent': absent_count,
+        'monthly_late': late_count,
+    }
+
+
 @router.get("")
 def list_staff(
     employee_type: Optional[str] = None,
@@ -109,6 +175,8 @@ def list_staff(
         d = staff_to_dict(m)
         if store_id and store_id not in (m.store_ids or []):
             continue
+        target_stores = [store_id] if store_id else (m.store_ids or [])
+        d['monthly_stats'] = calc_monthly_stats(m.name, target_stores, db)
         result.append(d)
     return result
 
