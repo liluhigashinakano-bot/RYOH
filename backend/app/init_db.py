@@ -15,6 +15,9 @@ def _run_migrations(engine):
         "ALTER TABLE customer_visits ADD COLUMN IF NOT EXISTS raw_data JSON",
         # OrderItem: custom_menu への item_type 修正（旧コードで 'other'+cast_id として保存されていたもの）
         "UPDATE order_items SET item_type='custom_menu' WHERE item_type='other' AND cast_id IS NOT NULL",
+        # Cast: 退店フラグ追加
+        "ALTER TABLE casts ADD COLUMN IF NOT EXISTS is_retired BOOLEAN DEFAULT false",
+        "ALTER TABLE casts ADD COLUMN IF NOT EXISTS retired_at DATE",
     ]
     with engine.connect() as conn:
         for sql in migrations:

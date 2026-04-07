@@ -91,6 +91,8 @@ class CastResponse(BaseModel):
     employment_start_date: Optional[date]
     last_rate_change_date: Optional[date]
     is_active: bool
+    is_retired: bool = False
+    retired_at: Optional[date] = None
 
     class Config:
         from_attributes = True
@@ -116,19 +118,22 @@ class CastResponse(BaseModel):
             employment_start_date=cast.employment_start_date,
             last_rate_change_date=cast.last_rate_change_date,
             is_active=cast.is_active,
+            is_retired=bool(getattr(cast, 'is_retired', False)),
+            retired_at=getattr(cast, 'retired_at', None),
         )
 
 
 @router.get("/{store_id}", response_model=list[CastResponse])
 def get_casts(
     store_id: int,
+    include_retired: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    casts = db.query(models.Cast).filter(
-        models.Cast.store_id == store_id,
-        models.Cast.is_active == True
-    ).all()
+    q = db.query(models.Cast).filter(models.Cast.store_id == store_id, models.Cast.is_active == True)
+    if not include_retired:
+        q = q.filter(models.Cast.is_retired == False)
+    casts = q.all()
     return [CastResponse.from_orm_cast(c) for c in casts]
 
 
@@ -214,6 +219,27 @@ def delete_cast(
     cast.is_active = False
     db.commit()
     return {"message": "キャストを削除しました"}
+
+
+@router.post("/{store_id}/{cast_id}/retire")
+def retire_cast(
+    store_id: int,
+    cast_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """キャストを退店にする"""
+    from datetime import date as date_type
+    cast = db.query(models.Cast).filter(
+        models.Cast.id == cast_id,
+        models.Cast.store_id == store_id,
+    ).first()
+    if not cast:
+        raise HTTPException(status_code=404, detail="キャストが見つかりません")
+    cast.is_retired = True
+    cast.retired_at = date_type.today()
+    db.commit()
+    return {"message": "退店しました"}
 
 
 @router.post("/{store_id}/{cast_id}/photo")

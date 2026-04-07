@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Plus, X, User, ArrowUpDown, Briefcase, Clock } from 'lucide-react'
+import { Plus, X, User, Briefcase, Clock } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -87,10 +87,20 @@ export default function CastList() {
   const [sortAsc, setSortAsc] = useState(false)
   const qc = useQueryClient()
 
+  const [retireTarget, setRetireTarget] = useState<any>(null)
+
   const { data: casts = [] } = useQuery({
     queryKey: ['casts', storeId],
-    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`, { params: { include_retired: true } }).then(r => r.data),
     enabled: !!storeId && employeeTab === 'cast',
+  })
+
+  const retireMutation = useMutation({
+    mutationFn: (castId: number) => apiClient.post(`/api/casts/${storeId}/${castId}/retire`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['casts', storeId] })
+      setRetireTarget(null)
+    },
   })
 
   // 全キャストの統計を並列フェッチ
@@ -111,6 +121,8 @@ export default function CastList() {
   const sortedCasts = useMemo(() => {
     const dir = sortAsc ? 1 : -1
     return [...casts].sort((a: any, b: any) => {
+      // 退店は常に末尾
+      if (a.is_retired !== b.is_retired) return a.is_retired ? 1 : -1
       const av = getSortValue(a, statsMap[a.id], sortKey)
       const bv = getSortValue(b, statsMap[b.id], sortKey)
       return (av - bv) * dir
@@ -199,11 +211,22 @@ export default function CastList() {
             : null
 
           return (
-            <button
+            <div
               key={cast.id}
-              onClick={() => navigate(`/casts/${cast.id}`)}
-              className="card text-left hover:border-primary-600/50 transition-colors space-y-3"
+              className={`card text-left transition-colors space-y-3 relative ${cast.is_retired ? 'opacity-50 grayscale' : 'hover:border-primary-600/50 cursor-pointer'}`}
             >
+              {/* 退店ボタン（右上） */}
+              {!cast.is_retired && (
+                <button
+                  onClick={e => { e.stopPropagation(); setRetireTarget(cast) }}
+                  className="absolute top-2 right-2 text-xs text-gray-600 hover:text-red-400 px-2 py-0.5 rounded hover:bg-red-900/20 transition-colors"
+                >
+                  退店
+                </button>
+              )}
+
+              {/* クリックでキャスト詳細へ（退店以外） */}
+              <div onClick={() => !cast.is_retired && navigate(`/casts/${cast.id}`)}>
               {/* ヘッダー */}
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-full bg-night-700 border border-night-600 overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -213,9 +236,12 @@ export default function CastList() {
                   }
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-white truncate">{cast.stage_name}</h3>
-                    <span className={`badge ${RANK_COLORS[cast.rank] || RANK_COLORS['C']} ml-2 flex-shrink-0`}>{cast.rank}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className={`font-bold truncate ${cast.is_retired ? 'text-gray-500' : 'text-white'}`}>{cast.stage_name}</h3>
+                    {cast.is_retired
+                      ? <span className="text-xs bg-gray-800 text-gray-500 px-2 py-0.5 rounded-full">退店</span>
+                      : <span className={`badge ${RANK_COLORS[cast.rank] || RANK_COLORS['C']} flex-shrink-0`}>{cast.rank}</span>
+                    }
                   </div>
                   <div className="flex gap-3 text-xs text-gray-500 mt-0.5 flex-wrap">
                     {birthday && <span>誕生日 {birthday}</span>}
@@ -286,7 +312,8 @@ export default function CastList() {
                   <StatRow label="NT数" value={fmt(stats.per_shift_nt)} />
                 </div>
               )}
-            </button>
+              </div>{/* クリックエリア終わり */}
+            </div>
           )
         })}
         {casts.length === 0 && (
@@ -337,6 +364,29 @@ export default function CastList() {
               {employeeTab === 'staff' ? '社員がいません' : 'アルバイトがいません'}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 退店確認ポップアップ */}
+      {retireTarget && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-sm p-6 space-y-4">
+            <p className="text-white font-bold text-center">退店確認</p>
+            <p className="text-gray-300 text-sm text-center">
+              <span className="text-white font-medium">{retireTarget.stage_name}</span> を退店にしますか？
+            </p>
+            <p className="text-gray-500 text-xs text-center">退店したキャストで間違いありませんか？</p>
+            <div className="flex gap-3">
+              <button onClick={() => setRetireTarget(null)} className="btn-secondary flex-1">キャンセル</button>
+              <button
+                onClick={() => retireMutation.mutate(retireTarget.id)}
+                disabled={retireMutation.isPending}
+                className="flex-1 bg-red-700 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                はい
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

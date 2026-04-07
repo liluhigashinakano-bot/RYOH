@@ -126,6 +126,8 @@ class Cast(Base):
     employment_start_date = Column(Date, nullable=True)
     last_rate_change_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
+    is_retired = Column(Boolean, default=False)
+    retired_at = Column(Date, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="casts")
