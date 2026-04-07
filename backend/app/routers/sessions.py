@@ -271,12 +271,25 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
     if session.is_closed:
         raise HTTPException(status_code=400, detail="既に終了済みのセッションです")
 
-    from sqlalchemy import func
-    sales = db.query(func.sum(models.Ticket.total_amount)).filter(
+    closed_tickets = db.query(models.Ticket).filter(
         models.Ticket.store_id == session.store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= session.opened_at,
-    ).scalar() or 0
+    ).all()
+
+    def _grand(t):
+        sk = sum(
+            abs(i.amount) for i in (t.order_items or [])
+            if i.item_name and (
+                i.item_name.startswith('先会計') or
+                i.item_name.startswith('分割清算') or
+                i.item_name.startswith('値引き')
+            ) and not i.canceled_at
+        )
+        sub = (t.total_amount or 0) + sk
+        return round(sub * 1.21) - sk
+
+    sales = sum(_grand(t) for t in closed_tickets)
 
     session.closed_at = datetime.utcnow()
     session.closing_cash = data.closing_cash
