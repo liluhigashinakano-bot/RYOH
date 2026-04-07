@@ -1934,9 +1934,10 @@ function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void 
     if (canceled) addEvent(item.canceled_at, `取消: ${name}`, undefined, 'text-red-500')
   }
 
-  // ドリンクスタンプ（last_drink_times）
+  // ドリンクスタンプ（last_drink_times）※custom_menuはオーダーと重複するため除外
   if (ticket.last_drink_times) {
     for (const [type, arr] of Object.entries(ticket.last_drink_times as Record<string, any[]>)) {
+      if (type === 'custom_menu') continue
       if (!Array.isArray(arr)) continue
       for (const c of arr) {
         if (!c?.last_at) continue
