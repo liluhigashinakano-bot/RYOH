@@ -2470,6 +2470,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     (castsAll as any[]).map((c: any) => [c.id, c.stage_name])
   )
 
+  const { data: customMenuItems = [] } = useQuery({
+    queryKey: ['menu-items', storeId],
+    queryFn: () => apiClient.get('/api/app-settings/menu', { params: { store_id: storeId } }).then(r => r.data),
+    enabled: !!storeId,
+  })
+  const activeMenuItems = (customMenuItems as any[]).filter((m: any) => m.is_active)
+
   const addOrderMutation = useMutation({
     mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) =>
       apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data),
@@ -3006,6 +3013,22 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     </button>
                   )
                 })}
+                {activeMenuItems.map((m: any) => (
+                  <button key={`menu-${m.id}`}
+                    onClick={() => {
+                      if (m.cast_required) {
+                        setCastSelectItem({ type: 'other', label: m.label, price: m.price })
+                      } else {
+                        addOrderMutation.mutate({ item_type: 'other', item_name: m.label, unit_price: m.price, quantity: 1 })
+                      }
+                    }}
+                    className={`btn-secondary text-xs py-1.5 leading-tight ${m.cast_required ? 'border-primary-700/50' : ''}`}
+                  >
+                    {m.label}
+                    {m.price > 0 && <span className="block text-[10px] text-gray-500">¥{m.price.toLocaleString()}</span>}
+                    {m.cast_required && <span className="block text-[10px] text-primary-500">キャスト選択</span>}
+                  </button>
+                ))}
               </div>
 
               {showOtherInput && (
