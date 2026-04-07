@@ -25,6 +25,8 @@ class StoreUpdate(BaseModel):
     address: Optional[str] = None
     phone: Optional[str] = None
     is_active: Optional[bool] = None
+    open_time: Optional[str] = None   # "19:00"
+    close_time: Optional[str] = None  # "29:00"
 
 
 class StoreResponse(BaseModel):
@@ -36,6 +38,8 @@ class StoreResponse(BaseModel):
     address: Optional[str]
     phone: Optional[str]
     is_active: bool
+    open_time: Optional[str] = None
+    close_time: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -54,6 +58,18 @@ def get_stores(
             models.Store.is_active == True
         ).all()
     return []
+
+
+@router.get("/{store_id}", response_model=StoreResponse)
+def get_store(
+    store_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    store = db.query(models.Store).filter(models.Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="店舗が見つかりません")
+    return store
 
 
 @router.post("", response_model=StoreResponse)
