@@ -13,6 +13,8 @@ def _run_migrations(engine):
         "ALTER TABLE menu_item_configs ADD COLUMN IF NOT EXISTS has_incentive BOOLEAN DEFAULT false",
         # CustomerVisit: raw_data 列追加
         "ALTER TABLE customer_visits ADD COLUMN IF NOT EXISTS raw_data JSON",
+        # OrderItem: custom_menu への item_type 修正（旧コードで 'other'+cast_id として保存されていたもの）
+        "UPDATE order_items SET item_type='custom_menu' WHERE item_type='other' AND cast_id IS NOT NULL",
     ]
     with engine.connect() as conn:
         for sql in migrations:
