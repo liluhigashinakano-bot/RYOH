@@ -21,17 +21,20 @@ def _run_migrations(engine):
         # ConfirmedShift: cast_id をnullable化・ヘルプキャスト名追加
         "ALTER TABLE confirmed_shifts ALTER COLUMN cast_id DROP NOT NULL",
         "ALTER TABLE confirmed_shifts ADD COLUMN IF NOT EXISTS help_cast_name VARCHAR(100)",
-        # User: permissions 列追加・superadmin → administrator 移行
+        # User: permissions 列追加
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSON",
+        # PostgreSQL enum type に administrator 追加（superadmin → administrator 移行用）
+        "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'administrator'",
+        # superadmin → administrator 移行（enum追加後に実行）
         "UPDATE users SET role = 'administrator' WHERE role = 'superadmin'",
     ]
-    with engine.connect() as conn:
-        for sql in migrations:
-            try:
+    # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
+    for sql in migrations:
+        try:
+            with engine.begin() as conn:
                 conn.execute(__import__('sqlalchemy').text(sql))
-            except Exception as e:
-                print(f"[MIGRATION SKIP] {sql[:60]}... → {e}")
-        conn.commit()
+        except Exception as e:
+            print(f"[MIGRATION SKIP] {sql[:60]}... → {e}")
 
 
 ALL_PERMISSIONS = {
