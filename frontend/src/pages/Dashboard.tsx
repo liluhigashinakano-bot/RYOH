@@ -7,13 +7,14 @@ export default function Dashboard() {
   const { stores } = useAuthStore()
   const navigate = useNavigate()
 
-  const { data: birthdays = [] } = useQueries({
+  const birthdayQuery = useQueries({
     queries: [{
       queryKey: ['birthdays-dashboard'],
       queryFn: () => apiClient.get('/api/customers/birthdays/upcoming', { params: { days: 7 } }).then(r => r.data),
       staleTime: 1000 * 60 * 30,
     }],
-  })[0] as any
+  })[0]
+  const birthdays: any[] = (birthdayQuery.data as any[]) ?? []
 
   const dashQueries = useQueries({
     queries: stores.map(s => ({
@@ -25,138 +26,113 @@ export default function Dashboard() {
   })
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       {/* ヘッダー */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">リアルタイム状況</h1>
-        <p className="text-gray-400 text-sm mt-0.5">
-          {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-white">リアルタイム状況</h1>
+          <p className="text-gray-500 text-xs">
+            {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+          </p>
+        </div>
       </div>
 
       {/* 誕生日アラート */}
-      {(birthdays as any[]).length > 0 && (
-        <div style={{ backgroundColor: '#422006', border: '1px solid #854d0e', borderRadius: '12px', padding: '10px 14px' }}>
-          <p className="text-yellow-400 text-xs font-medium mb-2">今週の誕生日</p>
-          <div className="flex flex-wrap gap-2">
-            {(birthdays as any[]).map((b: any) => (
-              <button
-                key={b.id}
-                onClick={() => navigate(`/customers/${b.id}`)}
-                className="text-xs bg-yellow-900/50 text-yellow-300 px-3 py-1 rounded-full hover:bg-yellow-900 transition-colors"
-              >
-                {b.name} — {b.days_until === 0 ? '今日！' : `あと${b.days_until}日`}
-              </button>
-            ))}
-          </div>
+      {birthdays.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg" style={{ backgroundColor: '#422006', border: '1px solid #854d0e' }}>
+          <span className="text-yellow-400 text-xs font-medium shrink-0">今週の誕生日:</span>
+          {birthdays.map((b: any) => (
+            <button key={b.id} onClick={() => navigate(`/customers/${b.id}`)}
+              className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full hover:bg-yellow-900 transition-colors">
+              {b.name} {b.days_until === 0 ? '今日！' : `あと${b.days_until}日`}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* 店舗ごとのセクション */}
-      {stores.map((store, i) => {
-        const q = dashQueries[i]
-        const dash = q.data as any
-        const isLoading = q.isLoading
-        const isError = q.isError
-        const isOpen = !!dash?.session
+      {/* 店舗一覧 */}
+      <div className="space-y-2">
+        {stores.map((store, i) => {
+          const q = dashQueries[i]
+          const dash = q.data as any
+          const isLoading = q.isLoading
+          const isError = q.isError
+          const isOpen = !!dash?.session
 
-        return (
-          <div key={store.id} className="space-y-3">
-            {/* 店舗名ヘッダー */}
-            <div className="flex items-center gap-3 border-b border-gray-800 pb-2">
-              <h2 className="text-white font-bold text-lg">{store.name}</h2>
-              {!isLoading && !isError && (
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                  isOpen ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'
-                }`}>
-                  {isOpen ? '● 営業中' : '営業外'}
-                </span>
-              )}
-              {isOpen && dash.session?.operator_name && (
-                <span className="text-gray-500 text-xs">担当: {dash.session.operator_name}</span>
-              )}
-              {isOpen && dash.session?.event_name && (
-                <span className="text-pink-400 text-xs font-medium">{dash.session.event_name}</span>
+          return (
+            <div key={store.id} className="rounded-xl border border-gray-800 overflow-hidden" style={{ backgroundColor: '#0f172a' }}>
+              {/* 店舗名行 */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/60" style={{ backgroundColor: '#1e293b' }}>
+                <span className="font-bold text-white text-sm">{store.name}</span>
+                {!isLoading && !isError && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isOpen ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
+                    {isOpen ? '● 営業中' : '営業外'}
+                  </span>
+                )}
+                {isOpen && dash.session?.operator_name && (
+                  <span className="text-gray-500 text-xs">{dash.session.operator_name}</span>
+                )}
+                {isOpen && dash.session?.event_name && (
+                  <span className="text-pink-400 text-xs">{dash.session.event_name}</span>
+                )}
+              </div>
+
+              {isError ? (
+                <p className="text-red-400 text-xs px-3 py-2">取得エラー</p>
+              ) : isLoading || !dash ? (
+                <p className="text-gray-600 text-xs px-3 py-2">読み込み中...</p>
+              ) : (
+                <div className="px-3 py-2 space-y-2">
+                  {/* 売上行 */}
+                  <div className="grid grid-cols-4 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">会計済売上</span>
+                      <p className="text-white font-bold">¥{(dash.closed_sales ?? 0).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">未会計売上</span>
+                      <p className="text-yellow-400 font-bold">¥{(dash.open_sales ?? 0).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">合計</span>
+                      <p className="text-white font-bold">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">組数/人数</span>
+                      <p className="text-white font-bold">
+                        <span className="text-white">{dash.closed_groups ?? 0}組</span>
+                        <span className="text-gray-500 mx-1">/</span>
+                        <span className="text-yellow-400">{dash.open_groups ?? 0}組未</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* スタッフ・キャスト行 */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">勤務中スタッフ</span>
+                      {(dash.working_staff ?? []).length === 0
+                        ? <p className="text-gray-700">なし</p>
+                        : <p className="text-white">{(dash.working_staff as any[]).map((s: any) => s.name).join('、')}</p>
+                      }
+                    </div>
+                    <div>
+                      <span className="text-gray-500">勤務中キャスト</span>
+                      {(dash.working_casts ?? []).length === 0
+                        ? <p className="text-gray-700">なし</p>
+                        : <p className="text-white">{(dash.working_casts as any[]).map((c: any) => c.stage_name).join('、')}</p>
+                      }
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
-
-            {isError ? (
-              <p className="text-red-400 text-sm py-2">取得エラー</p>
-            ) : isLoading || !dash ? (
-              <p className="text-gray-600 text-sm py-2">読み込み中...</p>
-            ) : (
-              <>
-                {/* 売上グリッド */}
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <StatCard label="会計済み売上" value={`¥${(dash.closed_sales ?? 0).toLocaleString()}`} valueClass="text-white text-lg font-bold" />
-                  <StatCard label="未会計売上" value={`¥${(dash.open_sales ?? 0).toLocaleString()}`} valueClass="text-yellow-400 text-lg font-bold" />
-                  <StatCard
-                    label="本日合計"
-                    value={`¥${((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}`}
-                    valueClass="text-white text-lg font-bold"
-                  />
-                  <StatCard label="会計済み組数" value={`${dash.closed_groups ?? 0} 組`} valueClass="text-white font-bold" />
-                  <StatCard label="会計済み人数" value={`${dash.closed_guests ?? 0} 人`} valueClass="text-white font-bold" />
-                  <StatCard label="未会計組数 / 人数" value={`${dash.open_groups ?? 0}組 ${dash.open_guests ?? 0}人`} valueClass="text-yellow-400 font-bold" />
-                </div>
-
-                {/* スタッフ・キャスト */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <PersonnelCard title="勤務中スタッフ" list={dash.working_staff ?? []} renderItem={(s: any) => (
-                    <div key={s.name} className="flex items-center justify-between py-1.5">
-                      <div className="flex items-center gap-2">
-                        {s.is_late && <span className="text-xs bg-red-900/60 text-red-300 px-1.5 py-0.5 rounded">遅</span>}
-                        <span className="text-white text-sm">{s.name}</span>
-                      </div>
-                      <span className="text-gray-400 text-xs">{s.actual_start}</span>
-                    </div>
-                  )} />
-                  <PersonnelCard title="勤務中キャスト" list={dash.working_casts ?? []} renderItem={(c: any) => (
-                    <div key={c.cast_id} className="flex items-center justify-between py-1.5">
-                      <div className="flex items-center gap-2">
-                        {c.is_late && <span className="text-xs bg-red-900/60 text-red-300 px-1.5 py-0.5 rounded">遅</span>}
-                        <span className="text-white text-sm">{c.stage_name}</span>
-                        {c.rank && <span className="text-xs text-gray-500">{c.rank}</span>}
-                      </div>
-                      <span className="text-gray-400 text-xs">{c.actual_start}</span>
-                    </div>
-                  )} />
-                </div>
-              </>
-            )}
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
 
       {stores.length === 0 && (
-        <div className="text-gray-500 text-center py-16 text-sm">店舗データを読み込み中...</div>
-      )}
-    </div>
-  )
-}
-
-function StatCard({ label, value, valueClass }: { label: string; value: string; valueClass: string }) {
-  return (
-    <div style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '12px', padding: '12px 14px' }}>
-      <p className="text-gray-400 text-xs mb-1">{label}</p>
-      <p className={valueClass}>{value}</p>
-    </div>
-  )
-}
-
-function PersonnelCard({ title, list, renderItem }: { title: string; list: any[]; renderItem: (item: any) => JSX.Element }) {
-  return (
-    <div style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '12px', padding: '12px 14px' }}>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-gray-300 text-sm font-medium">{title}</p>
-        <span className="text-xs text-gray-500">{list.length}名</span>
-      </div>
-      {list.length === 0 ? (
-        <p className="text-gray-600 text-xs py-1">なし</p>
-      ) : (
-        <div className="divide-y divide-gray-800">
-          {list.map(renderItem)}
-        </div>
+        <div className="text-gray-500 text-center py-8 text-sm">読み込み中...</div>
       )}
     </div>
   )
