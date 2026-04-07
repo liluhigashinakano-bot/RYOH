@@ -7,7 +7,7 @@ import apiClient from '../../api/client'
 const ITEM_TYPE_LABELS: Record<string, string> = {
   extension: '延長', drink_s: 'Sドリンク', drink_l: 'Lドリンク',
   drink_mg: 'MGドリンク', shot_cast: 'キャストショット', shot_guest: 'ゲストショット',
-  champagne: 'シャンパン', set: 'セット料金', other: 'その他',
+  champagne: 'シャンパン', set: 'セット料金', other: 'その他', custom_menu: 'カスタムメニュー',
 }
 
 function displayItemName(item: any, castMap?: Record<number, string>): string {
@@ -54,10 +54,11 @@ const CAST_SELECT_TYPES = new Set(['drink_s', 'drink_l', 'drink_mg', 'shot_cast'
 
 // D時間の色設定（shot_castは除外、drink_sを追加）
 const DRINK_COLORS: Record<string, { label: string; color: string; bg: string }> = {
-  drink_s:   { label: 'S',   color: 'text-green-400',  bg: 'bg-green-900/40' },
-  drink_l:   { label: 'L',   color: 'text-cyan-400',   bg: 'bg-cyan-900/40' },
-  drink_mg:  { label: 'MG',  color: 'text-purple-400', bg: 'bg-purple-900/40' },
-  champagne: { label: 'Ch',  color: 'text-yellow-400', bg: 'bg-yellow-900/40' },
+  drink_s:     { label: 'S',   color: 'text-green-400',  bg: 'bg-green-900/40' },
+  drink_l:     { label: 'L',   color: 'text-cyan-400',   bg: 'bg-cyan-900/40' },
+  drink_mg:    { label: 'MG',  color: 'text-purple-400', bg: 'bg-purple-900/40' },
+  champagne:   { label: 'Ch',  color: 'text-yellow-400', bg: 'bg-yellow-900/40' },
+  custom_menu: { label: 'CM',  color: 'text-orange-400', bg: 'bg-orange-900/40' },
 }
 
 const TABLE_NOS = [
@@ -3017,7 +3018,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <button key={`menu-${m.id}`}
                     onClick={() => {
                       if (m.cast_required) {
-                        setCastSelectItem({ type: 'other', label: m.label, price: m.price })
+                        setCastSelectItem({ type: 'custom_menu', label: m.label, price: m.price })
                       } else {
                         addOrderMutation.mutate({ item_type: 'other', item_name: m.label, unit_price: m.price, quantity: 1 })
                       }

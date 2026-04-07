@@ -9,7 +9,7 @@ from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
-CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne"}
+CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne", "custom_menu"}
 
 
 def _ticket_extra(ticket: models.Ticket) -> dict:
