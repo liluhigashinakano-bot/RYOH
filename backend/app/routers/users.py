@@ -49,7 +49,7 @@ def get_users(
             "id": u.id,
             "email": u.email,
             "name": u.name,
-            "role": str(u.role),
+            "role": u.role.value,
             "store_id": u.store_id,
             "is_active": u.is_active,
             "permissions": u.permissions,
@@ -79,7 +79,7 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "email": user.email, "name": user.name, "role": str(user.role), "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
+    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
 
 
 @router.put("/{user_id}")
@@ -99,7 +99,7 @@ def update_user(
         setattr(user, field, value)
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "email": user.email, "name": user.name, "role": str(user.role), "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
+    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
 
 
 @router.delete("/{user_id}")

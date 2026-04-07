@@ -84,7 +84,7 @@ def get_me(current_user: models.User = Depends(get_current_user), db: Session = 
         "id": current_user.id,
         "email": current_user.email,
         "name": current_user.name,
-        "role": str(current_user.role),
+        "role": current_user.role.value,
         "store_id": current_user.store_id,
         "permissions": perms,
     }

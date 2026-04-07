@@ -67,7 +67,7 @@ def get_current_user(
 
 
 def is_admin(user: models.User) -> bool:
-    return str(user.role) in ADMIN_ROLES
+    return user.role.value in ADMIN_ROLES
 
 
 def get_effective_permissions(user: models.User, db: Session) -> dict:
@@ -78,7 +78,7 @@ def get_effective_permissions(user: models.User, db: Session) -> dict:
     if user.permissions is not None:
         return user.permissions
     # ロール別デフォルト権限を使用
-    role_perm = db.query(models.RolePermission).filter_by(role=str(user.role)).first()
+    role_perm = db.query(models.RolePermission).filter_by(role=user.role.value).first()
     if role_perm:
         return role_perm.permissions
     return {}
@@ -86,7 +86,7 @@ def get_effective_permissions(user: models.User, db: Session) -> dict:
 
 def require_roles(*roles: models.UserRole):
     def checker(current_user: models.User = Depends(get_current_user)):
-        if current_user.role not in roles and str(current_user.role) not in ADMIN_ROLES:
+        if current_user.role not in roles and current_user.role.value not in ADMIN_ROLES:
             raise HTTPException(status_code=403, detail="Permission denied")
         return current_user
     return checker
@@ -94,7 +94,7 @@ def require_roles(*roles: models.UserRole):
 
 def require_superadmin(current_user: models.User = Depends(get_current_user)):
     """後方互換性のため残す。administrator/superadmin の両方を受け付ける"""
-    if str(current_user.role) not in ADMIN_ROLES:
+    if current_user.role.value not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Administrator required")
     return current_user
 
