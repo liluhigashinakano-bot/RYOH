@@ -4289,10 +4289,19 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
 }) {
   const { stores } = useAuthStore()
   const otherStores = stores.filter(s => s.id !== storeId)
+  const timeOptions = (() => {
+    const opts: string[] = []
+    for (let h = 12; h < 36; h++) {
+      opts.push(`${String(h).padStart(2, '0')}:00`)
+      opts.push(`${String(h).padStart(2, '0')}:30`)
+    }
+    return opts
+  })()
   const [time, setTime] = useState(() => {
     const n = new Date()
     const h = n.getHours() < 12 ? n.getHours() + 24 : n.getHours()
-    return `${String(h).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+    const m = n.getMinutes() < 30 ? '00' : '30'
+    return `${String(h).padStart(2, '0')}:${m}`
   })
 
   const canSubmit = helpCastName.trim() && helpStoreId !== ''
@@ -4314,8 +4323,9 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
       </div>
       <div>
         <label className="text-xs text-gray-400 block mb-1">出勤時間</label>
-        <input type="text" value={time} onChange={e => setTime(e.target.value)}
-          placeholder="例: 19:00" className="input-field w-full text-sm" />
+        <select value={time} onChange={e => setTime(e.target.value)} className="input-field w-full text-sm">
+          {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="btn-secondary flex-1 text-sm py-2">キャンセル</button>
