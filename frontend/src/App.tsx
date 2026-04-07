@@ -54,8 +54,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PermRoute({ page, children }: { page: import('./store/authStore').PermPage; children: React.ReactNode }) {
-  const hasPermission = useAuthStore((s) => s.hasPermission)
-  if (!hasPermission(page, 'view')) return <Navigate to="/" replace />
+  const { hasPermission, isLoading } = useAuthStore()
+  if (isLoading) return null
+  if (!hasPermission(page, 'view')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-gray-400 text-sm">このページへのアクセス権限がありません</p>
+      </div>
+    )
+  }
   return <>{children}</>
 }
 
