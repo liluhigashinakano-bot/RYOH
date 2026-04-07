@@ -4277,10 +4277,67 @@ function TimePickerModal({ title, defaultValue, onSelect, onClose, showStatusTab
   )
 }
 
+function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, setHelpCastName, onSubmit, onCancel, isPending }: {
+  storeId: number
+  helpStoreId: number | ''
+  setHelpStoreId: (v: number | '') => void
+  helpCastName: string
+  setHelpCastName: (v: string) => void
+  onSubmit: (name: string, fromStoreId: number, time: string) => void
+  onCancel: () => void
+  isPending: boolean
+}) {
+  const { stores } = useAuthStore()
+  const otherStores = stores.filter(s => s.id !== storeId)
+  const [time, setTime] = useState(() => {
+    const n = new Date()
+    const h = n.getHours() < 12 ? n.getHours() + 24 : n.getHours()
+    return `${String(h).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+  })
+
+  const canSubmit = helpCastName.trim() && helpStoreId !== ''
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">ヘルプ元店舗</label>
+        <select value={helpStoreId} onChange={e => setHelpStoreId(e.target.value ? Number(e.target.value) : '')}
+          className="input-field w-full text-sm">
+          <option value="">店舗を選択</option>
+          {otherStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">キャスト名</label>
+        <input type="text" value={helpCastName} onChange={e => setHelpCastName(e.target.value)}
+          placeholder="キャスト名を入力" className="input-field w-full text-sm" autoFocus />
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">出勤時間</label>
+        <input type="text" value={time} onChange={e => setTime(e.target.value)}
+          placeholder="例: 19:00" className="input-field w-full text-sm" />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={onCancel} className="btn-secondary flex-1 text-sm py-2">キャンセル</button>
+        <button
+          onClick={() => canSubmit && onSubmit(helpCastName.trim(), helpStoreId as number, time)}
+          disabled={!canSubmit || isPending}
+          className="flex-1 text-sm py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-medium disabled:opacity-40 transition-colors"
+        >
+          出勤
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function CastAttendanceView({ storeId }: { storeId: number }) {
   const qc = useQueryClient()
   const [showClockIn, setShowClockIn] = useState(false)
+  const [clockInTab, setClockInTab] = useState<'normal' | 'help'>('normal')
   const [q, setQ] = useState('')
+  const [helpStoreId, setHelpStoreId] = useState<number | ''>('')
+  const [helpCastName, setHelpCastName] = useState('')
   const [now, setNow] = useState(Date.now())
 
   // 出勤フロー: キャスト選択 → 時刻選択
@@ -4387,6 +4444,25 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
       setShowClockIn(false)
       setClockInCast(null)
       setQ('')
+    },
+  })
+
+  const helpClockInMutation = useMutation({
+    mutationFn: ({ name, fromStoreId, time }: { name: string; fromStoreId: number; time: string }) =>
+      apiClient.post('/api/casts/staff-attendance/clock-in', {
+        store_id: storeId,
+        name: `[ヘルプ:${name}]`,
+        actual_start: time || undefined,
+        is_late: false,
+        is_absent: false,
+        notes: `ヘルプ元店舗ID:${fromStoreId}`,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+      setShowClockIn(false)
+      setHelpCastName('')
+      setHelpStoreId('')
+      setClockInTab('normal')
     },
   })
 
@@ -4622,25 +4698,52 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
 
       {/* 出勤: キャスト検索モーダル */}
       {showClockIn && !clockInCast && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setShowClockIn(false); setQ('') }}>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}>
           <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-white">出勤キャストを選択</h3>
-              <button onClick={() => { setShowClockIn(false); setQ('') }}><X className="w-5 h-5 text-gray-400" /></button>
+              <button onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-            <input type="text" value={q} onChange={e => setQ(e.target.value)}
-              placeholder="キャスト名で検索" className="input-field w-full text-sm" autoFocus />
-            <div className="space-y-1 max-h-72 overflow-y-auto">
-              {filteredCasts.map((c: any) => (
-                <button key={c.id} onClick={() => setClockInCast({ id: c.id, name: c.stage_name })}
-                  className="w-full text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-emerald-900/50 text-gray-200 hover:text-emerald-300 transition-colors">
-                  <span className="font-medium">{c.stage_name}</span>
-                </button>
-              ))}
-              {filteredCasts.length === 0 && (
-                <p className="text-center text-gray-500 text-sm py-4">{q ? '該当なし' : '全員出勤中です'}</p>
-              )}
+            {/* タブ */}
+            <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+              <button onClick={() => setClockInTab('normal')}
+                className={`flex-1 text-sm py-1 rounded-md transition-colors ${clockInTab === 'normal' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                通常出勤
+              </button>
+              <button onClick={() => setClockInTab('help')}
+                className={`flex-1 text-sm py-1 rounded-md transition-colors ${clockInTab === 'help' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                ヘルプ出勤
+              </button>
             </div>
+
+            {clockInTab === 'normal' ? (
+              <>
+                <input type="text" value={q} onChange={e => setQ(e.target.value)}
+                  placeholder="キャスト名で検索" className="input-field w-full text-sm" autoFocus />
+                <div className="space-y-1 max-h-72 overflow-y-auto">
+                  {filteredCasts.map((c: any) => (
+                    <button key={c.id} onClick={() => setClockInCast({ id: c.id, name: c.stage_name })}
+                      className="w-full text-left px-3 py-2.5 rounded-lg bg-gray-800 hover:bg-emerald-900/50 text-gray-200 hover:text-emerald-300 transition-colors">
+                      <span className="font-medium">{c.stage_name}</span>
+                    </button>
+                  ))}
+                  {filteredCasts.length === 0 && (
+                    <p className="text-center text-gray-500 text-sm py-4">{q ? '該当なし' : '全員出勤中です'}</p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <HelpClockInForm
+                storeId={storeId}
+                helpStoreId={helpStoreId}
+                setHelpStoreId={setHelpStoreId}
+                helpCastName={helpCastName}
+                setHelpCastName={setHelpCastName}
+                onSubmit={(name, fromStoreId, time) => helpClockInMutation.mutate({ name, fromStoreId, time })}
+                onCancel={() => { setShowClockIn(false); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}
+                isPending={helpClockInMutation.isPending}
+              />
+            )}
           </div>
         </div>
       )}
