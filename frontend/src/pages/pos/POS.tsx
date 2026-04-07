@@ -2323,7 +2323,17 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
   })
-  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const { data: workingAttendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
+  })
+  const workingCastIds = new Set(
+    (workingAttendance as any[])
+      .filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
+      .map((a: any) => a.cast_id)
+  )
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active && workingCastIds.has(c.id))
   const isChampagne = itemType === 'champagne'
 
   // 単一選択
@@ -2405,7 +2415,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
                 <span className="font-medium">{c.stage_name}</span>
               </button>
             ))}
-            {casts.length === 0 && <p className="text-center text-gray-500 text-sm py-4">キャストが見つかりません</p>}
+            {casts.length === 0 && <p className="text-center text-gray-500 text-sm py-4">勤務中のキャストがいません</p>}
           </div>
         )}
         {isChampagne && selectedIds.size > 0 && (
