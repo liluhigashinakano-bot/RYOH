@@ -259,6 +259,33 @@ CAST_DRINK_TYPES = ("drink_s", "drink_l", "drink_mg", "shot_cast", "champagne")
 DRINK_UNIT_PRICE = {"drink_s": 100, "drink_l": 400, "drink_mg": 800, "shot_cast": 300}
 
 
+def _build_incentive_map(store_id: int, db: Session) -> dict:
+    """store_idのIncentiveConfigから drink_type → back計算関数 を返す"""
+    configs = db.query(models.IncentiveConfig).filter(
+        models.IncentiveConfig.store_id == store_id
+    ).all()
+    result = {}
+    for c in configs:
+        if c.incentive_mode == "fixed" and c.fixed_amount is not None:
+            result[c.drink_type] = ("fixed", c.fixed_amount)
+        else:
+            result[c.drink_type] = ("percent", c.rate or 10)
+    return result
+
+
+def _calc_back(drink_type: str, unit_price: int, quantity: int, incentive_map: dict) -> int:
+    """1品目のキャストバック額を計算"""
+    cfg = incentive_map.get(drink_type)
+    if cfg is None:
+        # フォールバック: 旧来のハードコード値
+        return DRINK_UNIT_PRICE.get(drink_type, 0) * quantity
+    mode, value = cfg
+    if mode == "fixed":
+        return value * quantity
+    else:  # percent
+        return int(unit_price * value / 100) * quantity
+
+
 def _parse_champagne_ratios(item_name: str) -> List[int]:
     """
     シャンパン item_name から配分比率リストを抽出。
@@ -282,6 +309,9 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
     session = db.query(models.BusinessSession).filter(models.BusinessSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="セッションが見つかりません")
+
+    # インセンティブ設定を取得
+    incentive_map = _build_incentive_map(session.store_id, db)
 
     # セッション内の伝票を取得（get_session_ticketsと同じフィルター）
     query = db.query(models.Ticket).filter(
@@ -315,13 +345,13 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
             if i.canceled_at is None and i.cast_id is not None and i.item_type in CAST_DRINK_TYPES
         ]
 
-        # S/L/MG/shot_cast: 数量集計
+        # S/L/MG/shot_cast: 数量集計（バック額はIncentiveConfigから算出）
         for item in valid_items:
             if item.item_type in ("drink_s", "drink_l", "drink_mg", "shot_cast"):
                 _ensure_cast(item.cast_id, item)
                 cast_map[item.cast_id][item.item_type] += item.quantity
 
-        # シャンパン: item_name でグループ化し、unit_price×10% を配分比率で分割
+        # シャンパン: item_name でグループ化し、IncentiveConfigの設定で配分
         champ_groups: dict = defaultdict(list)
         for item in valid_items:
             if item.item_type == "champagne":
@@ -331,10 +361,16 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
             # unit_price > 0 のアイテムから販売価格を取得
             price_item = next((i for i in items if (i.unit_price or 0) > 0), None)
             unit_price = price_item.unit_price if price_item else 0
-            back_pool = unit_price * 0.1  # 販売価格の10%がバック総額
+
+            # シャンパンのバック総額をIncentiveConfigから算出
+            champ_cfg = incentive_map.get("champagne")
+            if champ_cfg:
+                mode, value = champ_cfg
+                back_pool = (unit_price * value / 100) if mode == "percent" else value
+            else:
+                back_pool = unit_price * 0.1  # フォールバック: 10%
 
             ratios = _parse_champagne_ratios(item_name)
-            # 作成順（id昇順）と比率リストの位置を対応させる
             items_sorted = sorted(items, key=lambda i: i.id)
 
             for idx, item in enumerate(items_sorted):
@@ -373,10 +409,10 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
         # 合計金額と勤怠情報を付与
         for cid, entry in cast_map.items():
             entry["total_amount"] = (
-                entry["drink_s"] * DRINK_UNIT_PRICE["drink_s"]
-                + entry["drink_l"] * DRINK_UNIT_PRICE["drink_l"]
-                + entry["drink_mg"] * DRINK_UNIT_PRICE["drink_mg"]
-                + entry["shot_cast"] * DRINK_UNIT_PRICE["shot_cast"]
+                _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
+                + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
+                + _calc_back("drink_mg", 3700, entry["drink_mg"], incentive_map)
+                + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
                 + entry["champagne_amount"]
             )
             att = snap.get(str(cid), {})
@@ -420,10 +456,10 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
         shift_map = {s.cast_id: s for s in shifts}
         for cid, entry in cast_map.items():
             entry["total_amount"] = (
-                entry["drink_s"] * DRINK_UNIT_PRICE["drink_s"]
-                + entry["drink_l"] * DRINK_UNIT_PRICE["drink_l"]
-                + entry["drink_mg"] * DRINK_UNIT_PRICE["drink_mg"]
-                + entry["shot_cast"] * DRINK_UNIT_PRICE["shot_cast"]
+                _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
+                + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
+                + _calc_back("drink_mg", 3700, entry["drink_mg"], incentive_map)
+                + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
                 + entry["champagne_amount"]
             )
             shift = shift_map.get(cid)
