@@ -18,11 +18,12 @@ export default function Dashboard() {
     staleTime: 1000 * 60 * 30,
   })
 
-  const { data: dash, isLoading } = useQuery({
+  const { data: dash, isLoading, isError, error } = useQuery({
     queryKey: ['dashboard', storeId],
     queryFn: () => apiClient.get(`/api/sessions/dashboard/${storeId}`).then(r => r.data),
     refetchInterval: 30000,
     enabled: storeId !== null,
+    retry: 1,
   })
 
   const isOpen = !!dash?.session
@@ -75,7 +76,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {isLoading || !dash ? (
+      {isError ? (
+        <div className="text-red-400 text-center py-16 text-sm">
+          データ取得エラー: {(error as any)?.response?.data?.detail || (error as any)?.message || '不明なエラー'}
+        </div>
+      ) : isLoading || !dash ? (
         <div className="text-gray-500 text-center py-16 text-sm">読み込み中...</div>
       ) : (
         <>
