@@ -4455,6 +4455,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   const staffDeleteMutation = useMutation({
     mutationFn: (id: number) => apiClient.delete(`/api/casts/staff-attendance/${id}`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] }),
+    onError: (e: any) => alert(`削除に失敗しました: ${e?.response?.data?.detail ?? e?.message ?? '不明なエラー'}`),
   })
 
   const staffUpdateTimeMutation = useMutation({
@@ -4512,6 +4513,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   const deleteMutation = useMutation({
     mutationFn: (shiftId: number) => apiClient.post(`/api/casts/attendance/${shiftId}/remove`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attendance', storeId] }),
+    onError: (e: any) => alert(`削除に失敗しました: ${e?.response?.data?.detail ?? e?.message ?? '不明なエラー'}`),
   })
 
   const updateTimeMutation = useMutation({

@@ -694,9 +694,12 @@ def delete_attendance(shift_id: int, db: Session = Depends(get_db), current_user
     shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
-    # シフト自体は残してタイムスタンプのみクリア
-    shift.actual_start = None
-    shift.actual_end = None
+    # ヘルプキャスト（cast_id=None）はレコードごと削除、通常キャストはタイムスタンプのみクリア
+    if shift.cast_id is None:
+        db.delete(shift)
+    else:
+        shift.actual_start = None
+        shift.actual_end = None
     db.commit()
     return {"message": "出勤記録を削除しました"}
 
