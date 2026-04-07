@@ -1917,21 +1917,17 @@ function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void 
   addEvent(ticket.set_started_at, 'セット開始（飲み放題）', undefined, 'text-blue-400')
   addEvent(ticket.e_started_at, '延長開始', undefined, 'text-orange-400')
 
-  // オーダーアイテム（quantity > 1 は1ユニットずつ展開）
+  // オーダーアイテム
   for (const item of ticket.order_items || []) {
     if (!item.created_at) continue
     const canceled = !!item.canceled_at
     const name = item.item_name || item.item_type || '—'
-    const qty = item.quantity || 1
-    const unitPrice = item.unit_price ?? Math.round(item.amount / qty)
-    for (let i = 0; i < qty; i++) {
-      addEvent(
-        item.created_at,
-        canceled ? `[取消] ${name}` : name,
-        `¥${unitPrice.toLocaleString()}`,
-        canceled ? 'text-gray-600 line-through' : 'text-gray-200'
-      )
-    }
+    addEvent(
+      item.created_at,
+      canceled ? `[取消] ${name}` : name,
+      item.quantity > 1 ? `×${item.quantity}  ¥${item.amount.toLocaleString()}` : `¥${item.amount.toLocaleString()}`,
+      canceled ? 'text-gray-600 line-through' : 'text-gray-200'
+    )
     if (canceled) addEvent(item.canceled_at, `取消: ${name}`, undefined, 'text-red-500')
   }
 
