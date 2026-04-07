@@ -503,6 +503,7 @@ class MenuItemConfig(Base):
     label = Column(String(100), nullable=False)          # 表示名（例: Lドリンク）
     price = Column(Integer, default=0)                   # 単価
     cast_required = Column(Boolean, default=True)        # キャスト選択が必要か
+    has_incentive = Column(Boolean, default=False)       # インセンティブあり/なし
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -516,8 +517,10 @@ class IncentiveConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
-    drink_type = Column(String(50), nullable=False)      # drink_l / drink_mg / drink_s / shot_cast / champagne
-    rate = Column(Integer, default=10)                   # インセンティブ率（%）
+    drink_type = Column(String(50), nullable=False)      # drink_l / drink_mg / drink_s / shot_cast / champagne / menu_{id}
+    incentive_mode = Column(String(10), default="percent")  # 'percent' | 'fixed'
+    rate = Column(Integer, default=10)                   # インセンティブ率（%）incentive_mode='percent'の時
+    fixed_amount = Column(Integer, nullable=True)        # 固定バック額（円）incentive_mode='fixed'の時
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

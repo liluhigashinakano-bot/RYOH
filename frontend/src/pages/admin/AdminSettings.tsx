@@ -4,14 +4,6 @@ import { Plus, X, Trash2, Edit2, Save, ChevronDown, ChevronUp } from 'lucide-rea
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
-const DEFAULT_DRINK_TYPES = [
-  { drink_type: 'drink_l',   label: 'Lドリンク' },
-  { drink_type: 'drink_mg',  label: 'MGドリンク' },
-  { drink_type: 'drink_s',   label: 'Sドリンク' },
-  { drink_type: 'shot_cast', label: 'キャストショット' },
-  { drink_type: 'champagne', label: 'シャンパン' },
-]
-
 export default function AdminSettings() {
   const { stores } = useAuthStore()
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
@@ -38,9 +30,6 @@ export default function AdminSettings() {
   )
 }
 
-// ─────────────────────────────────────────
-// 店舗ごとの設定まとめ
-// ─────────────────────────────────────────
 function StoreSettings({ storeId }: { storeId: number }) {
   return (
     <div className="space-y-6">
@@ -67,7 +56,10 @@ function MenuSection({ storeId }: { storeId: number }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiClient.delete(`/api/app-settings/menu/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu-items', storeId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['menu-items', storeId] })
+      qc.invalidateQueries({ queryKey: ['incentives', storeId] })
+    },
   })
 
   const toggleActive = useMutation({
@@ -78,7 +70,6 @@ function MenuSection({ storeId }: { storeId: number }) {
 
   return (
     <div className="card space-y-4">
-      {/* セクションヘッダー */}
       <div className="flex items-center justify-between">
         <button
           onClick={() => setCollapsed(v => !v)}
@@ -103,7 +94,8 @@ function MenuSection({ storeId }: { storeId: number }) {
               <tr className="border-b border-night-600 text-gray-400 text-xs">
                 <th className="text-left py-2 px-2">メニュー名</th>
                 <th className="text-right py-2 px-2">単価</th>
-                <th className="text-center py-2 px-2">キャスト選択</th>
+                <th className="text-center py-2 px-2">キャスト</th>
+                <th className="text-center py-2 px-2">インセン</th>
                 <th className="text-center py-2 px-2">状態</th>
                 <th className="py-2 px-2 w-16"></th>
               </tr>
@@ -116,6 +108,11 @@ function MenuSection({ storeId }: { storeId: number }) {
                   <td className="py-2.5 px-2 text-center">
                     <span className={`badge text-xs ${item.cast_required ? 'bg-purple-900/40 text-purple-400' : 'bg-night-700 text-gray-500'}`}>
                       {item.cast_required ? '必要' : 'なし'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 px-2 text-center">
+                    <span className={`badge text-xs ${item.has_incentive ? 'bg-yellow-900/40 text-yellow-400' : 'bg-night-700 text-gray-500'}`}>
+                      {item.has_incentive ? 'あり' : 'なし'}
                     </span>
                   </td>
                   <td className="py-2.5 px-2 text-center">
@@ -145,7 +142,7 @@ function MenuSection({ storeId }: { storeId: number }) {
               ))}
               {(menuItems as any[]).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center text-gray-600 py-6 text-sm">
+                  <td colSpan={6} className="text-center text-gray-600 py-6 text-sm">
                     メニューが登録されていません
                   </td>
                 </tr>
@@ -167,6 +164,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
     label: item?.label || '',
     price: item?.price ?? 0,
     cast_required: item?.cast_required ?? true,
+    has_incentive: item?.has_incentive ?? false,
     sort_order: item?.sort_order ?? 0,
   })
 
@@ -176,6 +174,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
       : apiClient.post('/api/app-settings/menu', { ...form, store_id: storeId, is_active: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['menu-items', storeId] })
+      qc.invalidateQueries({ queryKey: ['incentives', storeId] })
       onClose()
     },
   })
@@ -194,7 +193,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
               value={form.label}
               onChange={e => setForm({ ...form, label: e.target.value })}
               className="input-field w-full"
-              placeholder="例: Lドリンク"
+              placeholder="例: オリジナルカクテル"
             />
           </div>
           <div>
@@ -223,9 +222,27 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
                 </button>
               ))}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              「必要」にするとオーダー時にキャストを選択できます
-            </p>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">インセンティブ</label>
+            <div className="flex gap-2">
+              {[true, false].map(v => (
+                <button
+                  key={String(v)}
+                  onClick={() => setForm({ ...form, has_incentive: v })}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    form.has_incentive === v ? 'bg-yellow-700 text-white' : 'btn-secondary'
+                  }`}
+                >
+                  {v ? 'あり' : 'なし'}
+                </button>
+              ))}
+            </div>
+            {form.has_incentive && (
+              <p className="text-xs text-yellow-500/80 mt-1">
+                インセンティブ率は下の「キャストドリンクインセンティブ率」で設定できます
+              </p>
+            )}
           </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">表示順（小さいほど先頭）</label>
@@ -259,7 +276,7 @@ function MenuItemModal({ storeId, item, onClose }: { storeId: number; item?: any
 // ─────────────────────────────────────────
 function IncentiveSection({ storeId }: { storeId: number }) {
   const qc = useQueryClient()
-  const [localRates, setLocalRates] = useState<Record<string, number>>({})
+  const [localSettings, setLocalSettings] = useState<Record<string, { mode: string; rate: number; fixed: number }>>({})
   const [saved, setSaved] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -269,23 +286,32 @@ function IncentiveSection({ storeId }: { storeId: number }) {
     enabled: !!storeId,
   })
 
-  // incentivesが読み込まれたらlocalRatesに反映
   useEffect(() => {
     if ((incentives as any[]).length > 0) {
-      const map: Record<string, number> = {}
-      ;(incentives as any[]).forEach((d: any) => { map[d.drink_type] = d.rate })
-      setLocalRates(map)
+      const map: Record<string, { mode: string; rate: number; fixed: number }> = {}
+      ;(incentives as any[]).forEach((d: any) => {
+        map[d.drink_type] = {
+          mode: d.incentive_mode || 'percent',
+          rate: d.rate ?? 10,
+          fixed: d.fixed_amount ?? 0,
+        }
+      })
+      setLocalSettings(map)
     }
   }, [storeId, JSON.stringify(incentives)])
 
   const saveMutation = useMutation({
     mutationFn: () => apiClient.put('/api/app-settings/incentives', {
       store_id: storeId,
-      items: DEFAULT_DRINK_TYPES.map(d => ({
-        store_id: storeId,
-        drink_type: d.drink_type,
-        rate: localRates[d.drink_type] ?? 10,
-      })),
+      items: (incentives as any[]).map((d: any) => {
+        const s = localSettings[d.drink_type] || { mode: 'percent', rate: 10, fixed: 0 }
+        return {
+          drink_type: d.drink_type,
+          incentive_mode: s.mode,
+          rate: s.rate,
+          fixed_amount: s.mode === 'fixed' ? s.fixed : null,
+        }
+      }),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['incentives', storeId] })
@@ -294,11 +320,13 @@ function IncentiveSection({ storeId }: { storeId: number }) {
     },
   })
 
-  const getRate = (drink_type: string) => localRates[drink_type] ?? 10
+  const get = (drink_type: string) => localSettings[drink_type] || { mode: 'percent', rate: 10, fixed: 0 }
+  const set = (drink_type: string, patch: Partial<{ mode: string; rate: number; fixed: number }>) => {
+    setLocalSettings(prev => ({ ...prev, [drink_type]: { ...get(drink_type), ...patch } }))
+  }
 
   return (
     <div className="card space-y-4">
-      {/* セクションヘッダー */}
       <div className="flex items-center justify-between">
         <button
           onClick={() => setCollapsed(v => !v)}
@@ -311,9 +339,7 @@ function IncentiveSection({ storeId }: { storeId: number }) {
           onClick={() => saveMutation.mutate()}
           disabled={saveMutation.isPending}
           className={`flex items-center gap-1.5 text-sm py-1.5 px-3 rounded-xl font-medium transition-colors ${
-            saved
-              ? 'bg-green-700/40 text-green-400'
-              : 'btn-primary'
+            saved ? 'bg-green-700/40 text-green-400' : 'btn-primary'
           }`}
         >
           <Save className="w-3.5 h-3.5" />
@@ -323,39 +349,84 @@ function IncentiveSection({ storeId }: { storeId: number }) {
 
       {!collapsed && (
         <>
-          <p className="text-xs text-gray-500 -mt-2">
-            日報でのキャストバック計算に使用します
-          </p>
+          <p className="text-xs text-gray-500 -mt-2">日報でのキャストバック計算に使用します</p>
 
           <div className="space-y-0">
-            {DEFAULT_DRINK_TYPES.map((d, i) => (
-              <div
-                key={d.drink_type}
-                className={`flex items-center justify-between py-3 ${i < DEFAULT_DRINK_TYPES.length - 1 ? 'border-b border-night-700' : ''}`}
-              >
-                <div>
-                  <p className="text-white font-medium text-sm">{d.label}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={getRate(d.drink_type)}
-                    onChange={e => setLocalRates(prev => ({ ...prev, [d.drink_type]: Number(e.target.value) }))}
-                    className="input-field w-20 text-right text-sm"
-                    min={0}
-                    max={100}
-                  />
-                  <span className="text-gray-400 text-sm w-4">%</span>
-                </div>
-              </div>
-            ))}
-          </div>
+            {(incentives as any[]).map((d: any, i: number) => {
+              const s = get(d.drink_type)
+              const isLast = i === (incentives as any[]).length - 1
+              const previewBack = s.mode === 'percent'
+                ? Math.round((d.menu_price ?? d.price ?? 1700) * s.rate / 100)
+                : s.fixed
+              return (
+                <div
+                  key={d.drink_type}
+                  className={`py-3 ${!isLast ? 'border-b border-night-700' : ''}`}
+                >
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-white font-medium text-sm">{d.label}</p>
+                      {d.is_custom && (
+                        <span className="text-xs text-yellow-500/70">カスタムメニュー</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      {/* モード切替 */}
+                      <div className="flex rounded-lg overflow-hidden border border-night-600 text-xs">
+                        <button
+                          onClick={() => set(d.drink_type, { mode: 'percent' })}
+                          className={`px-2.5 py-1.5 transition-colors ${s.mode === 'percent' ? 'bg-primary-600 text-white' : 'bg-night-800 text-gray-400 hover:text-white'}`}
+                        >
+                          ％
+                        </button>
+                        <button
+                          onClick={() => set(d.drink_type, { mode: 'fixed' })}
+                          className={`px-2.5 py-1.5 transition-colors ${s.mode === 'fixed' ? 'bg-primary-600 text-white' : 'bg-night-800 text-gray-400 hover:text-white'}`}
+                        >
+                          固定額
+                        </button>
+                      </div>
 
-          <div className="bg-night-900/60 border border-night-600 rounded-xl p-3">
-            <p className="text-xs text-gray-400">
-              <span className="text-primary-400 font-medium">計算例）</span>
-              Lドリンク ¥1,700、インセンティブ率 {getRate('drink_l')}% → キャストバック ¥{Math.round(1700 * getRate('drink_l') / 100).toLocaleString()}
-            </p>
+                      {/* 値入力 */}
+                      {s.mode === 'percent' ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={s.rate}
+                            onChange={e => set(d.drink_type, { rate: Number(e.target.value) })}
+                            onFocus={e => e.target.select()}
+                            className="input-field w-16 text-right text-sm"
+                            min={0}
+                            max={100}
+                          />
+                          <span className="text-gray-400 text-sm">%</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <span className="text-gray-400 text-sm">¥</span>
+                          <input
+                            type="number"
+                            value={s.fixed}
+                            onChange={e => set(d.drink_type, { fixed: Number(e.target.value) })}
+                            onFocus={e => e.target.select()}
+                            className="input-field w-20 text-right text-sm"
+                            min={0}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* プレビュー */}
+                  <p className="text-xs text-gray-600 mt-1 text-right">
+                    → バック ¥{previewBack.toLocaleString()}
+                  </p>
+                </div>
+              )
+            })}
+
+            {(incentives as any[]).length === 0 && (
+              <p className="text-center text-gray-600 py-6 text-sm">設定がありません</p>
+            )}
           </div>
         </>
       )}
