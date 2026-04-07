@@ -150,6 +150,21 @@ function AutoExtender({ ticket, storeId, extensionPrice }: { ticket: any; storeI
 
     if (prevSetIntervalRef.current === null) {
       prevSetIntervalRef.current = intervalNum
+
+      // ページ開き直し等で未加算の延長があればキャッチアップ
+      const dbCount = ticket.extension_count || 0
+      const missed = intervalNum - dbCount
+      if (missed > 0) {
+        const guestCount = ticket.guest_count || 1
+        const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
+        const adds = Array.from({ length: missed * guestCount }, () =>
+          apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: 1 })
+        )
+        Promise.all(adds).then(() => {
+          qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+          qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+        })
+      }
       return
     }
 
