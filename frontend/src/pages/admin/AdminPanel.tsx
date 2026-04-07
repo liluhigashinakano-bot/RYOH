@@ -165,7 +165,7 @@ function AccountPermsTab({ canEdit }: { canEdit: boolean }) {
 
   const updatePermsMutation = useMutation({
     mutationFn: ({ userId, permissions }: { userId: number; permissions: any }) =>
-      apiClient.patch(`/api/users/${userId}/permissions`, { permissions }),
+      apiClient.post(`/api/users/${userId}/permissions`, { permissions }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] })
       setExpandedId(null)
@@ -262,7 +262,7 @@ function GroupPermsTab({ canEdit }: { canEdit: boolean }) {
 
   const updateMutation = useMutation({
     mutationFn: ({ role, permissions }: { role: string; permissions: any }) =>
-      apiClient.patch(`/api/users/role-permissions/${role}`, { permissions }),
+      apiClient.post(`/api/users/role-permissions/${role}`, { permissions }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['role-permissions'] })
       setEditingRole(null)

@@ -118,7 +118,7 @@ def delete_user(
     return {"message": "ユーザーを削除しました"}
 
 
-@router.patch("/{user_id}/permissions")
+@router.post("/{user_id}/permissions")
 def update_user_permissions(
     user_id: int,
     data: dict,
@@ -149,7 +149,7 @@ def get_role_permissions(
     return {r.role: r.permissions for r in records}
 
 
-@router.patch("/role-permissions/{role}")
+@router.post("/role-permissions/{role}")
 def update_role_permissions(
     role: str,
     data: dict,
