@@ -2108,7 +2108,12 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
   onSelect: (id: number | null) => void
   onClose: () => void
 }) {
+  const qc = useQueryClient()
   const [q, setQ] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
+  const [newForm, setNewForm] = useState({ name: '', alias: '', phone: '' })
+  const [adding, setAdding] = useState(false)
+
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', storeId],
     queryFn: () => apiClient.get('/api/customers', { params: { store_id: storeId } }).then(r => r.data),
@@ -2117,6 +2122,23 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
     !q || c.name?.includes(q) || c.alias?.includes(q) || c.phone?.includes(q)
   ).slice(0, 30)
 
+  const handleAddCustomer = async () => {
+    if (!newForm.name.trim()) return
+    setAdding(true)
+    try {
+      const res = await apiClient.post('/api/customers', {
+        name: newForm.name.trim(),
+        alias: newForm.alias.trim() || undefined,
+        phone: newForm.phone.trim() || undefined,
+      })
+      await qc.invalidateQueries({ queryKey: ['customers', storeId] })
+      onSelect(res.data.id)
+      onClose()
+    } finally {
+      setAdding(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
       <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
@@ -2124,26 +2146,82 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
           <h3 className="font-bold text-white">顧客を選択</h3>
           <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
-        <input type="text" value={q} onChange={e => setQ(e.target.value)}
-          placeholder="名前・電話番号で検索"
-          className="input-field w-full text-sm" autoFocus />
-        <div className="space-y-1 max-h-64 overflow-y-auto">
-          {currentId && (
-            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
-              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
-              未設定に戻す
-            </button>
-          )}
-          {filtered.map((c: any) => (
-            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.id === currentId ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
-              <span className="font-medium">{c.name}</span>
-              {c.alias && <span className="text-gray-400 text-xs ml-2">({c.alias})</span>}
-              {c.phone && <span className="text-gray-500 text-xs ml-2">{c.phone}</span>}
-            </button>
-          ))}
-          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
-        </div>
+
+        {!showAdd ? (
+          <>
+            <div className="flex gap-2">
+              <input type="text" value={q} onChange={e => setQ(e.target.value)}
+                placeholder="名前・電話番号で検索"
+                className="input-field flex-1 text-sm" autoFocus />
+              <button
+                onClick={e => { e.stopPropagation(); setShowAdd(true) }}
+                className="btn-primary text-sm px-3 flex items-center gap-1 whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />新規
+              </button>
+            </div>
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {currentId && (
+                <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
+                  className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
+                  未設定に戻す
+                </button>
+              )}
+              {filtered.map((c: any) => (
+                <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.id === currentId ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+                  <span className="font-medium">{c.name}</span>
+                  {c.alias && <span className="text-gray-400 text-xs ml-2">({c.alias})</span>}
+                  {c.phone && <span className="text-gray-500 text-xs ml-2">{c.phone}</span>}
+                </button>
+              ))}
+              {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-gray-400">新規顧客を登録して伝票に紐づけます</p>
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={newForm.name}
+                onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="名前 *"
+                className="input-field w-full text-sm"
+                autoFocus
+              />
+              <input
+                type="text"
+                value={newForm.alias}
+                onChange={e => setNewForm(f => ({ ...f, alias: e.target.value }))}
+                placeholder="ニックネーム（任意）"
+                className="input-field w-full text-sm"
+              />
+              <input
+                type="tel"
+                value={newForm.phone}
+                onChange={e => setNewForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="電話番号（任意）"
+                className="input-field w-full text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={e => { e.stopPropagation(); setShowAdd(false) }}
+                className="btn-secondary flex-1 text-sm"
+              >
+                戻る
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); handleAddCustomer() }}
+                disabled={!newForm.name.trim() || adding}
+                className="btn-primary flex-1 text-sm disabled:opacity-40"
+              >
+                {adding ? '登録中...' : '登録して選択'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
