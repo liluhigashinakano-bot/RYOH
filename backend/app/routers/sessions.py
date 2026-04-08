@@ -464,6 +464,8 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
     tickets = query.all()
 
     cast_map: dict = {}
+    # 通常メニュー（非シャンパン）のインセンティブ累計を別管理
+    nonchamp_amount: dict = defaultdict(int)
 
     def _ensure_cast(cid: int, item: models.OrderItem) -> None:
         if cid not in cast_map:
@@ -479,45 +481,94 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
                 "champagne_amount": 0,
             }
 
+    # 集計用ヘルパー: snapshot 優先・無ければ旧計算でフォールバック
+    def _amount_for_item(item: models.OrderItem) -> int:
+        snap = item.incentive_snapshot or {}
+        amt = snap.get("calculated_amount") if isinstance(snap, dict) else None
+        if amt is not None:
+            return int(amt)
+        # フォールバック（snapshot が無い古いデータ用）
+        return _calc_back(item.item_type, item.unit_price or 0, item.quantity or 0, incentive_map)
+
     for ticket in tickets:
         valid_items = [
             i for i in ticket.order_items
             if i.canceled_at is None and i.cast_id is not None and i.item_type in CAST_DRINK_TYPES
         ]
 
-        # S/L/MG/shot_cast: 数量集計（バック額はIncentiveConfigから算出）
+        # S/L/MG/shot_cast/custom_menu: 数量集計 + snapshot 金額累積
         for item in valid_items:
+            if item.item_type == "champagne":
+                continue
+            _ensure_cast(item.cast_id, item)
             if item.item_type in ("drink_s", "drink_l", "drink_mg", "shot_cast"):
-                _ensure_cast(item.cast_id, item)
                 cast_map[item.cast_id][item.item_type] += item.quantity
+            # custom_menu 含むすべての非シャンパンメニューのインセンティブ金額を累積
+            nonchamp_amount[item.cast_id] += _amount_for_item(item)
 
-        # シャンパン: item_name でグループ化し、IncentiveConfigの設定で配分
+        # シャンパン
+        # 新形式: cast_distribution が存在する行はそれで配分
+        # 旧形式: cast_distribution が無いグループは item_name パースにフォールバック
         champ_groups: dict = defaultdict(list)
         for item in valid_items:
             if item.item_type == "champagne":
                 champ_groups[item.item_name or ""].append(item)
 
         for item_name, items in champ_groups.items():
-            # unit_price > 0 のアイテムから販売価格を取得
-            price_item = next((i for i in items if (i.unit_price or 0) > 0), None)
-            unit_price = price_item.unit_price if price_item else 0
-
-            # シャンパンのバック総額をIncentiveConfigから算出
-            champ_cfg = incentive_map.get("champagne")
-            if champ_cfg:
-                mode, value = champ_cfg
-                back_pool = (unit_price * value / 100) if mode == "percent" else value
-            else:
-                back_pool = unit_price * 0.1  # フォールバック: 10%
-
-            ratios = _parse_champagne_ratios(item_name)
             items_sorted = sorted(items, key=lambda i: i.id)
 
-            for idx, item in enumerate(items_sorted):
-                _ensure_cast(item.cast_id, item)
-                cast_map[item.cast_id]["champagne"] += item.quantity
-                ratio = ratios[idx] if idx < len(ratios) else 0
-                cast_map[item.cast_id]["champagne_amount"] += int(back_pool * ratio / 100)
+            # cast_distribution を持つ代表行を探す（同一グループでは同じ JSON が入っている想定）
+            dist_holder = next(
+                (i for i in items_sorted if isinstance(i.cast_distribution, list) and i.cast_distribution),
+                None
+            )
+
+            if dist_holder is not None:
+                # ── 新形式: cast_distribution ベース ──
+                # 代表行から back_pool（snapshot.calculated_amount）を取得
+                snap = dist_holder.incentive_snapshot or {}
+                back_pool = int(snap.get("calculated_amount") or 0)
+                # 代表行の snapshot が無い場合は unit_price から再計算
+                if back_pool == 0:
+                    price_item = next((i for i in items_sorted if (i.unit_price or 0) > 0), None)
+                    unit_price = price_item.unit_price if price_item else 0
+                    champ_cfg = incentive_map.get("champagne")
+                    if champ_cfg:
+                        mode, value = champ_cfg
+                        back_pool = int((unit_price * value / 100) if mode == "percent" else value)
+                # 各 cast_id に分配
+                for entry in dist_holder.cast_distribution:
+                    cid = entry.get("cast_id")
+                    ratio = entry.get("ratio") or 0
+                    if cid is None:
+                        continue
+                    # cast_name 解決のため cast_map にエントリを作る
+                    if cid not in cast_map:
+                        cast_obj = db.query(models.Cast).filter(models.Cast.id == cid).first()
+                        cast_name = cast_obj.stage_name if cast_obj else f"Cast{cid}"
+                        cast_map[cid] = {
+                            "cast_id": cid, "cast_name": cast_name,
+                            "drink_s": 0, "drink_l": 0, "drink_mg": 0,
+                            "shot_cast": 0, "champagne": 0, "champagne_amount": 0,
+                        }
+                    cast_map[cid]["champagne"] += 1  # 1本のうち各キャストの参加カウント
+                    cast_map[cid]["champagne_amount"] += int(back_pool * ratio / 100)
+            else:
+                # ── 旧形式フォールバック: item_name パース ──
+                price_item = next((i for i in items_sorted if (i.unit_price or 0) > 0), None)
+                unit_price = price_item.unit_price if price_item else 0
+                champ_cfg = incentive_map.get("champagne")
+                if champ_cfg:
+                    mode, value = champ_cfg
+                    back_pool = (unit_price * value / 100) if mode == "percent" else value
+                else:
+                    back_pool = unit_price * 0.1
+                ratios = _parse_champagne_ratios(item_name)
+                for idx, item in enumerate(items_sorted):
+                    _ensure_cast(item.cast_id, item)
+                    cast_map[item.cast_id]["champagne"] += item.quantity
+                    ratio = ratios[idx] if idx < len(ratios) else 0
+                    cast_map[item.cast_id]["champagne_amount"] += int(back_pool * ratio / 100)
 
     # 勤怠情報を取得（クローズ済みはスナップショット、オープン中はライブデータ）
     from datetime import timedelta
@@ -557,13 +608,7 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
 
         # 合計金額と勤怠情報を付与
         for key, entry in cast_map.items():
-            entry["total_amount"] = (
-                _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
-                + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
-                + _calc_back("drink_mg", 3700, entry["drink_mg"], incentive_map)
-                + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
-                + entry["champagne_amount"]
-            )
+            entry["total_amount"] = nonchamp_amount.get(key, 0) + entry["champagne_amount"]
             snap_key = f"h_{key}" if key is None or (isinstance(key, str) and key.startswith("h_")) else str(key)
             att = snap.get(snap_key, snap.get(str(key), {}))
             entry["actual_start"] = att.get("actual_start")
@@ -605,13 +650,7 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
         help_shift_map = {f"h_{s.id}": s for s in shifts if s.cast_id is None}
 
         for key, entry in cast_map.items():
-            entry["total_amount"] = (
-                _calc_back("drink_s", 900, entry["drink_s"], incentive_map)
-                + _calc_back("drink_l", 1700, entry["drink_l"], incentive_map)
-                + _calc_back("drink_mg", 3700, entry["drink_mg"], incentive_map)
-                + _calc_back("shot_cast", 1500, entry["shot_cast"], incentive_map)
-                + entry["champagne_amount"]
-            )
+            entry["total_amount"] = nonchamp_amount.get(key, 0) + entry["champagne_amount"]
             if isinstance(key, str) and key.startswith("h_"):
                 shift = help_shift_map.get(key)
             else:
