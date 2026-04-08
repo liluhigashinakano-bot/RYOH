@@ -287,6 +287,11 @@ class OrderItem(Base):
     canceled_at = Column(DateTime, nullable=True)
     canceled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # シャンパン等の複数キャスト分配: [{"cast_id": 5, "ratio": 60}, ...]
+    cast_distribution = Column(JSON, nullable=True)
+    # 注文時点のインセンティブスナップショット:
+    # {"mode": "percent"|"fixed", "rate": int|None, "fixed_amount": int|None, "calculated_amount": int}
+    incentive_snapshot = Column(JSON, nullable=True)
 
     ticket = relationship("Ticket", back_populates="order_items")
     cast = relationship("Cast", foreign_keys=[cast_id])
@@ -444,6 +449,7 @@ class StaffAttendance(Base):
     actual_end = Column(DateTime, nullable=True)
     is_late = Column(Boolean, default=False)
     is_absent = Column(Boolean, default=False)
+    employee_type = Column(String(20), nullable=True)  # "社員" | "アルバイト"
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

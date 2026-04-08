@@ -27,6 +27,11 @@ def _run_migrations(engine):
         "ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'administrator'",
         # superadmin → administrator 移行（enum追加後に実行）
         "UPDATE users SET role = 'administrator' WHERE role = 'superadmin'",
+        # OrderItem: シャンパン分配・インセンティブスナップショット用JSONカラム追加
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cast_distribution JSON",
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS incentive_snapshot JSON",
+        # StaffAttendance: 社員/アルバイト区分追加
+        "ALTER TABLE staff_attendances ADD COLUMN IF NOT EXISTS employee_type VARCHAR(20)",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:
