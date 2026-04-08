@@ -6,6 +6,11 @@ from datetime import datetime
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
+from ..services.incentive import (
+    build_incentive_map,
+    build_custom_menu_label_map,
+    calc_incentive_snapshot,
+)
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
@@ -82,12 +87,19 @@ class TicketCreate(BaseModel):
     motivation_note: Optional[str] = None
 
 
+class CastDistributionEntry(BaseModel):
+    cast_id: int
+    ratio: int  # 0-100
+
+
 class OrderItemCreate(BaseModel):
     item_type: str
     item_name: Optional[str] = None
     quantity: int = 1
     unit_price: int
     cast_id: Optional[int] = None
+    # シャンパン等で複数キャストに分配する場合のみ指定
+    cast_distribution: Optional[List[CastDistributionEntry]] = None
 
 
 class TicketClose(BaseModel):
@@ -380,6 +392,20 @@ def add_order(
 
     amount = data.quantity * data.unit_price
 
+    # インセンティブスナップショット & 分配情報の計算
+    snapshot = None
+    distribution_json = None
+    if data.cast_id is not None:
+        imap = build_incentive_map(db, ticket.store_id)
+        lmap = build_custom_menu_label_map(db, ticket.store_id)
+        snapshot = calc_incentive_snapshot(
+            data.item_type, data.item_name, data.unit_price, data.quantity, imap, lmap
+        )
+    if data.cast_distribution:
+        distribution_json = [
+            {"cast_id": e.cast_id, "ratio": e.ratio} for e in data.cast_distribution
+        ]
+
     # 常に新規レコードを作成（個別タイムスタンプ保持のため）
     item = models.OrderItem(
         ticket_id=ticket_id,
@@ -389,6 +415,8 @@ def add_order(
         unit_price=data.unit_price,
         amount=amount,
         cast_id=data.cast_id,
+        incentive_snapshot=snapshot,
+        cast_distribution=distribution_json,
     )
     db.add(item)
     item_id = None
@@ -434,6 +462,16 @@ def update_order(
     item.quantity = data.quantity
     item.amount = item.unit_price * data.quantity
     ticket.total_amount += item.amount - old_amount
+
+    # インセンティブスナップショットを再計算（数量変更に追従）
+    if item.cast_id is not None:
+        imap = build_incentive_map(db, ticket.store_id)
+        lmap = build_custom_menu_label_map(db, ticket.store_id)
+        new_snap = calc_incentive_snapshot(
+            item.item_type, item.item_name, item.unit_price or 0, data.quantity, imap, lmap
+        )
+        if new_snap is not None:
+            item.incentive_snapshot = new_snap
     # 履歴記録
     log = models.OrderItemLog(
         ticket_id=item.ticket_id,
@@ -690,6 +728,8 @@ class ChampagneRatioUpdate(BaseModel):
     new_item_name: str
     operator_name: Optional[str] = None
     reason: Optional[str] = None
+    # 新形式: cast_distribution を渡せば item_name 文字列に依存せず構造的に更新
+    cast_distribution: Optional[List[CastDistributionEntry]] = None
 
 
 @router.patch("/{ticket_id}/update-champagne")
@@ -710,6 +750,14 @@ def update_champagne_ratios(
         raise HTTPException(status_code=404, detail="シャンパン注文が見つかりません")
 
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+
+    # 新形式: cast_distribution が指定されていればそれを全行に適用
+    distribution_json = None
+    if data.cast_distribution:
+        distribution_json = [
+            {"cast_id": e.cast_id, "ratio": e.ratio} for e in data.cast_distribution
+        ]
+
     for item in items:
         log = models.OrderItemLog(
             ticket_id=ticket_id,
@@ -727,6 +775,8 @@ def update_champagne_ratios(
         )
         db.add(log)
         item.item_name = data.new_item_name
+        if distribution_json is not None:
+            item.cast_distribution = distribution_json
 
     db.commit()
     return {"ok": True, "total_amount": ticket.total_amount if ticket else None}
