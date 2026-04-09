@@ -31,6 +31,169 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
 # ─────────────────────────────────────────
+# 旧スナップショット補完 (シャンパン額・カスタムメニュー列の追記)
+# ─────────────────────────────────────────
+
+def _enrich_legacy_payload(db: Session, payload: dict) -> dict:
+    """過去スナップショットに custom_drink_columns / シャンパン額 / custom_drinks を
+    追記して返す（破壊しない）。
+    - すでに新フォーマットなら触らない
+    - DBの tickets/orders/menu_configs/incentive_configs を参照して再計算
+    """
+    if not isinstance(payload, dict):
+        return payload
+    has_custom_cols = "custom_drink_columns" in payload
+    sample_cast = (payload.get("cast_attendance") or [None])[0]
+    has_champ_amount = (
+        sample_cast is not None and "champagne_amount" in sample_cast
+    )
+    if has_custom_cols and has_champ_amount:
+        return payload  # 新フォーマット、補完不要
+
+    store_id = payload.get("store_id")
+    if not store_id:
+        return payload
+
+    # メニュー設定 (custom_menu の cast_required×has_incentive を抽出)
+    menu_configs = db.query(models.MenuItemConfig).filter(
+        models.MenuItemConfig.store_id == store_id,
+    ).all()
+    from ..services.report_builder import _assign_short_names
+    custom_menu_labels = sorted({
+        m.label for m in menu_configs
+        if m.is_active and m.cast_required and m.has_incentive
+    })
+    custom_short_map = _assign_short_names(custom_menu_labels)
+    custom_drink_columns = [
+        {"label": l, "short": custom_short_map[l]} for l in custom_menu_labels
+    ]
+
+    # インセンティブ設定 (シャンパン用)
+    from ..services.incentive import build_incentive_map, strip_cast_suffix
+    imap = build_incentive_map(db, store_id)
+    champ_cfg = imap.get("champagne")  # (mode, value) | None
+
+    # ticket_id → ORM tickets / order_items
+    ticket_blocks = payload.get("tickets") or []
+    ticket_ids = [t.get("id") for t in ticket_blocks if t.get("id")]
+    if not ticket_ids:
+        # 触らず返す
+        new = dict(payload)
+        new.setdefault("custom_drink_columns", custom_drink_columns)
+        return new
+
+    orm_tickets = db.query(models.Ticket).filter(models.Ticket.id.in_(ticket_ids)).all()
+    orm_by_id = {t.id: t for t in orm_tickets}
+
+    def _champ_back_pool(group_items: list) -> int:
+        """グループのバックプール額。snapshot 優先・無ければ incentive 設定で再計算。"""
+        # snapshot 優先
+        for it in group_items:
+            snap = it.incentive_snapshot if isinstance(it.incentive_snapshot, dict) else None
+            if snap and snap.get("calculated_amount"):
+                return int(snap["calculated_amount"])
+        # fallback
+        if not champ_cfg:
+            return 0
+        mode, value = champ_cfg
+        price_item = next((i for i in group_items if (i.unit_price or 0) > 0), None)
+        unit_price = price_item.unit_price if price_item else 0
+        return int((unit_price * value / 100) if mode == "percent" else value)
+
+    def _custom_drinks_for(orders, label_filter_cast_id=None) -> dict:
+        """orders から custom_menu のラベル別数量を集計。略称キー。"""
+        out = {}
+        for label in custom_menu_labels:
+            short = custom_short_map[label]
+            qty = 0
+            for o in orders:
+                if o.canceled_at is not None:
+                    continue
+                if o.item_type != "custom_menu":
+                    continue
+                if label_filter_cast_id is not None and o.cast_id != label_filter_cast_id:
+                    continue
+                if strip_cast_suffix(o.item_name or "") == label:
+                    qty += o.quantity or 0
+            out[short] = qty
+        return out
+
+    # ─── ticket_blocks 補完 ───
+    new_ticket_blocks = []
+    for tb in ticket_blocks:
+        nt = dict(tb)
+        ot = orm_by_id.get(tb.get("id"))
+        if ot is None:
+            new_ticket_blocks.append(nt)
+            continue
+        active_orders = [o for o in (ot.order_items or []) if o.canceled_at is None]
+        # シャンパングループ
+        groups: dict = defaultdict(list)
+        for o in active_orders:
+            if o.item_type == "champagne":
+                groups[o.item_name or ""].append(o)
+        champ_count = len(groups)
+        champ_amount = 0
+        for items in groups.values():
+            for it in items:
+                if (it.unit_price or 0) > 0:
+                    champ_amount += (it.unit_price or 0) * (it.quantity or 0)
+        nt.setdefault("champagne_count", champ_count)
+        nt.setdefault("champagne_amount", champ_amount)
+        nt.setdefault("custom_drinks", _custom_drinks_for(active_orders))
+        new_ticket_blocks.append(nt)
+
+    # ─── cast_attendance 補完 ───
+    new_cast_blocks = []
+    for cb in (payload.get("cast_attendance") or []):
+        nc = dict(cb)
+        cid = cb.get("cast_id")
+        # シャンパン本数・額 (このキャストの分配額)
+        champ_count = 0
+        champ_amount = 0
+        if cid is not None:
+            for ot in orm_tickets:
+                active = [o for o in (ot.order_items or []) if o.canceled_at is None and o.item_type == "champagne"]
+                groups: dict = defaultdict(list)
+                for o in active:
+                    groups[o.item_name or ""].append(o)
+                for items in groups.values():
+                    dist_holder = next(
+                        (i for i in items if isinstance(i.cast_distribution, list) and i.cast_distribution),
+                        None
+                    )
+                    if not dist_holder:
+                        continue
+                    if not any((e.get("cast_id") == cid) for e in dist_holder.cast_distribution):
+                        continue
+                    back_pool = _champ_back_pool(items)
+                    for entry in dist_holder.cast_distribution:
+                        if entry.get("cast_id") == cid:
+                            ratio = entry.get("ratio") or 0
+                            champ_amount += int(back_pool * ratio / 100)
+                            champ_count += 1
+                            break
+        nc.setdefault("champagne_count", champ_count)
+        nc.setdefault("champagne_amount", champ_amount)
+        # custom_drinks
+        if cid is not None:
+            cd_total = {short: 0 for short in custom_short_map.values()}
+            for ot in orm_tickets:
+                for short, qty in _custom_drinks_for(ot.order_items or [], label_filter_cast_id=cid).items():
+                    cd_total[short] = cd_total.get(short, 0) + qty
+            nc.setdefault("custom_drinks", cd_total)
+        else:
+            nc.setdefault("custom_drinks", {})
+        new_cast_blocks.append(nc)
+
+    new_payload = dict(payload)
+    new_payload["custom_drink_columns"] = custom_drink_columns
+    new_payload["tickets"] = new_ticket_blocks
+    new_payload["cast_attendance"] = new_cast_blocks
+    return new_payload
+
+
+# ─────────────────────────────────────────
 # 日報
 # ─────────────────────────────────────────
 
@@ -52,7 +215,7 @@ def get_daily_latest(
         "version": snap.version,
         "created_at": snap.created_at.isoformat() if snap.created_at else None,
         "created_by": snap.created_by,
-        "payload": snap.payload,
+        "payload": _enrich_legacy_payload(db, snap.payload),
         "has_raw_inputs": bool(snap.raw_inputs),
     }
 
@@ -138,7 +301,7 @@ def get_daily_by_id(
         "version": snap.version,
         "created_at": snap.created_at.isoformat() if snap.created_at else None,
         "created_by": snap.created_by,
-        "payload": snap.payload,
+        "payload": _enrich_legacy_payload(db, snap.payload),
     }
 
 
@@ -374,7 +537,7 @@ def get_monthly(
             continue
         by_date[r.business_date] = r
 
-    payloads = [r.payload for r in by_date.values() if r.payload]
+    payloads = [_enrich_legacy_payload(db, r.payload) for r in by_date.values() if r.payload]
     summary = _aggregate_monthly(payloads)
 
     return {
