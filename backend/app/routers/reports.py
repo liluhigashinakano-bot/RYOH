@@ -119,6 +119,42 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
             out[short] = qty
         return out
 
+    # 接客中会計の最終キャストを ORM から推定する
+    def _closing_cast_id(ot) -> Optional[int]:
+        # CastAssignment 優先
+        if ot.assignments:
+            valid = [a for a in ot.assignments if a.cast_id is not None and a.started_at is not None]
+            if valid:
+                latest = max(valid, key=lambda a: a.started_at)
+                return latest.cast_id
+        # フォールバック: キャスト選択ありの注文の最後
+        from ..services.report_calc import OrderInput  # 不要だけど明示
+        from ..services.incentive import strip_cast_suffix as _scs  # noqa
+        cast_orders = []
+        for o in (ot.order_items or []):
+            if o.canceled_at is not None or o.cast_id is None:
+                continue
+            mtype = o.item_type
+            if mtype in ("drink_s", "drink_l", "drink_mg", "shot_cast", "champagne"):
+                cast_orders.append(o)
+            elif mtype == "custom_menu":
+                label = strip_cast_suffix(o.item_name or "")
+                meta = next((m for m in menu_configs if m.label == label and m.cast_required), None)
+                if meta is not None:
+                    cast_orders.append(o)
+        if not cast_orders:
+            return None
+        last = max(cast_orders, key=lambda o: (o.created_at or datetime.min, o.id))
+        return last.cast_id
+
+    closing_counts_legacy: dict = defaultdict(int)
+    closing_cid_by_ticket: dict = {}
+    for ot in orm_tickets:
+        cid = _closing_cast_id(ot)
+        closing_cid_by_ticket[ot.id] = cid
+        if cid is not None:
+            closing_counts_legacy[cid] += 1
+
     # ─── ticket_blocks 補完 ───
     new_ticket_blocks = []
     for tb in ticket_blocks:
@@ -139,14 +175,17 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
             for it in items:
                 if (it.unit_price or 0) > 0:
                     champ_amount += (it.unit_price or 0) * (it.quantity or 0)
+        closing_cid = closing_cid_by_ticket.get(ot.id)
         if force:
             nt["champagne_count"] = champ_count
             nt["champagne_amount"] = champ_amount
             nt["custom_drinks"] = _custom_drinks_for(active_orders)
+            nt["closing_cast_id"] = closing_cid
         else:
             nt.setdefault("champagne_count", champ_count)
             nt.setdefault("champagne_amount", champ_amount)
             nt.setdefault("custom_drinks", _custom_drinks_for(active_orders))
+            nt.setdefault("closing_cast_id", closing_cid)
         new_ticket_blocks.append(nt)
 
     # ─── cast_attendance 補完 ───
@@ -186,17 +225,20 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
             for ot in orm_tickets:
                 for short, qty in _custom_drinks_for(ot.order_items or [], label_filter_cast_id=cid).items():
                     cd_total[short] = cd_total.get(short, 0) + qty
+        cl_count = closing_counts_legacy.get(cid, 0) if cid is not None else 0
         if force:
             nc["champagne_count"] = champ_count
             nc["champagne_amount"] = champ_amount
             nc["custom_drinks"] = cd_total
+            nc["closing_count"] = cl_count
         else:
             nc.setdefault("champagne_count", champ_count)
             nc.setdefault("champagne_amount", champ_amount)
             nc.setdefault("custom_drinks", cd_total)
+            nc.setdefault("closing_count", cl_count)
         new_cast_blocks.append(nc)
 
-    # 出勤外キャストへのシャンパン分配エントリを追加
+    # 出勤外キャスト（シャンパン分配 or 接客中会計）エントリを追加
     existing_cids = {c.get("cast_id") for c in new_cast_blocks if c.get("cast_id") is not None}
     extra_cids: set = set()
     for ot in orm_tickets:
@@ -209,6 +251,9 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
                 cid = entry.get("cast_id")
                 if cid is not None and cid not in existing_cids:
                     extra_cids.add(cid)
+    for cid in closing_counts_legacy.keys():
+        if cid not in existing_cids:
+            extra_cids.add(cid)
     if extra_cids:
         extra_casts = db.query(models.Cast).filter(models.Cast.id.in_(extra_cids)).all()
         cast_map = {c.id: c for c in extra_casts}
@@ -264,6 +309,7 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
                 "shot_cast": 0,
                 "champagne_count": champ_count,
                 "champagne_amount": champ_amount,
+                "closing_count": closing_counts_legacy.get(cid, 0),
                 "custom_drinks": {short: 0 for short in custom_short_map.values()},
             })
 
@@ -548,6 +594,7 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
                     "perf_22_26_total": 0,
                     "n_tissue_count": 0,
                     "r_tissue_count": 0,
+                    "closing_count": 0,
                     "custom_drinks": {},
                 }
             acc = cast_acc[key]
@@ -565,6 +612,7 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             acc["perf_22_26_total"] += int(c.get("perf_22_26") or 0)
             acc["n_tissue_count"] += int(c.get("n_tissue_count") or 0)
             acc["r_tissue_count"] += int(c.get("r_tissue_count") or 0)
+            acc["closing_count"] += int(c.get("closing_count") or 0)
             for short, qty in (c.get("custom_drinks") or {}).items():
                 acc["custom_drinks"][short] = acc["custom_drinks"].get(short, 0) + int(qty or 0)
 

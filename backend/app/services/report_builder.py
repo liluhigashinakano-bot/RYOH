@@ -131,6 +131,19 @@ def _to_order_input(item: models.OrderItem, label_meta: Dict[str, dict]) -> rc.O
     )
 
 
+def _to_assignments(ticket: models.Ticket) -> List[rc.CastAssignmentInput]:
+    out: List[rc.CastAssignmentInput] = []
+    for a in (ticket.assignments or []):
+        if a.cast_id is None or a.started_at is None:
+            continue
+        out.append(rc.CastAssignmentInput(
+            cast_id=a.cast_id,
+            started_at_jst=_to_jst(a.started_at) or datetime.min,
+            ended_at_jst=_to_jst(a.ended_at),
+        ))
+    return out
+
+
 def _to_ticket_input(
     ticket: models.Ticket,
     label_meta: Dict[str, dict],
@@ -158,6 +171,7 @@ def _to_ticket_input(
         code_amount=ticket.code_amount or 0,
         payment_method=payment,
         orders=[_to_order_input(o, label_meta) for o in (ticket.order_items or [])],
+        assignments=_to_assignments(ticket),
     )
 
 
@@ -468,6 +482,15 @@ def build_daily_report_payload(
         {"label": l, "short": custom_short_map[l]} for l in custom_menu_labels
     ]
 
+    # ─── 接客中会計（最終接客キャスト） ───
+    closing_counts = rc.closing_count_per_cast(tickets)
+    # cast_id → 名前マップ（cast_blocks 生成より前に必要）
+    closing_cast_ids = {cid for cid in closing_counts.keys()}
+    closing_cast_name_map: Dict[int, str] = {}
+    if closing_cast_ids:
+        for c in db.query(models.Cast).filter(models.Cast.id.in_(closing_cast_ids)).all():
+            closing_cast_name_map[c.id] = c.stage_name
+
     # ─── 伝票一覧 ───
     ticket_blocks = []
     for t in tickets:
@@ -503,6 +526,8 @@ def build_daily_report_payload(
             ],
             "champagne_count": rc.champagne_count_total([t]),
             "champagne_amount": rc.champagne_amount_total([t]),
+            "closing_cast_id": rc.closing_cast_id_for(t),
+            "closing_cast_name": closing_cast_name_map.get(rc.closing_cast_id_for(t)) if rc.closing_cast_id_for(t) is not None else None,
             "custom_drinks": {
                 custom_short_map[label]: sum(
                     o.quantity
@@ -591,6 +616,7 @@ def build_daily_report_payload(
             "shot_cast": sum(o.quantity for t in tickets for o in t.orders if not o.canceled and o.cast_id == cid and o.item_type == "shot_cast"),
             "champagne_count": champagne_count,
             "champagne_amount": champagne_amount,
+            "closing_count": closing_counts.get(cid, 0) if cid is not None else 0,
             "custom_drinks": {
                 custom_short_map[label]: sum(
                     o.quantity
@@ -605,7 +631,7 @@ def build_daily_report_payload(
             },
         })
 
-    # ─── 出勤外キャストへのシャンパン分配を追加（cast_blocks 末尾に） ───
+    # ─── 出勤外キャスト（シャンパン分配 or 接客中会計）を追加（cast_blocks 末尾に） ───
     existing_cast_ids = {b.get("cast_id") for b in cast_blocks if b.get("cast_id") is not None}
     extra_dist_cids: set = set()
     for t in tickets:
@@ -617,6 +643,9 @@ def build_daily_report_payload(
                 cid = entry.get("cast_id")
                 if cid is not None and cid not in existing_cast_ids:
                     extra_dist_cids.add(cid)
+    for cid in closing_counts.keys():
+        if cid not in existing_cast_ids:
+            extra_dist_cids.add(cid)
     if extra_dist_cids:
         extra_casts = db.query(models.Cast).filter(models.Cast.id.in_(extra_dist_cids)).all()
         extra_cast_map = {c.id: c for c in extra_casts}
@@ -663,6 +692,7 @@ def build_daily_report_payload(
                 "shot_cast": 0,
                 "champagne_count": champagne_count,
                 "champagne_amount": champagne_amount,
+                "closing_count": closing_counts.get(cid, 0),
                 "custom_drinks": {custom_short_map[label]: 0 for label in custom_menu_labels},
             })
 

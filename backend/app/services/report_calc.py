@@ -40,6 +40,14 @@ class OrderInput:
 
 
 @dataclass
+class CastAssignmentInput:
+    """CastAssignment の集計用ビュー"""
+    cast_id: int
+    started_at_jst: datetime
+    ended_at_jst: Optional[datetime]
+
+
+@dataclass
 class TicketInput:
     """Ticket の集計用ビュー"""
     id: int
@@ -60,6 +68,7 @@ class TicketInput:
     code_amount: int
     payment_method: Optional[str]
     orders: List[OrderInput] = field(default_factory=list)
+    assignments: List[CastAssignmentInput] = field(default_factory=list)
 
 
 @dataclass
@@ -192,6 +201,37 @@ def avg_per_r(tickets: List[TicketInput]) -> Optional[int]:
 # ─────────────────────────────────────────
 # キャスト紹介人数（交代回数）セクション3.7
 # ─────────────────────────────────────────
+
+def closing_cast_id_for(t: TicketInput) -> Optional[int]:
+    """会計時の最終接客キャストを特定する。
+    優先順:
+      1. CastAssignment の最も遅い started_at の cast_id
+      2. キャスト選択ありの注文の中で created_at が最後の cast_id
+    どちらも無ければ None。
+    """
+    if t.assignments:
+        latest = max(t.assignments, key=lambda a: (a.started_at_jst, a.cast_id))
+        return latest.cast_id
+    cast_orders = [
+        o for o in t.orders
+        if o.cast_id is not None and not o.canceled and o.cast_required
+    ]
+    if not cast_orders:
+        return None
+    last = max(cast_orders, key=lambda o: (o.created_at_jst, o.id))
+    return last.cast_id
+
+
+def closing_count_per_cast(tickets: List[TicketInput]) -> Dict[int, int]:
+    """伝票一覧から、各キャストが「会計時の最終接客担当」だった回数を集計"""
+    counts: Dict[int, int] = {}
+    for t in tickets:
+        cid = closing_cast_id_for(t)
+        if cid is None:
+            continue
+        counts[cid] = counts.get(cid, 0) + 1
+    return counts
+
 
 def rotation_count_for_ticket(t: TicketInput) -> int:
     """卓1つの交代回数: キャスト選択ありの注文を時刻順に並べ、隣接で cast_id が違う回数"""
