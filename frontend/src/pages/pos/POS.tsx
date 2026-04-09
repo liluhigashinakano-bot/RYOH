@@ -1847,6 +1847,9 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
             <>
               <select value={editHour} onChange={e => setEditHour(Number(e.target.value))}
                 className="input-field text-xs py-0.5 px-1 w-16">
+                {!BAR_HOURS.includes(editHour) && (
+                  <option value={editHour}>{String(editHour).padStart(2,'0')}</option>
+                )}
                 {BAR_HOURS.map(n => <option key={n} value={n}>{String(n).padStart(2,'0')}</option>)}
               </select>
               <span className="text-gray-500 text-xs">:</span>
@@ -2941,6 +2944,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1">
                     <select value={editStartHour} onChange={e => setEditStartHour(Number(e.target.value))} className="input-field text-xs py-0.5 px-1 w-16">
+                      {!BAR_HOURS.includes(editStartHour) && (
+                        <option value={editStartHour}>{String(editStartHour).padStart(2,'0')}</option>
+                      )}
                       {BAR_HOURS.map(n => <option key={n} value={n}>{String(n).padStart(2,'0')}</option>)}
                     </select>
                     <span className="text-gray-500 text-xs">:</span>
