@@ -758,7 +758,8 @@ def update_champagne_ratios(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """シャンパンのキャスト配分率を一括更新（item_nameを書き換え）"""
+    """シャンパンのキャスト配分率を一括更新（item_nameを書き換え）。
+    クローズ済み伝票でも編集可能。日報スナップショットがあれば自動再生成する。"""
     items = db.query(models.OrderItem).filter(
         models.OrderItem.ticket_id == ticket_id,
         models.OrderItem.item_name == data.old_item_name,
@@ -770,6 +771,22 @@ def update_champagne_ratios(
 
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
 
+    # ratio バリデーション
+    if data.cast_distribution:
+        total = sum(e.ratio for e in data.cast_distribution)
+        if total != 100:
+            raise HTTPException(status_code=400, detail=f"分配率の合計は100%必須です（現在 {total}%）")
+        if any(e.ratio < 0 for e in data.cast_distribution):
+            raise HTTPException(status_code=400, detail="分配率は 0 以上にしてください")
+        # キャスト存在チェック
+        cast_ids = list({e.cast_id for e in data.cast_distribution})
+        casts = db.query(models.Cast).filter(
+            models.Cast.id.in_(cast_ids),
+            models.Cast.store_id == ticket.store_id,
+        ).all() if ticket else []
+        if len(casts) != len(cast_ids):
+            raise HTTPException(status_code=400, detail="無効なキャストIDが含まれています")
+
     # 新形式: cast_distribution が指定されていればそれを全行に適用
     distribution_json = None
     if data.cast_distribution:
@@ -777,27 +794,74 @@ def update_champagne_ratios(
             {"cast_id": e.cast_id, "ratio": e.ratio} for e in data.cast_distribution
         ]
 
+    # 旧分配の表示（変更ログ用）
+    old_holder = next((i for i in items if isinstance(i.cast_distribution, list) and i.cast_distribution), None)
+    old_dist = old_holder.cast_distribution if old_holder else []
+
+    def _fmt(dist) -> str:
+        if not dist:
+            return "(なし)"
+        ids = [d.get("cast_id") if isinstance(d, dict) else d.cast_id for d in dist]
+        name_map = {
+            c.id: c.stage_name
+            for c in db.query(models.Cast).filter(models.Cast.id.in_(ids)).all()
+        }
+        parts = []
+        for d in dist:
+            cid = d.get("cast_id") if isinstance(d, dict) else d.cast_id
+            ratio = d.get("ratio") if isinstance(d, dict) else d.ratio
+            parts.append(f"{name_map.get(cid, f'#{cid}')}={ratio}%")
+        return ", ".join(parts)
+
+    change_summary = f"{_fmt(old_dist)} → {_fmt(data.cast_distribution or [])}"
+    log_reason = (change_summary + (f" / 理由: {data.reason}" if data.reason else ""))[:200]
+
+    # ログは代表行（最初の1行）に1件だけ記録
+    log = models.OrderItemLog(
+        ticket_id=ticket_id,
+        order_item_id=items[0].id,
+        action='update_ratio',
+        item_type='champagne',
+        item_name=data.new_item_name,
+        old_quantity=items[0].quantity,
+        new_quantity=items[0].quantity,
+        old_amount=items[0].amount,
+        new_amount=items[0].amount,
+        changed_by=current_user.id,
+        operator_name=data.operator_name,
+        reason=log_reason,
+    )
+    db.add(log)
+
     for item in items:
-        log = models.OrderItemLog(
-            ticket_id=ticket_id,
-            order_item_id=item.id,
-            action='update_ratio',
-            item_type=item.item_type,
-            item_name=data.new_item_name,
-            old_quantity=item.quantity,
-            new_quantity=item.quantity,
-            old_amount=item.amount,
-            new_amount=item.amount,
-            changed_by=current_user.id,
-            operator_name=data.operator_name,
-            reason=data.reason,
-        )
-        db.add(log)
         item.item_name = data.new_item_name
         if distribution_json is not None:
             item.cast_distribution = distribution_json
 
     db.commit()
+
+    # 該当日の日報スナップショットを自動再生成（raw_inputs があれば）
+    if ticket and distribution_json is not None:
+        try:
+            from datetime import timedelta as _td
+            from ..services.report_builder import (
+                get_latest_snapshot, regenerate_from_snapshot, save_snapshot,
+            )
+            ref = ticket.ended_at or ticket.started_at
+            if ref is not None:
+                biz_date = (ref + _td(hours=9)).date()
+                snap = get_latest_snapshot(db, ticket.store_id, biz_date)
+                if snap and snap.raw_inputs:
+                    payload, raw_inputs = regenerate_from_snapshot(
+                        db, snap, generated_by=current_user.id
+                    )
+                    save_snapshot(
+                        db, snap.store_id, snap.business_date, payload,
+                        raw_inputs=raw_inputs, generated_by=current_user.id,
+                    )
+        except Exception as e:
+            print(f"[WARNING] 日報自動再生成失敗: {e}")
+
     return {"ok": True, "total_amount": ticket.total_amount if ticket else None}
 
 

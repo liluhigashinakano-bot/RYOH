@@ -3619,26 +3619,52 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <span className="text-xs text-gray-500">/ {editingGroupMaxQty}</span>
                   </div>
                 )}
-                {/* シャンパン: キャスト配分率編集 */}
-                {editingOrderId && item.item_type === 'champagne' && champEditCasts.length > 0 && (() => {
+                {/* シャンパン: キャスト配分率編集（追加・削除可） */}
+                {editingOrderId && item.item_type === 'champagne' && (() => {
                   const totalRatio = champEditCasts.reduce((s, c) => s + c.ratio, 0)
+                  const availableCasts = (castsAll as any[]).filter(
+                    (c: any) => !champEditCasts.some(x => x.castId === c.id)
+                  )
                   return (
                     <div className="space-y-1.5 p-2 bg-night-700 rounded-lg">
                       <p className="text-xs text-gray-400 font-medium">インセンティブ配分</p>
                       {champEditCasts.map((c, idx) => (
                         <div key={idx} className="flex items-center gap-2">
-                          <span className="text-xs text-gray-300 flex-1">{c.castName}</span>
+                          <span className="text-xs text-gray-300 flex-1 truncate">{c.castName}</span>
                           <input
-                            type="number" min={1} max={100} value={c.ratio}
+                            type="number" min={0} max={100} value={c.ratio}
                             onFocus={e => e.target.select()}
                             onChange={e => setChampEditCasts(prev => prev.map((x, i) =>
-                              i === idx ? { ...x, ratio: Math.min(100, Math.max(1, Number(e.target.value) || 1)) } : x
+                              i === idx ? { ...x, ratio: Math.min(100, Math.max(0, Number(e.target.value) || 0)) } : x
                             ))}
                             className="input-field w-16 text-center text-xs py-0.5"
                           />
                           <span className="text-gray-400 text-xs">%</span>
+                          <button
+                            onClick={() => setChampEditCasts(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-300 text-xs px-1.5"
+                            title="削除">×</button>
                         </div>
                       ))}
+                      {availableCasts.length > 0 && (
+                        <select
+                          value=""
+                          onChange={e => {
+                            const cid = Number(e.target.value)
+                            if (!cid) return
+                            const c = (castsAll as any[]).find((x: any) => x.id === cid)
+                            if (c) {
+                              setChampEditCasts(prev => [...prev, { castId: cid, castName: c.stage_name, ratio: 0 }])
+                            }
+                          }}
+                          className="input-field w-full text-xs py-0.5"
+                        >
+                          <option value="">＋ キャスト追加</option>
+                          {availableCasts.map((c: any) => (
+                            <option key={c.id} value={c.id}>{c.stage_name}</option>
+                          ))}
+                        </select>
+                      )}
                       <p className={`text-xs text-right font-medium ${totalRatio === 100 ? 'text-green-400' : 'text-red-400'}`}>
                         合計 {totalRatio}%{totalRatio !== 100 && ' ← 100%にしてください'}
                       </p>
