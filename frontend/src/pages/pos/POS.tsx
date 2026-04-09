@@ -474,10 +474,9 @@ export default function POS() {
       {castModalTicket && (
         <CastAssignModal
           storeId={selectedStoreId}
-          ticketId={castModalTicket.id}
-          currentCastIds={(castModalTicket.current_casts || []).map((c: any) => c.cast_id).filter((x: any) => typeof x === 'number')}
-          onSubmit={ids => {
-            apiClient.post(`/api/tickets/${castModalTicket.id}/assignments/set`, { cast_ids: ids })
+          currentCastName={castModalTicket.featured_cast_name || null}
+          onSelect={id => {
+            apiClient.post(`/api/tickets/${castModalTicket.id}/set-cast`, { cast_id: id })
               .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
             setCastModalTicket(null)
           }}
@@ -1819,10 +1818,13 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         </button>
         <button onClick={e => { e.stopPropagation(); onOpenCastModal(ticket) }}
           className="w-fit text-left text-primary-400 hover:text-primary-300 transition-colors underline decoration-dotted">
-          {(ticket.current_casts && ticket.current_casts.length > 0)
-            ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
-            : '担当未設定'}
+          {ticket.featured_cast_name || '担当未設定'}
         </button>
+        {ticket.current_casts && ticket.current_casts.length > 0 && (
+          <span className="text-[10px] text-purple-300">
+            接客中: {ticket.current_casts.map((c: any) => c.cast_name).join('・')}
+          </span>
+        )}
       </div>
 
       {/* E/残り時間タイマー */}
@@ -2275,7 +2277,53 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
   )
 }
 
-function CastAssignModal({ storeId, currentCastIds, ticketId, onSubmit, onClose }: {
+// 担当（推しキャスト）= 1人だけ選択
+function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
+  storeId: number
+  currentCastName: string | null
+  onSelect: (id: number | null) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">担当（推しキャスト）を設定</h3>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="キャスト名で検索"
+          className="input-field w-full text-sm" autoFocus />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {currentCastName && (
+            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
+              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
+              担当を外す
+            </button>
+          )}
+          {filtered.map((c: any) => (
+            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.stage_name === currentCastName ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+              <span className="font-medium">{c.stage_name}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 接客中キャスト = 出勤中から複数選択
+function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose }: {
   storeId: number
   currentCastIds: number[]
   ticketId: number
@@ -2288,7 +2336,6 @@ function CastAssignModal({ storeId, currentCastIds, ticketId, onSubmit, onClose 
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
   })
-  // 出勤中キャスト
   const { data: workingAttendance = [] } = useQuery({
     queryKey: ['attendance', storeId],
     queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
@@ -2299,13 +2346,11 @@ function CastAssignModal({ storeId, currentCastIds, ticketId, onSubmit, onClose 
       .filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
       .map((a: any) => a.cast_id)
   )
-  // 他の卓で接客中のキャストを集めるため、オープン中の伝票を取得
   const { data: openTickets = [] } = useQuery({
     queryKey: ['tickets', storeId, 'open'],
     queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
     staleTime: 5000,
   })
-  // cast_id → 接客中の他卓の table_no
   const castOnOtherTable: Record<number, string> = {}
   for (const t of (openTickets as any[])) {
     if (t.id === ticketId) continue
@@ -2358,7 +2403,7 @@ function CastAssignModal({ storeId, currentCastIds, ticketId, onSubmit, onClose 
               </button>
             )
           })}
-          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">出勤中キャストがいません</p>}
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={e => { e.stopPropagation(); setSelected([]) }}
@@ -2547,6 +2592,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [actionPos, setActionPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [showCastSearch, setShowCastSearch] = useState(false)
+  const [showActiveCastsModal, setShowActiveCastsModal] = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showWarikanModal, setShowWarikanModal] = useState(false)
@@ -2738,12 +2784,22 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   const setCastMutation = useMutation({
+    mutationFn: (castId: number | null) =>
+      apiClient.post(`/api/tickets/${ticketId}/set-cast`, { cast_id: castId }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+      setShowCastSearch(false)
+    },
+  })
+
+  const setActiveCastsMutation = useMutation({
     mutationFn: (castIds: number[]) =>
       apiClient.post(`/api/tickets/${ticketId}/assignments/set`, { cast_ids: castIds }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
-      setShowCastSearch(false)
+      setShowActiveCastsModal(false)
     },
   })
 
@@ -2911,19 +2967,26 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <span className="text-gray-600">/</span>
                   <button onClick={() => setShowCastSearch(true)}
                     className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
+                    {ticket.featured_cast_name || '担当未設定'}
+                  </button>
+                  <span className="text-gray-600">/</span>
+                  <button onClick={() => setShowActiveCastsModal(true)}
+                    className="text-purple-300 hover:text-purple-200 underline decoration-dotted transition-colors">
                     {(ticket.current_casts && ticket.current_casts.length > 0)
-                      ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
-                      : '担当未設定'}
+                      ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+                      : '接客中未設定'}
                   </button>
                 </>
               ) : (
                 <>
                   <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
                   <span className="text-gray-600">/</span>
-                  <span className="text-primary-400">
+                  <span className="text-primary-400">{ticket.featured_cast_name || '担当未設定'}</span>
+                  <span className="text-gray-600">/</span>
+                  <span className="text-purple-300">
                     {(ticket.current_casts && ticket.current_casts.length > 0)
-                      ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
-                      : '担当未設定'}
+                      ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+                      : '接客中未設定'}
                   </span>
                 </>
               )}
@@ -3296,14 +3359,23 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         />
       )}
 
-      {/* キャスト選択モーダル（担当設定用 / 複数同時 OK） */}
+      {/* 担当（推しキャスト）選択モーダル */}
       {showCastSearch && (
         <CastAssignModal
           storeId={storeId}
+          currentCastName={ticket.featured_cast_name || null}
+          onSelect={id => setCastMutation.mutate(id)}
+          onClose={() => setShowCastSearch(false)}
+        />
+      )}
+      {/* 接客中キャスト選択モーダル */}
+      {showActiveCastsModal && (
+        <ActiveCastsModal
+          storeId={storeId}
           ticketId={ticketId}
           currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((x: any) => typeof x === 'number')}
-          onSubmit={ids => setCastMutation.mutate(ids)}
-          onClose={() => setShowCastSearch(false)}
+          onSubmit={ids => setActiveCastsMutation.mutate(ids)}
+          onClose={() => setShowActiveCastsModal(false)}
         />
       )}
 

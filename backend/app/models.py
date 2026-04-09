@@ -262,6 +262,7 @@ class Ticket(Base):
     visit_motivation = Column(String(50), nullable=True)   # ティッシュ/SNS/LINE/紹介/Google/看板/電話
     motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト
     motivation_note = Column(String(200), nullable=True)   # 紹介用テキスト
+    featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")
@@ -270,6 +271,7 @@ class Ticket(Base):
     assignments = relationship("CastAssignment", back_populates="ticket")
     visit_notes = relationship("CustomerVisitNote", back_populates="ticket")
     motivation_cast = relationship("Cast", foreign_keys=[motivation_cast_id])
+    featured_cast = relationship("Cast", foreign_keys=[featured_cast_id])
 
 
 # ─────────────────────────────────────────

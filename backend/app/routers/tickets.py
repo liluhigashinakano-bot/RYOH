@@ -19,20 +19,24 @@ CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne", "custom_menu"
 
 def _ticket_extra(ticket: models.Ticket) -> dict:
     """伝票の追加情報（キャスト名・E開始時刻・最終キャストドリンク時刻）を返す"""
-    # 現在担当キャスト（ended_at が null の active 全部）
-    current_cast_name = None
+    # 接客中キャスト（CastAssignment の ended_at が null の active 全部）
     current_casts: list = []
     e_started_at = None
     active_assignments = [a for a in (ticket.assignments or []) if a.ended_at is None]
     if active_assignments:
-        # started_at 昇順で並べ、表示用リストと最新行を作る
         sorted_active = sorted(active_assignments, key=lambda a: a.started_at)
         for a in sorted_active:
             if a.cast and a.cast_id is not None:
                 current_casts.append({"cast_id": a.cast_id, "cast_name": a.cast.stage_name})
         latest = sorted_active[-1]
-        current_cast_name = latest.cast.stage_name if latest.cast else None
         e_started_at = latest.started_at
+
+    # 推しキャスト（担当）= Ticket.featured_cast_id
+    featured_cast_name = None
+    if ticket.featured_cast_id is not None and ticket.featured_cast:
+        featured_cast_name = ticket.featured_cast.stage_name
+    # 後方互換: current_cast_name は推しキャスト名（既存表示用）
+    current_cast_name = featured_cast_name
 
     # 種別×キャストごとの最終注文時刻
     # 構造: { "drink_l": [{"cast_id": 1, "cast_name": "すずな", "last_at": datetime}, ...], ... }
@@ -74,6 +78,8 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
 
     return {
         "current_cast_name": current_cast_name,
+        "featured_cast_id": ticket.featured_cast_id,
+        "featured_cast_name": featured_cast_name,
         "current_casts": current_casts,
         "e_started_at": e_started_at,
         "last_drink_times": last_drink_times,
@@ -160,6 +166,8 @@ class TicketResponse(BaseModel):
     set_paused_seconds: int = 0
     # computed extras
     current_cast_name: Optional[str] = None
+    featured_cast_id: Optional[int] = None
+    featured_cast_name: Optional[str] = None
     current_casts: Optional[List[dict]] = None
     e_started_at: Optional[datetime] = None
     last_drink_times: Optional[dict] = None
@@ -201,6 +209,8 @@ def _to_response(ticket: models.Ticket) -> dict:
         "set_paused_at": ticket.set_paused_at,
         "set_paused_seconds": ticket.set_paused_seconds or 0,
         "current_cast_name": extra["current_cast_name"],
+        "featured_cast_id": extra["featured_cast_id"],
+        "featured_cast_name": extra["featured_cast_name"],
         "current_casts": extra["current_casts"],
         "e_started_at": extra["e_started_at"],
         "last_drink_times": extra["last_drink_times"],
@@ -628,22 +638,12 @@ def set_cast(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    """担当（推しキャスト）を1人だけ設定する。
+    CastAssignment は触らない（あちらは「接客中」用）。"""
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="伝票が見つかりません")
-    now = datetime.utcnow()
-    # 既存アクティブアサインを終了
-    for a in (ticket.assignments or []):
-        if a.ended_at is None:
-            a.ended_at = now
-    if data.cast_id:
-        new_assignment = models.CastAssignment(
-            ticket_id=ticket_id,
-            cast_id=data.cast_id,
-            assignment_type=data.assignment_type,
-            started_at=now,
-        )
-        db.add(new_assignment)
+    ticket.featured_cast_id = data.cast_id  # None で解除
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)

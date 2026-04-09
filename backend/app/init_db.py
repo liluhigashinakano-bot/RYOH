@@ -39,6 +39,8 @@ def _run_migrations(engine):
         "ALTER TABLE daily_report_snapshots ADD COLUMN IF NOT EXISTS raw_inputs JSON",
         # キャストのヘルプ時給は常に基本時給+100に整合（ズレてるデータを修正）
         "UPDATE casts SET help_hourly_rate = hourly_rate + 100 WHERE hourly_rate IS NOT NULL AND (help_hourly_rate IS NULL OR help_hourly_rate <> hourly_rate + 100)",
+        # Ticket: featured_cast_id (推しキャスト)
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS featured_cast_id INTEGER REFERENCES casts(id)",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:
