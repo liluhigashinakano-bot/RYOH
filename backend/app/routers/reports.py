@@ -30,7 +30,7 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 # 一時的な管理API: 壊れた（cast_attendance が空の）スナップショットを削除
 # 復旧完了後に削除予定
-@router.post("/_admin/rollback-broken-snapshots")
+@router.get("/_admin/rollback-broken-snapshots")
 def rollback_broken_snapshots(
     apply: bool = Query(False, description="True で実行、False で DRY RUN"),
     store_id: Optional[int] = Query(None),
