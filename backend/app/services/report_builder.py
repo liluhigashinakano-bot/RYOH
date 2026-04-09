@@ -381,6 +381,26 @@ def build_daily_report_payload(
                         customer_names.add(t.customer_name)
                     break
 
+        # シャンパン分配額の計算（incentive_total に含まれているシャンパン分のみ）
+        champagne_amount = 0
+        champagne_count = 0
+        if cid is not None:
+            for t in tickets:
+                for group in rc.champagne_groups(t):
+                    dist_holder = next(
+                        (o for o in group if o.cast_distribution),
+                        None,
+                    )
+                    if dist_holder is None:
+                        continue
+                    back_pool = dist_holder.incentive_amount
+                    for entry in dist_holder.cast_distribution:
+                        if entry.get("cast_id") == cid:
+                            ratio = entry.get("ratio", 0)
+                            champagne_amount += int(back_pool * ratio / 100)
+                            champagne_count += 1
+                            break
+
         cast_blocks.append({
             "cast_id": cid,
             "cast_name": s.cast_name,
@@ -403,6 +423,8 @@ def build_daily_report_payload(
             "drink_l": sum(o.quantity for t in tickets for o in t.orders if not o.canceled and o.cast_id == cid and o.item_type == "drink_l"),
             "drink_mg": sum(o.quantity for t in tickets for o in t.orders if not o.canceled and o.cast_id == cid and o.item_type == "drink_mg"),
             "shot_cast": sum(o.quantity for t in tickets for o in t.orders if not o.canceled and o.cast_id == cid and o.item_type == "shot_cast"),
+            "champagne_count": champagne_count,
+            "champagne_amount": champagne_amount,
         })
 
     # ─── 社員/アルバイト勤怠 ───

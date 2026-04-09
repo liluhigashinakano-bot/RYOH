@@ -62,6 +62,12 @@ def main():
                 for r in items:
                     r.canceled_at = datetime.utcnow()
                 ticket.total_amount = new_total
+                # extension_count を実カウントに合わせる
+                remaining_ext = sum(
+                    (i.quantity or 0) for i in (ticket.order_items or [])
+                    if i.item_type == "extension" and i.canceled_at is None
+                )
+                ticket.extension_count = remaining_ext
                 total_canceled += len(items)
 
         if args.apply:

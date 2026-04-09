@@ -4,6 +4,7 @@ import apiClient from '../../api/client'
 type Props = {
   storeId: number
   date: string  // "YYYY-MM-DD"
+  onTicketClick?: (ticketId: number) => void
 }
 
 const MOTIVATION_ORDER = ['ティッシュ', 'アメブロ', 'LINE', '紹介', 'Google', '看板', '電話', '未設定']
@@ -42,7 +43,7 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
   )
 }
 
-export default function DailyReportPanel({ storeId, date }: Props) {
+export default function DailyReportPanel({ storeId, date, onTicketClick }: Props) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['daily-report', storeId, date],
     queryFn: () => apiClient.get('/api/reports/daily/latest', {
@@ -209,6 +210,8 @@ export default function DailyReportPanel({ storeId, date }: Props) {
                   <th className="text-center py-0.5">L</th>
                   <th className="text-center py-0.5">MG</th>
                   <th className="text-center py-0.5">SH</th>
+                  <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
+                  <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
                   <th className="text-right py-0.5">22-26ﾊﾟﾌｫ</th>
                 </tr>
               </thead>
@@ -230,6 +233,8 @@ export default function DailyReportPanel({ storeId, date }: Props) {
                     <td className="py-1 text-center text-gray-300">{c.drink_l || '—'}</td>
                     <td className="py-1 text-center text-gray-300">{c.drink_mg || '—'}</td>
                     <td className="py-1 text-center text-gray-300">{c.shot_cast || '—'}</td>
+                    <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
+                    <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
                     <td className="py-1 text-right text-blue-300">{c.perf_22_26 !== null && c.perf_22_26 !== undefined ? fmtYen(c.perf_22_26) : '—'}</td>
                   </tr>
                 ))}
@@ -292,7 +297,9 @@ export default function DailyReportPanel({ storeId, date }: Props) {
               </thead>
               <tbody>
                 {tickets.map((t: any) => (
-                  <tr key={t.id} className="border-t border-gray-800">
+                  <tr key={t.id}
+                    className={`border-t border-gray-800 ${onTicketClick ? 'cursor-pointer hover:bg-gray-800/50' : ''}`}
+                    onClick={() => onTicketClick?.(t.id)}>
                     <td className="py-1 text-white">{t.table_no || '—'}</td>
                     <td className="py-1 text-center font-mono text-gray-400">{fmtTime(t.started_at)}</td>
                     <td className="py-1 text-center font-mono text-gray-400">{fmtTime(t.ended_at)}</td>
