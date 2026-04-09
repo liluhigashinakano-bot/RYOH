@@ -213,6 +213,15 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
     sum_n_amount = 0
     sum_r_amount = 0
 
+    # キャスト別月次累積（cast_id があれば cast_id、無ければ "help:NAME"）
+    cast_acc: dict = {}
+
+    def _cast_key(c: dict) -> str:
+        cid = c.get("cast_id")
+        if cid is not None:
+            return f"id:{cid}"
+        return f"help:{c.get('cast_name') or '?'}"
+
     for p in payloads:
         s = p.get("sales", {}) or {}
         cp = p.get("cast_payroll", {}) or {}
@@ -243,12 +252,63 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         if s.get("avg_per_r") is not None and s.get("r_count"):
             sum_r_amount += int(s["avg_per_r"]) * int(s["r_count"])
 
+        # キャスト別累積
+        for c in (p.get("cast_attendance") or []):
+            if c.get("is_absent"):
+                continue
+            key = _cast_key(c)
+            if key not in cast_acc:
+                cast_acc[key] = {
+                    "cast_id": c.get("cast_id"),
+                    "cast_name": c.get("cast_name"),
+                    "is_help": bool(c.get("is_help")),
+                    "work_days": 0,
+                    "work_hours_total": 0.0,
+                    "base_pay_total": 0,
+                    "incentive_total": 0,
+                    "daily_pay_total": 0,
+                    "drink_s": 0,
+                    "drink_l": 0,
+                    "drink_mg": 0,
+                    "shot_cast": 0,
+                    "champagne_count": 0,
+                    "champagne_amount": 0,
+                    "perf_22_26_total": 0,
+                    "n_tissue_count": 0,
+                    "r_tissue_count": 0,
+                    "custom_drinks": {},
+                }
+            acc = cast_acc[key]
+            acc["work_days"] += 1
+            acc["work_hours_total"] += float(c.get("work_hours") or 0)
+            acc["base_pay_total"] += int(c.get("base_pay") or 0)
+            acc["incentive_total"] += int(c.get("incentive_total") or 0)
+            acc["daily_pay_total"] += int(c.get("daily_pay") or 0)
+            acc["drink_s"] += int(c.get("drink_s") or 0)
+            acc["drink_l"] += int(c.get("drink_l") or 0)
+            acc["drink_mg"] += int(c.get("drink_mg") or 0)
+            acc["shot_cast"] += int(c.get("shot_cast") or 0)
+            acc["champagne_count"] += int(c.get("champagne_count") or 0)
+            acc["champagne_amount"] += int(c.get("champagne_amount") or 0)
+            acc["perf_22_26_total"] += int(c.get("perf_22_26") or 0)
+            acc["n_tissue_count"] += int(c.get("n_tissue_count") or 0)
+            acc["r_tissue_count"] += int(c.get("r_tissue_count") or 0)
+            for short, qty in (c.get("custom_drinks") or {}).items():
+                acc["custom_drinks"][short] = acc["custom_drinks"].get(short, 0) + int(qty or 0)
+
     def _div(num, den):
         return int(num / den) if den else None
 
     ratio = None
     if sums["total_amount"] > 0:
         ratio = round(sums["actual_pay_total"] * 100 / sums["total_amount"], 1)
+
+    # キャスト別累積を整形（時間は小数2桁）
+    cast_summary = []
+    for v in cast_acc.values():
+        v["work_hours_total"] = round(v["work_hours_total"], 2)
+        cast_summary.append(v)
+    cast_summary.sort(key=lambda x: (x["is_help"], -(x["incentive_total"] or 0)))
 
     return {
         **sums,
@@ -263,6 +323,7 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         "drink_s_per_set": round(sums["drink_s_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_l_per_set": round(sums["drink_l_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_mg_per_set": round(sums["drink_mg_total"] / sums["set_count"], 2) if sums["set_count"] else None,
+        "cast_summary": cast_summary,
     }
 
 

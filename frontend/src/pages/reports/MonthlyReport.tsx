@@ -46,6 +46,16 @@ export default function MonthlyReport() {
 
   const summary = data?.summary || {}
   const breakdown: any[] = data?.daily_breakdown || []
+  const castSummary: any[] = summary.cast_summary || []
+
+  // キャスト累積に出てくる custom_drinks のキー（略称）を集めて列定義
+  const customDrinkShorts = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of castSummary) {
+      for (const k of Object.keys(c.custom_drinks || {})) set.add(k)
+    }
+    return Array.from(set).sort()
+  }, [castSummary])
 
   // 日別バーの最大値（スケール用）
   const maxAmount = useMemo(
@@ -197,6 +207,66 @@ export default function MonthlyReport() {
               </table>
             </div>
           </div>
+
+          {/* キャスト別月次累積 */}
+          {castSummary.length > 0 && (
+            <div className="card">
+              <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-3">キャスト別月次累積（{castSummary.length}名）</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-500">
+                      <th className="text-left py-0.5">キャスト</th>
+                      <th className="text-right py-0.5">出勤日</th>
+                      <th className="text-right py-0.5">時間</th>
+                      <th className="text-right py-0.5">基本給</th>
+                      <th className="text-right py-0.5">ｲﾝｾﾝﾃｨﾌﾞ</th>
+                      <th className="text-right py-0.5">日払い</th>
+                      <th className="text-center py-0.5">S</th>
+                      <th className="text-center py-0.5">L</th>
+                      <th className="text-center py-0.5">MG</th>
+                      <th className="text-center py-0.5">SH</th>
+                      {customDrinkShorts.map(s => (
+                        <th key={s} className="text-center py-0.5">{s}</th>
+                      ))}
+                      <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
+                      <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
+                      <th className="text-right py-0.5">22-26ﾊﾟﾌｫ</th>
+                      <th className="text-center py-0.5">N/Rﾃｨｯｼｭ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {castSummary.map((c, i) => (
+                      <tr key={i} className="border-t border-gray-800">
+                        <td className="py-1 text-white font-medium">
+                          {c.cast_name}
+                          {c.is_help && <span className="ml-1 text-[10px] text-blue-300">[ヘルプ]</span>}
+                        </td>
+                        <td className="py-1 text-right text-gray-300">{c.work_days}日</td>
+                        <td className="py-1 text-right text-gray-300">{c.work_hours_total}h</td>
+                        <td className="py-1 text-right text-gray-300">{fmtYen(c.base_pay_total)}</td>
+                        <td className="py-1 text-right text-pink-300">{fmtYen(c.incentive_total)}</td>
+                        <td className="py-1 text-right text-orange-300">{c.daily_pay_total > 0 ? fmtYen(c.daily_pay_total) : '—'}</td>
+                        <td className="py-1 text-center text-gray-300">{c.drink_s || '—'}</td>
+                        <td className="py-1 text-center text-gray-300">{c.drink_l || '—'}</td>
+                        <td className="py-1 text-center text-gray-300">{c.drink_mg || '—'}</td>
+                        <td className="py-1 text-center text-gray-300">{c.shot_cast || '—'}</td>
+                        {customDrinkShorts.map(s => (
+                          <td key={s} className="py-1 text-center text-gray-300">{(c.custom_drinks?.[s] ?? 0) || '—'}</td>
+                        ))}
+                        <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
+                        <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
+                        <td className="py-1 text-right text-blue-300">{c.perf_22_26_total > 0 ? fmtYen(c.perf_22_26_total) : '—'}</td>
+                        <td className="py-1 text-center text-gray-400">
+                          <span className="text-pink-400">{c.n_tissue_count}</span>/<span className="text-blue-400">{c.r_tissue_count}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* 日別売上推移 */}
           <div className="card">
