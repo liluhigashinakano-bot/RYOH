@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import apiClient from '../../api/client'
 
 type Props = {
@@ -44,6 +44,7 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
 }
 
 export default function DailyReportPanel({ storeId, date, onTicketClick }: Props) {
+  const qc = useQueryClient()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['daily-report', storeId, date],
     queryFn: () => apiClient.get('/api/reports/daily/latest', {
@@ -51,6 +52,14 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
     }).then(r => r.data),
     enabled: !!storeId && !!date,
     retry: false,
+  })
+
+  const regenerate = useMutation({
+    mutationFn: (sessionId: number) =>
+      apiClient.post('/api/reports/daily/regenerate', { session_id: sessionId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['daily-report', storeId, date] })
+    },
   })
 
   if (isLoading) {
@@ -77,7 +86,18 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
       {/* バージョン情報 */}
       <div className="flex items-center justify-between text-[10px] text-gray-500">
         <span>日報スナップショット v{data.version}</span>
-        <span>{data.created_at ? new Date(data.created_at).toLocaleString('ja-JP') : ''}</span>
+        <div className="flex items-center gap-2">
+          <span>{data.created_at ? new Date(data.created_at).toLocaleString('ja-JP') : ''}</span>
+          {p.session_id && (
+            <button
+              onClick={() => regenerate.mutate(p.session_id)}
+              disabled={regenerate.isPending}
+              className="text-[10px] text-primary-400 hover:text-primary-300 underline disabled:opacity-50"
+            >
+              {regenerate.isPending ? '再生成中...' : '再生成'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 売上サマリー */}
