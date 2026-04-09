@@ -285,9 +285,10 @@ def _build_raw_inputs(
     shifts: List[rc.CastShiftInput],
     staff_atts: List[rc.StaffAttendanceInput],
     expenses: dict,
+    tissue_rows: Optional[List["models.TissueDistribution"]] = None,
 ) -> dict:
     """再生成に必要な生入力データをJSON化"""
-    return {
+    out = {
         "version": 1,
         "shifts": [_shift_to_dict(s) for s in shifts],
         "staff_atts": [_staff_to_dict(s) for s in staff_atts],
@@ -297,6 +298,18 @@ def _build_raw_inputs(
             "daily_pay_names": sorted(list(expenses.get("daily_pay_names") or [])),
         },
     }
+    if tissue_rows is not None:
+        out["tissue"] = [
+            {
+                "id": r.id,
+                "cast_id": r.cast_id,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+                "count": r.count,
+            }
+            for r in tissue_rows
+        ]
+    return out
 
 
 def _restore_expenses(raw: dict) -> dict:
@@ -341,6 +354,37 @@ def _fetch_session_staff_att(db: Session, session: models.BusinessSession) -> Li
         models.StaffAttendance.store_id == session.store_id,
         models.StaffAttendance.date == business_date,
     ).all()
+
+
+def _fetch_session_tissue(db: Session, session: models.BusinessSession) -> List[models.TissueDistribution]:
+    """セッション期間内に開始されたティッシュ配り（完了済みのみ集計対象）"""
+    q = db.query(models.TissueDistribution).filter(
+        models.TissueDistribution.store_id == session.store_id,
+        models.TissueDistribution.started_at >= session.opened_at,
+    )
+    if session.closed_at:
+        q = q.filter(models.TissueDistribution.started_at <= session.closed_at)
+    return q.all()
+
+
+def _aggregate_tissue_per_cast(rows: List[models.TissueDistribution]) -> dict:
+    """cast_id -> {count, hours, sessions}"""
+    out: dict = {}
+    for r in rows:
+        if r.ended_at is None:
+            continue  # 配り中はスキップ
+        cid = r.cast_id
+        if cid is None:
+            continue
+        delta = (r.ended_at - r.started_at).total_seconds() / 3600
+        if cid not in out:
+            out[cid] = {"count": 0, "hours": 0.0, "sessions": 0}
+        out[cid]["count"] += int(r.count or 0)
+        out[cid]["hours"] += max(0.0, delta)
+        out[cid]["sessions"] += 1
+    for cid in out:
+        out[cid]["hours"] = round(out[cid]["hours"], 2)
+    return out
 
 
 # ─────────────────────────────────────────
@@ -435,6 +479,9 @@ def build_daily_report_payload(
         staff_atts = [_to_staff_input(a) for a in raw_staff_att]
 
     expenses = expenses_override if expenses_override is not None else _extract_expenses(session)
+
+    tissue_rows = _fetch_session_tissue(db, session)
+    tissue_per_cast = _aggregate_tissue_per_cast(tissue_rows)
 
     # ─── 売上集計 ───
     daily_sales = rc.total_sales(tickets)
@@ -617,6 +664,8 @@ def build_daily_report_payload(
             "champagne_count": champagne_count,
             "champagne_amount": champagne_amount,
             "closing_count": closing_counts.get(cid, 0) if cid is not None else 0,
+            "tissue_count": (tissue_per_cast.get(cid, {}).get("count", 0)) if cid is not None else 0,
+            "tissue_hours": (tissue_per_cast.get(cid, {}).get("hours", 0.0)) if cid is not None else 0.0,
             "custom_drinks": {
                 custom_short_map[label]: sum(
                     o.quantity
@@ -644,6 +693,9 @@ def build_daily_report_payload(
                 if cid is not None and cid not in existing_cast_ids:
                     extra_dist_cids.add(cid)
     for cid in closing_counts.keys():
+        if cid not in existing_cast_ids:
+            extra_dist_cids.add(cid)
+    for cid in tissue_per_cast.keys():
         if cid not in existing_cast_ids:
             extra_dist_cids.add(cid)
     if extra_dist_cids:
@@ -693,6 +745,8 @@ def build_daily_report_payload(
                 "champagne_count": champagne_count,
                 "champagne_amount": champagne_amount,
                 "closing_count": closing_counts.get(cid, 0),
+                "tissue_count": (tissue_per_cast.get(cid, {}).get("count", 0)),
+                "tissue_hours": (tissue_per_cast.get(cid, {}).get("hours", 0.0)),
                 "custom_drinks": {custom_short_map[label]: 0 for label in custom_menu_labels},
             })
 
@@ -744,6 +798,7 @@ def build_daily_report_full(
     raw_staff_att = _fetch_session_staff_att(db, session)
     staff_atts = [_to_staff_input(a) for a in raw_staff_att]
     expenses = _extract_expenses(session)
+    tissue_rows = _fetch_session_tissue(db, session)
 
     payload = build_daily_report_payload(
         db, session,
@@ -752,7 +807,7 @@ def build_daily_report_full(
         staff_atts_override=staff_atts,
         expenses_override=expenses,
     )
-    raw_inputs = _build_raw_inputs(shifts, staff_atts, expenses)
+    raw_inputs = _build_raw_inputs(shifts, staff_atts, expenses, tissue_rows=tissue_rows)
     return payload, raw_inputs
 
 

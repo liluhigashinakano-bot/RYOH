@@ -245,6 +245,8 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
                   <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
                   <th className="text-center py-0.5">接客中会計</th>
+                  <th className="text-center py-0.5">ﾃｨｯｼｭ枚</th>
+                  <th className="text-right py-0.5">ﾃｨｯｼｭ時間</th>
                   <th className="text-right py-0.5">22-26ﾊﾟﾌｫ</th>
                 </tr>
               </thead>
@@ -275,6 +277,8 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
                     <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
                     <td className="py-1 text-center text-purple-300">{c.closing_count > 0 ? c.closing_count : '—'}</td>
+                    <td className="py-1 text-center text-amber-300">{c.tissue_count > 0 ? c.tissue_count : '—'}</td>
+                    <td className="py-1 text-right text-amber-300">{c.tissue_hours > 0 ? `${c.tissue_hours}h` : '—'}</td>
                     <td className="py-1 text-right text-blue-300">{c.perf_22_26 !== null && c.perf_22_26 !== undefined ? fmtYen(c.perf_22_26) : '—'}</td>
                   </tr>
                 ))}

@@ -256,6 +256,7 @@ export default function POS() {
   const { stores } = useAuthStore()
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
   const [showNewTicket, setShowNewTicket] = useState(false)
+  const [showTissueStartModal, setShowTissueStartModal] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
   const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports' | 'casts'>('open')
   const [showOpenSessionModal, setShowOpenSessionModal] = useState(false)
@@ -376,6 +377,14 @@ export default function POS() {
               <Plus className="w-3.5 h-3.5" />新規伝票
             </button>
           )}
+          {currentSession && !currentSession.is_closed && (
+            <button
+              onClick={() => setShowTissueStartModal(true)}
+              className="bg-amber-700 hover:bg-amber-600 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0"
+            >
+              ティッシュ配り
+            </button>
+          )}
           {/* 右: 売上サマリ + 営業ボタン */}
           <div className="flex items-center gap-2 ml-auto shrink-0">
             <div className="hidden md:flex items-center gap-3 text-xs">
@@ -483,6 +492,17 @@ export default function POS() {
             setCastModalTicket(null)
           }}
           onClose={() => setCastModalTicket(null)}
+        />
+      )}
+      {showTissueStartModal && (
+        <TissueStartModal
+          storeId={selectedStoreId}
+          onClose={() => setShowTissueStartModal(false)}
+          onStarted={() => {
+            qc.invalidateQueries({ queryKey: ['tissue-active', selectedStoreId] })
+            qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] })
+            setShowTissueStartModal(false)
+          }}
         />
       )}
       {activeCastsModalTicket && (
@@ -2338,6 +2358,86 @@ function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
     </div>
   )
 }
+
+// ティッシュ配り開始モーダル（出勤中キャストから複数選択）
+function TissueStartModal({ storeId, onClose, onStarted }: {
+  storeId: number
+  onClose: () => void
+  onStarted: () => void
+}) {
+  const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<number[]>([])
+  const { data: castsAll = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  })
+  const { data: workingAttendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
+  })
+  const { data: activeTissue = [] } = useQuery({
+    queryKey: ['tissue-active', storeId],
+    queryFn: () => apiClient.get('/api/tissue/active', { params: { store_id: storeId } }).then(r => r.data),
+  })
+  const workingCastIds = new Set(
+    (workingAttendance as any[])
+      .filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
+      .map((a: any) => a.cast_id)
+  )
+  const busyTissueCastIds = new Set((activeTissue as any[]).map((t: any) => t.cast_id))
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active && workingCastIds.has(c.id) && !busyTissueCastIds.has(c.id))
+  const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
+
+  const toggle = (cid: number) => {
+    if (selected.includes(cid)) setSelected(selected.filter(x => x !== cid))
+    else setSelected([...selected, cid])
+  }
+
+  const submit = () => {
+    if (selected.length === 0) return
+    apiClient.post('/api/tissue/start', { store_id: storeId, cast_ids: selected })
+      .then(() => onStarted())
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
+      <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-white">ティッシュ配り開始</h3>
+          <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <input type="text" value={q} onChange={e => setQ(e.target.value)}
+          placeholder="キャスト名で検索" className="input-field w-full text-sm" autoFocus />
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {filtered.map((c: any) => {
+            const isSelected = selected.includes(c.id)
+            return (
+              <button key={c.id} onClick={e => { e.stopPropagation(); toggle(c.id) }}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${isSelected ? 'bg-amber-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+                <span className={`inline-block w-3.5 h-3.5 border rounded ${isSelected ? 'bg-white border-white' : 'border-gray-500'}`}>
+                  {isSelected && <span className="block w-full h-full text-amber-700 text-[10px] leading-3 text-center">✓</span>}
+                </span>
+                <span className="font-medium">{c.stage_name}</span>
+              </button>
+            )
+          })}
+          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">対象キャストがいません</p>}
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={e => { e.stopPropagation(); onClose() }}
+            className="text-xs px-3 py-1.5 text-gray-400 hover:text-gray-200">キャンセル</button>
+          <button onClick={e => { e.stopPropagation(); submit() }}
+            disabled={selected.length === 0}
+            className="text-xs px-4 py-1.5 bg-amber-700 hover:bg-amber-600 text-white rounded-lg disabled:opacity-40">
+            開始（{selected.length}名）
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 // 接客中キャスト = 出勤中から複数選択
 function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose }: {
@@ -4644,6 +4744,7 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
 }
 
 function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void }) {
+  const qc = useQueryClient()
   // 出勤中キャスト一覧
   const { data: shifts = [] } = useQuery({
     queryKey: ['casts-working', storeId],
@@ -4651,6 +4752,33 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
     enabled: !!storeId,
     refetchInterval: 15000,
   })
+  // ティッシュ配り中
+  const { data: activeTissue = [] } = useQuery({
+    queryKey: ['tissue-active', storeId],
+    queryFn: () => apiClient.get('/api/tissue/active', { params: { store_id: storeId } }).then(r => r.data),
+    enabled: !!storeId,
+    refetchInterval: 15000,
+  })
+  // 入力中の枚数
+  const [tissueCounts, setTissueCounts] = useState<Record<number, string>>({})
+
+  const completeTissue = (tdId: number) => {
+    const v = parseInt(tissueCounts[tdId] || '0', 10)
+    if (isNaN(v) || v < 0) return
+    apiClient.post(`/api/tissue/${tdId}/complete`, { count: v }).then(() => {
+      qc.invalidateQueries({ queryKey: ['tissue-active', storeId] })
+      qc.invalidateQueries({ queryKey: ['casts-working', storeId] })
+    })
+  }
+  const cancelTissue = (tdId: number) => {
+    if (!confirm('この配り中を取り消しますか？')) return
+    apiClient.delete(`/api/tissue/${tdId}`).then(() => {
+      qc.invalidateQueries({ queryKey: ['tissue-active', storeId] })
+    })
+  }
+
+  // 配り中のキャスト ID 集合（出勤中の表示から除外するため）
+  const tissueCastIds = new Set((activeTissue as any[]).map((t: any) => t.cast_id))
 
   // キャスト別の現在担当卓（current_casts ベース）
   const castToTicket: Record<number, any> = {}
@@ -4662,7 +4790,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
 
   // 出勤中・接客なしのキャスト
   const workingCasts = (shifts as any[]).filter((s: any) => !s.is_absent && s.actual_start && !s.actual_end)
-  const idleCasts = workingCasts.filter((s: any) => s.cast_id !== null && !castToTicket[s.cast_id!])
+  const idleCasts = workingCasts.filter((s: any) => s.cast_id !== null && !castToTicket[s.cast_id!] && !tissueCastIds.has(s.cast_id))
   const busyCasts = workingCasts.filter((s: any) => s.cast_id !== null && castToTicket[s.cast_id!])
 
   return (
@@ -4692,6 +4820,32 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
                   </span>
                 </div>
               </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ティッシュ配り中 */}
+      <div className="card">
+        <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">ティッシュ配り中（{(activeTissue as any[]).length}名）</div>
+        {(activeTissue as any[]).length === 0 ? (
+          <div className="text-xs text-gray-600 py-3 text-center">ティッシュ配り中のキャストはいません</div>
+        ) : (
+          <div className="space-y-1.5">
+            {(activeTissue as any[]).map((t: any) => (
+              <div key={t.id} className="flex items-center gap-2 bg-amber-900/20 border border-amber-800/50 rounded-lg px-3 py-2">
+                <span className="text-white text-sm font-medium flex-1">{t.cast_name}</span>
+                <input
+                  type="number" min={0} placeholder="枚数"
+                  value={tissueCounts[t.id] ?? ''}
+                  onChange={e => setTissueCounts(prev => ({ ...prev, [t.id]: e.target.value }))}
+                  className="input-field w-20 text-xs py-1 text-center"
+                />
+                <button onClick={() => completeTissue(t.id)}
+                  className="text-xs px-3 py-1 bg-amber-700 hover:bg-amber-600 text-white rounded">完了</button>
+                <button onClick={() => cancelTissue(t.id)}
+                  className="text-xs px-2 py-1 text-red-400 hover:text-red-300">取消</button>
+              </div>
             ))}
           </div>
         )}

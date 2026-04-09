@@ -484,6 +484,11 @@ def add_order(
             {"cast_id": e.cast_id, "ratio": e.ratio} for e in data.cast_distribution
         ]
 
+    # キャスト指定ドリンク注文時はそのキャストの配り中を終了
+    if data.cast_id is not None:
+        from .tissue import end_active_tissue_for_cast
+        end_active_tissue_for_cast(db, data.cast_id)
+
     # 常に新規レコードを作成（個別タイムスタンプ保持のため）
     item = models.OrderItem(
         ticket_id=ticket_id,
@@ -704,6 +709,7 @@ def set_assignments(
     """付け回しを一括設定する。
     - その卓の現在 active な assignments を全て ended_at にする
     - 各 cast_id について、他の卓で active なら ended_at にして移動
+    - 配り中の active があれば終了
     - 新規 active 行を追加
     """
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
@@ -727,6 +733,11 @@ def set_assignments(
         ).all()
         for a in other_active:
             a.ended_at = now
+
+        # 2.5 配り中(active)を終了（接客中設定で配り中から外す）
+        from .tissue import end_active_tissue_for_cast
+        for cid in new_cast_ids:
+            end_active_tissue_for_cast(db, cid)
 
         # 3. 新規 active を追加
         for cid in new_cast_ids:

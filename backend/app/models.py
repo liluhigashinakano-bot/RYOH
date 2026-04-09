@@ -482,6 +482,23 @@ class DailyReport(Base):
 
 
 # ─────────────────────────────────────────
+# ティッシュ配り
+# ─────────────────────────────────────────
+class TissueDistribution(Base):
+    __tablename__ = "tissue_distributions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    count = Column(Integer, nullable=True)  # 配った枚数（後から入力可）
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    cast = relationship("Cast")
+
+
+# ─────────────────────────────────────────
 # 日報スナップショット（バージョン管理付き・JSON保存）
 # ─────────────────────────────────────────
 class DailyReportSnapshot(Base):

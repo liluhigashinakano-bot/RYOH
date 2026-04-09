@@ -8,7 +8,7 @@ load_dotenv()
 
 from .database import engine
 from . import models
-from .routers import auth, users, stores, casts, customers, tickets, ai, excel_import, sessions, staff, app_settings, reports
+from .routers import auth, users, stores, casts, customers, tickets, ai, excel_import, sessions, staff, app_settings, reports, tissue
 from .init_db import init_db
 
 init_db()
@@ -52,6 +52,7 @@ app.include_router(sessions.router)
 app.include_router(staff.router)
 app.include_router(app_settings.router)
 app.include_router(reports.router)
+app.include_router(tissue.router)
 
 
 uploads_dir = os.path.join(os.path.dirname(__file__), "..", "data", "uploads")
