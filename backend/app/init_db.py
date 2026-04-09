@@ -46,6 +46,8 @@ def _run_migrations(engine):
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id)",
         # Ticket: ドラッグ並び順
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS display_order INTEGER",
+        # OrderItem: 延長の期番号
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS period_no INTEGER",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:
@@ -191,11 +193,72 @@ def _merge_split_extensions():
         db.close()
 
 
+def _normalize_extension_count():
+    """extension_count を「期数のみ」に正規化する一回限りのマイグレーション。
+    旧仕様: extension_count = 期 × ゲスト数, OrderItem 1個=1人分
+    新仕様: extension_count = 期数のみ, OrderItem 1個 = 1期 (quantity=人数)
+    """
+    db = SessionLocal()
+    try:
+        tickets = db.query(models.Ticket).filter(
+            models.Ticket.deleted_at.is_(None),
+        ).all()
+        fixed_tickets = 0
+        for t in tickets:
+            ext_items = [i for i in (t.order_items or [])
+                         if i.item_type == "extension" and i.canceled_at is None
+                         and not (i.item_name or '').startswith('合流')]
+            if not ext_items:
+                if t.extension_count and t.extension_count > 0:
+                    t.extension_count = 0
+                    fixed_tickets += 1
+                continue
+            total_qty = sum((i.quantity or 0) for i in ext_items)
+            guest = max(1, t.guest_count or 1)
+            # 期数を total_qty / guest として推定
+            expected_period = total_qty // guest if guest > 0 else 0
+            changed = False
+            if t.extension_count != expected_period:
+                t.extension_count = expected_period
+                changed = True
+            # 各 OrderItem を「1期=1行 quantity=人数」に揃え直す
+            need_normalize = (
+                len(ext_items) != expected_period
+                or any((i.quantity or 0) != guest for i in ext_items)
+            )
+            if expected_period > 0 and need_normalize:
+                # 既存行をすべて削除して再作成
+                unit_price = ext_items[0].unit_price or 0
+                for i in ext_items:
+                    db.delete(i)
+                for p in range(1, expected_period + 1):
+                    db.add(models.OrderItem(
+                        ticket_id=t.id,
+                        item_type="extension",
+                        unit_price=unit_price,
+                        quantity=guest,
+                        amount=unit_price * guest,
+                        period_no=p,
+                    ))
+                changed = True
+            if changed:
+                fixed_tickets += 1
+        if fixed_tickets > 0:
+            db.commit()
+            print(f"[CLEANUP] extension を {fixed_tickets} 伝票で正規化")
+    except Exception as e:
+        print(f"[CLEANUP SKIP] normalize_extension_count: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def init_db():
     models.Base.metadata.create_all(bind=engine)
     _run_migrations(engine)
     _cleanup_broken_snapshots()
     _merge_split_extensions()
+    _normalize_extension_count()
 
     db = SessionLocal()
     try:

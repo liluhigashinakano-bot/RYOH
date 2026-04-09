@@ -139,50 +139,38 @@ function calcSetInterval(setElapsed: number | null): number {
   return Math.floor(setElapsed / SET_DURATION)
 }
 
-function AutoExtender({ ticket, storeId, extensionPrice }: { ticket: any; storeId: number; extensionPrice: number }) {
+function AutoExtender({ ticket, storeId, extensionPrice: _ }: { ticket: any; storeId: number; extensionPrice: number }) {
   const qc = useQueryClient()
   const now = useNow()
-  const prevSetIntervalRef = useRef<number | null>(null)
+  const inflightRef = useRef<Set<number>>(new Set())
 
   useEffect(() => {
     if (!ticket || ticket.set_is_paused || !ticket.set_started_at) return
     const setElapsed = calcSetElapsed(ticket, now)
     if (setElapsed === null) return
-    const intervalNum = calcSetInterval(setElapsed)
+    // 期番号 = 経過秒 / 2400 (40分)。0 始まり → 1 以上が延長対象
+    // intervalNum (calcSetInterval) と等価
+    const periodCount = calcSetInterval(setElapsed)
+    if (periodCount <= 0) return
 
-    if (prevSetIntervalRef.current === null) {
-      prevSetIntervalRef.current = intervalNum
+    const dbPeriod = ticket.extension_count || 0
+    if (periodCount <= dbPeriod) return
 
-      // ページ開き直し等で未加算の延長があればキャッチアップ
-      const dbCount = ticket.extension_count || 0
-      const missed = intervalNum - dbCount
-      if (missed > 0) {
-        const guestCount = ticket.guest_count || 1
-        const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
-        const addQty = missed * guestCount
-        const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && !oi.item_name)
-        const req = existing
-          ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + addQty })
-          : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: addQty })
-        req.then(() => {
-          qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
-          qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
-        })
-      }
-      return
-    }
-
-    if (intervalNum > prevSetIntervalRef.current) {
-      prevSetIntervalRef.current = intervalNum
-      const guestCount = ticket.guest_count || 1
-      const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
-      const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && !oi.item_name)
-      const req = existing
-        ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + guestCount })
-        : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', unit_price: extPrice, quantity: guestCount })
-      req.then(() => {
+    // 不足期を順に period_no 指定で追加（重複は backend が弾く）
+    const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
+    for (let p = dbPeriod + 1; p <= periodCount; p++) {
+      if (inflightRef.current.has(p)) continue
+      inflightRef.current.add(p)
+      apiClient.post(`/api/tickets/${ticket.id}/orders`, {
+        item_type: 'extension',
+        unit_price: extPrice,
+        quantity: 1,
+        period_no: p,
+      }).then(() => {
         qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
         qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+      }).finally(() => {
+        inflightRef.current.delete(p)
       })
     }
   }, [ticket, now])
@@ -276,6 +264,7 @@ export default function POS() {
   const [customerModalTicket, setCustomerModalTicket] = useState<any | null>(null)
   const [castModalTicket, setCastModalTicket] = useState<any | null>(null)
   const [activeCastsModalTicket, setActiveCastsModalTicket] = useState<any | null>(null)
+  const dragFromIdxRef = useRef<number | null>(null)
   const qc = useQueryClient()
 
   const { data: tickets = [] } = useQuery({
@@ -451,20 +440,26 @@ export default function POS() {
             <div key={ticket.id}
               draggable
               onDragStart={e => {
-                // バッジやボタン上で開始したドラッグは無効化
                 const target = e.target as HTMLElement
                 if (target.closest('[data-nopropagate]') || target.tagName === 'BUTTON') {
                   e.preventDefault()
                   return
                 }
-                e.dataTransfer.setData('text/plain', String(idx))
+                dragFromIdxRef.current = idx
                 e.dataTransfer.effectAllowed = 'move'
+                try { e.dataTransfer.setData('text/plain', String(idx)) } catch {}
               }}
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+              onDragEnd={() => { dragFromIdxRef.current = null }}
               onDrop={e => {
                 e.preventDefault()
-                const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10)
-                if (isNaN(fromIdx) || fromIdx === idx) return
+                let fromIdx = dragFromIdxRef.current
+                if (fromIdx === null) {
+                  const v = parseInt(e.dataTransfer.getData('text/plain'), 10)
+                  if (!isNaN(v)) fromIdx = v
+                }
+                dragFromIdxRef.current = null
+                if (fromIdx === null || fromIdx === idx) return
                 const newOrder = [...tickets]
                 const [moved] = newOrder.splice(fromIdx, 1)
                 newOrder.splice(idx, 0, moved)

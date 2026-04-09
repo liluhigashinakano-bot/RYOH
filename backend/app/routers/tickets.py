@@ -155,6 +155,9 @@ class OrderItemCreate(BaseModel):
     cast_id: Optional[int] = None
     # シャンパン等で複数キャストに分配する場合のみ指定
     cast_distribution: Optional[List[CastDistributionEntry]] = None
+    # 延長 (extension) のロック用：何期目の延長か（0始まり）。
+    # 同じ ticket × period_no が既に登録済みなら no-op。
+    period_no: Optional[int] = None
 
 
 class TicketClose(BaseModel):
@@ -482,23 +485,45 @@ def add_order(
 
     amount = data.quantity * data.unit_price
 
-    # extension は cast_id を持たないので、同じ item_name の既存行があれば数量加算してマージ
-    if data.item_type == "extension" and data.cast_id is None:
+    # 通常延長 (合流ではない) は period_no で重複防止
+    is_normal_ext = (
+        data.item_type == "extension"
+        and data.cast_id is None
+        and not (data.item_name or '').startswith('合流')
+    )
+    if is_normal_ext and data.period_no is not None:
+        # 同じ ticket × period_no が既にあれば no-op
         existing = db.query(models.OrderItem).filter(
             models.OrderItem.ticket_id == ticket_id,
             models.OrderItem.item_type == "extension",
             models.OrderItem.cast_id.is_(None),
             models.OrderItem.canceled_at.is_(None),
-            models.OrderItem.unit_price == data.unit_price,
-            (models.OrderItem.item_name == data.item_name) if data.item_name else (models.OrderItem.item_name.is_(None)),
-        ).order_by(models.OrderItem.id.asc()).first()
+            models.OrderItem.period_no == data.period_no,
+        ).first()
         if existing is not None:
-            existing.quantity = (existing.quantity or 0) + data.quantity
-            existing.amount = (existing.unit_price or 0) * existing.quantity
-            ticket.total_amount += amount
-            ticket.extension_count = (ticket.extension_count or 0) + data.quantity
-            db.commit()
-            return {"message": "注文を追加しました", "id": existing.id, "total_amount": ticket.total_amount}
+            return {
+                "message": "既に登録済み",
+                "id": existing.id,
+                "total_amount": ticket.total_amount,
+                "skipped": True,
+            }
+        # 新規行を作成（quantity = ゲスト数）
+        guest = max(1, ticket.guest_count or 1)
+        new_item = models.OrderItem(
+            ticket_id=ticket_id,
+            item_type="extension",
+            item_name=data.item_name,
+            quantity=guest,
+            unit_price=data.unit_price,
+            amount=data.unit_price * guest,
+            cast_id=None,
+            period_no=data.period_no,
+        )
+        db.add(new_item)
+        ticket.total_amount += data.unit_price * guest
+        ticket.extension_count = (ticket.extension_count or 0) + 1  # 期数のみ
+        db.commit()
+        return {"message": "延長を追加しました", "id": new_item.id, "total_amount": ticket.total_amount}
 
     # インセンティブスナップショット & 分配情報の計算
     snapshot = None
@@ -1144,32 +1169,30 @@ def patch_ticket(
         )
         db.add(time_log)
 
-        # 現在時刻から経過した延長回数を再計算
-        # extension_count はゲスト数×延長期数で管理（AutoExtenderがゲスト数分リクエストするため）
+        # 現在時刻から経過した延長期数を再計算 (新仕様: extension_count = 期数のみ)
         now_utc = datetime.utcnow()
         elapsed_seconds = max(0, (now_utc - new_started_at).total_seconds())
         guest_count = ticket.guest_count or 1
         ext_price = 4000 if ticket.plan_type == 'premium' else 3000
         new_period_count = int(elapsed_seconds // (40 * 60))
-        new_ext_count = new_period_count * guest_count  # ゲスト数込みの合計
-        old_ext_count = ticket.extension_count or 0
-        diff = new_ext_count - old_ext_count  # 追加/削除すべき注文件数
+        old_period_count = ticket.extension_count or 0
+        diff = new_period_count - old_period_count  # 期数の差
 
         if diff > 0:
-            # 不足分の延長注文を追加
+            # 不足期分を1行ずつ追加（quantity = ゲスト数）
             for _ in range(diff):
                 item = models.OrderItem(
                     ticket_id=ticket_id,
                     item_type='extension',
                     unit_price=ext_price,
-                    quantity=1,
-                    amount=ext_price,
+                    quantity=guest_count,
+                    amount=ext_price * guest_count,
                 )
                 db.add(item)
-                ticket.total_amount += ext_price
-            ticket.extension_count = new_ext_count
+                ticket.total_amount += ext_price * guest_count
+            ticket.extension_count = new_period_count
         elif diff < 0:
-            # 超過分の延長注文をキャンセル（新しい順に）
+            # 超過期分をキャンセル（新しい順に）
             ext_items = [
                 i for i in (ticket.order_items or [])
                 if i.item_type == 'extension' and i.canceled_at is None
@@ -1178,7 +1201,7 @@ def patch_ticket(
             for item in ext_items[-cancel_count:]:
                 item.canceled_at = datetime.utcnow()
                 ticket.total_amount = max(0, ticket.total_amount - item.amount)
-            ticket.extension_count = new_ext_count
+            ticket.extension_count = new_period_count
 
     if data.guest_count is not None:
         new_guest_count = max(1, data.guest_count)

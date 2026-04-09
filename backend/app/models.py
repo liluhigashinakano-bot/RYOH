@@ -299,6 +299,8 @@ class OrderItem(Base):
     # 注文時点のインセンティブスナップショット:
     # {"mode": "percent"|"fixed", "rate": int|None, "fixed_amount": int|None, "calculated_amount": int}
     incentive_snapshot = Column(JSON, nullable=True)
+    # 延長 (extension) の期番号。同じ ticket × period_no は1行のみ存在
+    period_no = Column(Integer, nullable=True)
 
     ticket = relationship("Ticket", back_populates="order_items")
     cast = relationship("Cast", foreign_keys=[cast_id])
