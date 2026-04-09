@@ -116,11 +116,12 @@ def get_dashboard(
         models.Ticket.deleted_at.is_(None),
     ).all()
 
-    # 未会計伝票（現在オープン中）
+    # 未会計伝票（現在オープン中・当該セッション内のみ）
     open_tickets = db.query(models.Ticket).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == False,
         models.Ticket.deleted_at.is_(None),
+        models.Ticket.started_at >= since,
     ).all()
 
     def grand_total(t):
