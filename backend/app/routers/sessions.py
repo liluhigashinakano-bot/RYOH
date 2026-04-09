@@ -124,7 +124,20 @@ def get_dashboard(
     ).all()
 
     def grand_total(t):
-        return max(0, (t.total_amount or 0) - (t.discount_amount or 0))
+        # 先会計・分割清算・値引き は order_items に負の amount で記録されているため
+        # total_amount から控除済み。サービス料10% + 消費税10% = 1.21倍を上乗せした
+        # 「税サ込み合計」を返す（先会計分は税サ対象外なので戻して計算）。
+        senkaikei = sum(
+            abs(i.amount or 0) for i in (t.order_items or [])
+            if i.canceled_at is None and (
+                (i.item_name or '').startswith('先会計')
+                or (i.item_name or '').startswith('分割清算')
+                or (i.item_name or '').startswith('値引き')
+            )
+        )
+        subtotal = (t.total_amount or 0) + senkaikei
+        gross = round(subtotal * 1.21) - senkaikei
+        return max(0, gross - (t.discount_amount or 0))
 
     closed_sales = sum(grand_total(t) for t in closed_tickets)
     open_sales = sum(grand_total(t) for t in open_tickets)
