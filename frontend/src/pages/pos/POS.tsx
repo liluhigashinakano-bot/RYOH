@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, X, CreditCard, Banknote, Bot, Play, Pause, QrCode, ClipboardList, Pencil } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
@@ -443,10 +443,13 @@ export default function POS() {
       ))}
 
       {view === 'open' ? (
+        <CrossTicketTimerContext tickets={tickets}>
+        {(castLatestMap) => (
         /* 伝票カード一覧：残り高さを全部使う */
         <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start">
           {tickets.map((ticket: any) => (
             <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
+              castLatestMap={castLatestMap}
               onOpenCustomerModal={t => setCustomerModalTicket(t)}
               onOpenCastModal={t => setCastModalTicket(t)}
               onOpenActiveCastsModal={t => setActiveCastsModalTicket(t)}
@@ -457,6 +460,8 @@ export default function POS() {
             <div className="flex-1 text-center text-gray-500 py-16">現在オープン中の伝票はありません</div>
           )}
         </div>
+        )}
+        </CrossTicketTimerContext>
       ) : view === 'casts' ? (
         <ActiveCastsView storeId={selectedStoreId} tickets={tickets} onTicketClick={(id) => setSelectedTicketId(id)} onOpenActiveCastsModal={t => setActiveCastsModalTicket(t)} />
       ) : view === 'attendance' ? (
@@ -1483,8 +1488,34 @@ function BusinessCloseModal({ storeId, session, openTicketCount, salesTotal, cas
 }
 
 // D時間: 種別×キャストごとに色分けして表示
-function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared }: {
+// 全卓を横断してキャスト最新ドリンク時刻を集計（シャンパン除外）
+function CrossTicketTimerContext({ tickets, children }: {
+  tickets: any[]
+  children: (map: Record<number, { ticketId: number; lastAt: string }>) => React.ReactNode
+}) {
+  const map = useMemo(() => {
+    const out: Record<number, { ticketId: number; lastAt: string }> = {}
+    for (const t of (tickets || [])) {
+      const ldt = t.last_drink_times || {}
+      for (const [type, arr] of Object.entries(ldt) as any[]) {
+        if (type === 'champagne') continue
+        if (!Array.isArray(arr)) continue
+        for (const c of arr) {
+          if (!c || c.cast_id == null || !c.last_at) continue
+          const cur = out[c.cast_id]
+          if (!cur || c.last_at > cur.lastAt) out[c.cast_id] = { ticketId: t.id, lastAt: c.last_at }
+        }
+      }
+    }
+    return out
+  }, [tickets])
+  return <>{children(map)}</>
+}
+
+
+function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap }: {
   lastDrinkTimes: any; now: number; ticketId?: number; onCleared?: () => void
+  castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
 }) {
   const [confirming, setConfirming] = useState<string | null>(null) // key
   // key -> clearedAt (ms)。last_at がクリア時刻より新しければ再表示する
@@ -1517,12 +1548,19 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared }: {
       .then(() => onCleared?.())
   }
 
-  const isHidden = (e: { key: string; lastAt: string }) => {
+  const isHidden = (e: { key: string; lastAt: string; castId: number }) => {
     const clearedAt = clearedKeys.get(e.key)
-    if (clearedAt === undefined) return false
-    // last_at がクリア時刻より新しい（新規注文あり）→ 再表示
     const lastAtMs = new Date(e.lastAt.endsWith('Z') ? e.lastAt : e.lastAt + 'Z').getTime()
-    return lastAtMs <= clearedAt
+    if (clearedAt !== undefined && lastAtMs <= clearedAt) return true
+    // 他の卓で同じキャストにより新しい注文があれば、こちらは隠す
+    if (castLatestMap && e.castId != null) {
+      const latest = castLatestMap[e.castId]
+      if (latest && latest.ticketId !== ticketId) {
+        const latestMs = new Date(latest.lastAt.endsWith('Z') ? latest.lastAt : latest.lastAt + 'Z').getTime()
+        if (latestMs > lastAtMs) return true
+      }
+    }
+    return false
   }
 
   return (
@@ -1769,11 +1807,12 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
   )
 }
 
-function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal, onOpenActiveCastsModal }: {
+function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal, onOpenActiveCastsModal, castLatestMap }: {
   ticket: any; storeId: number; onClick: () => void
   onOpenCustomerModal: (ticket: any) => void
   onOpenCastModal: (ticket: any) => void
   onOpenActiveCastsModal: (ticket: any) => void
+  castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
 }) {
   const qc = useQueryClient()
   const now = useNow()
@@ -1887,6 +1926,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
       {/* D時間 */}
       <div className="mb-3" data-nopropagate>
         <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticket.id}
+          castLatestMap={castLatestMap}
           onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
       </div>
 
@@ -2783,6 +2823,30 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     refetchInterval: (query) => (query.state.data?.is_closed ? false : 10000),
   })
 
+  // 横断キャスト最新ドリンク用（オープン中伝票）
+  const { data: openTicketsForTimers = [] } = useQuery({
+    queryKey: ['tickets', storeId, 'open'],
+    queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
+    staleTime: 5000,
+    enabled: !!storeId,
+  })
+  const detailCastLatestMap = useMemo(() => {
+    const out: Record<number, { ticketId: number; lastAt: string }> = {}
+    for (const t of (openTicketsForTimers as any[])) {
+      const ldt = t.last_drink_times || {}
+      for (const [type, arr] of Object.entries(ldt) as any[]) {
+        if (type === 'champagne') continue
+        if (!Array.isArray(arr)) continue
+        for (const c of arr) {
+          if (!c || c.cast_id == null || !c.last_at) continue
+          const cur = out[c.cast_id]
+          if (!cur || c.last_at > cur.lastAt) out[c.cast_id] = { ticketId: t.id, lastAt: c.last_at }
+        }
+      }
+    }
+    return out
+  }, [openTicketsForTimers])
+
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
@@ -3255,6 +3319,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           {/* D時間（オープン中のみ） */}
           {!isClosed && (
             <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticketId}
+              castLatestMap={detailCastLatestMap}
               onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
           )}
         </div>
