@@ -578,6 +578,23 @@ def update_order(
     item.amount = item.unit_price * data.quantity
     ticket.total_amount += item.amount - old_amount
 
+    # キャスト選択ありドリンクの数量増加 = 追加注文相当 → タイマーをリセット
+    if (
+        item.cast_id is not None
+        and item.item_type in CAST_DRINK_TYPES
+        and data.quantity > old_quantity
+    ):
+        item.created_at = datetime.utcnow()
+        # drink_clears の該当キーを消す（新規注文があった扱い）
+        try:
+            dc = dict(ticket.drink_clears or {})
+            ck = f"{item.cast_id}_{item.item_type}"
+            if ck in dc:
+                del dc[ck]
+                ticket.drink_clears = dc
+        except Exception:
+            pass
+
     # インセンティブスナップショットを再計算（数量変更に追従）
     if item.cast_id is not None:
         imap = build_incentive_map(db, ticket.store_id)
