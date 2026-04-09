@@ -449,8 +449,6 @@ export default function POS() {
         <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start">
           {tickets.map((ticket: any, idx: number) => (
             <div key={ticket.id}
-              draggable
-              onDragStart={e => { e.dataTransfer.setData('text/plain', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
               onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
               onDrop={e => {
                 e.preventDefault()
@@ -460,13 +458,20 @@ export default function POS() {
                 const [moved] = newOrder.splice(fromIdx, 1)
                 newOrder.splice(idx, 0, moved)
                 const orderedIds = newOrder.map((t: any) => t.id)
-                // 楽観更新
                 qc.setQueryData(['tickets', selectedStoreId, 'open'], newOrder)
                 apiClient.post('/api/tickets/reorder', { store_id: selectedStoreId, ordered_ids: orderedIds })
                   .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
               }}
-              className="shrink-0"
+              className="shrink-0 relative"
             >
+              {/* ドラッグハンドル */}
+              <div
+                draggable
+                onDragStart={e => { e.dataTransfer.setData('text/plain', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
+                title="ドラッグで並び替え"
+                className="absolute top-1.5 right-12 z-10 cursor-grab active:cursor-grabbing text-gray-600 hover:text-gray-300 px-1 select-none text-sm font-bold"
+                onClick={e => e.stopPropagation()}
+              >⠿</div>
               <TicketCard ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
                 castLatestMap={castLatestMap}
                 onOpenCustomerModal={t => setCustomerModalTicket(t)}
