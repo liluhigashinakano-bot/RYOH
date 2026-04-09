@@ -163,6 +163,16 @@ export default function MonthlyReport() {
             </div>
           </div>
 
+          {/* 経費 */}
+          <div className="card">
+            <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-3">経費</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <StatBox label="酒類経費" value={fmtYen(summary.alcohol_expense)} />
+              <StatBox label="その他経費" value={fmtYen(summary.other_expense)} />
+              <StatBox label="経費合計" value={fmtYen((summary.alcohol_expense || 0) + (summary.other_expense || 0))} />
+            </div>
+          </div>
+
           {/* 来店動機 / 時間帯 / コース */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="card">
