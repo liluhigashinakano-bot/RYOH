@@ -375,7 +375,23 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
     # 既存の expenses_detail に "_attendance" / "_staff_attendance" キーで追記
     existing_detail = session.expenses_detail or {}
     session.expenses_detail = {**existing_detail, "_attendance": snap, "_staff_attendance": staff_snap}
+    db.commit()
+    db.refresh(session)
 
+    # 日報スナップショット生成（勤怠クリア前なので実データが取れる）
+    try:
+        from ..services.report_builder import build_daily_report_payload, save_snapshot
+        from datetime import timedelta as _td
+        payload = build_daily_report_payload(db, session, generated_by=current_user.id)
+        biz_date = (session.opened_at + _td(hours=9)).date()
+        save_snapshot(db, session.store_id, biz_date, payload, generated_by=current_user.id)
+    except Exception as e:
+        # 日報生成失敗してもセッションクローズは成功させる
+        print(f"[WARNING] Failed to build daily report snapshot: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # 勤怠クリア（snapshot 生成後に実行）
     for shift in shifts_to_clear:
         shift.actual_start = None
         shift.actual_end = None
@@ -386,7 +402,7 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
         db.delete(sr)
     db.commit()
 
-    # 日報JSONファイルを保存
+    # 既存: 日報JSONファイルを保存（旧仕組み・並行運用）
     try:
         _save_report_file(_session_dict(session))
     except Exception as e:
