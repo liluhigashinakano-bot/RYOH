@@ -144,6 +144,42 @@ def get_dashboard(
     closed_guests = sum(t.guest_count or 0 for t in closed_tickets)
     open_guests = sum(t.guest_count or 0 for t in open_tickets)
 
+    # カスタムドリンク (キャスト選択あり×インセンティブあり) 集計
+    from collections import defaultdict
+    from ..services.report_builder import _assign_short_names
+    from ..services.incentive import strip_cast_suffix as _strip
+    menu_configs = db.query(models.MenuItemConfig).filter(
+        models.MenuItemConfig.store_id == store_id,
+    ).all()
+    custom_labels = sorted({
+        m.label for m in menu_configs
+        if m.is_active and m.cast_required and m.has_incentive
+    })
+    short_map = _assign_short_names(custom_labels)
+    custom_drinks_total: dict = defaultdict(int)
+    # シャンパン本数・金額
+    champagne_count = 0
+    champagne_amount = 0
+    all_tickets = closed_tickets + open_tickets
+    for t in all_tickets:
+        # シャンパン: グループ単位で1本と数える
+        groups: dict = defaultdict(list)
+        for o in (t.order_items or []):
+            if o.canceled_at is not None:
+                continue
+            if o.item_type == "champagne":
+                groups[o.item_name or ""].append(o)
+            elif o.item_type == "custom_menu":
+                lbl = _strip(o.item_name or "")
+                if lbl in short_map:
+                    custom_drinks_total[short_map[lbl]] += int(o.quantity or 0)
+        for items in groups.values():
+            champagne_count += 1
+            for it in items:
+                if (it.unit_price or 0) > 0:
+                    champagne_amount += int(it.unit_price * (it.quantity or 0))
+    custom_drink_columns = [{"label": l, "short": short_map[l]} for l in custom_labels]
+
     # 勤務中社員/アルバイト（当日セッション日付のStaffAttendance, actual_end IS NULL, not absent）
     session_date = (since + timedelta(hours=9)).date()
     working_staff = db.query(models.StaffAttendance).filter(
@@ -209,6 +245,10 @@ def get_dashboard(
         "open_guests": open_guests,
         "working_staff": staff_list,
         "working_casts": cast_list,
+        "custom_drinks_total": dict(custom_drinks_total),
+        "custom_drink_columns": custom_drink_columns,
+        "champagne_count": champagne_count,
+        "champagne_amount": champagne_amount,
     }
 
 

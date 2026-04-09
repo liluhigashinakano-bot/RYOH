@@ -84,26 +84,21 @@ export default function Dashboard() {
               ) : (
                 <div className="px-3 py-2 space-y-2">
                   {/* 売上行 */}
-                  <div className="grid grid-cols-4 gap-2 text-xs">
+                  <div className="grid grid-cols-3 gap-2 text-xs">
                     <div>
-                      <span className="text-gray-500">会計済売上</span>
+                      <span className="text-gray-500">会計済</span>
                       <p className="text-white font-bold">¥{(dash.closed_sales ?? 0).toLocaleString()}</p>
+                      <p className="text-[10px] text-gray-500">{dash.closed_groups ?? 0}組 / {dash.closed_guests ?? 0}名</p>
                     </div>
                     <div>
-                      <span className="text-gray-500">未会計売上</span>
+                      <span className="text-gray-500">未会計</span>
                       <p className="text-yellow-400 font-bold">¥{(dash.open_sales ?? 0).toLocaleString()}</p>
+                      <p className="text-[10px] text-yellow-500/80">{dash.open_groups ?? 0}組 / {dash.open_guests ?? 0}名</p>
                     </div>
                     <div>
                       <span className="text-gray-500">合計</span>
                       <p className="text-white font-bold">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">組数/人数</span>
-                      <p className="text-white font-bold">
-                        <span className="text-white">{dash.closed_groups ?? 0}組</span>
-                        <span className="text-gray-500 mx-1">/</span>
-                        <span className="text-yellow-400">{dash.open_groups ?? 0}組未</span>
-                      </p>
+                      <p className="text-[10px] text-gray-500">{(dash.closed_groups ?? 0) + (dash.open_groups ?? 0)}組 / {(dash.closed_guests ?? 0) + (dash.open_guests ?? 0)}名</p>
                     </div>
                   </div>
 
@@ -123,6 +118,21 @@ export default function Dashboard() {
                         : <p className="text-white">{(dash.working_casts as any[]).map((c: any) => c.stage_name).join('、')}</p>
                       }
                     </div>
+                  </div>
+
+                  {/* シャンパン・カスタムドリンク */}
+                  <div className="flex items-center gap-3 flex-wrap text-xs pt-1 border-t border-gray-800/60">
+                    <div>
+                      <span className="text-gray-500">ｼｬﾝﾊﾟﾝ </span>
+                      <span className="text-yellow-400 font-bold">{dash.champagne_count ?? 0}本</span>
+                      <span className="text-yellow-400 font-bold ml-1">¥{(dash.champagne_amount ?? 0).toLocaleString()}</span>
+                    </div>
+                    {(dash.custom_drink_columns ?? []).map((col: any) => (
+                      <div key={col.short}>
+                        <span className="text-gray-500">{col.label} </span>
+                        <span className="text-white font-bold">{(dash.custom_drinks_total ?? {})[col.short] ?? 0}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
