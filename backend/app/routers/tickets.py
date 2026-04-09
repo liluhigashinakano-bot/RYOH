@@ -19,12 +19,18 @@ CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne", "custom_menu"
 
 def _ticket_extra(ticket: models.Ticket) -> dict:
     """伝票の追加情報（キャスト名・E開始時刻・最終キャストドリンク時刻）を返す"""
-    # 現在担当キャスト（ended_at が null の最新アサイン）
+    # 現在担当キャスト（ended_at が null の active 全部）
     current_cast_name = None
+    current_casts: list = []
     e_started_at = None
     active_assignments = [a for a in (ticket.assignments or []) if a.ended_at is None]
     if active_assignments:
-        latest = max(active_assignments, key=lambda a: a.started_at)
+        # started_at 昇順で並べ、表示用リストと最新行を作る
+        sorted_active = sorted(active_assignments, key=lambda a: a.started_at)
+        for a in sorted_active:
+            if a.cast and a.cast_id is not None:
+                current_casts.append({"cast_id": a.cast_id, "cast_name": a.cast.stage_name})
+        latest = sorted_active[-1]
         current_cast_name = latest.cast.stage_name if latest.cast else None
         e_started_at = latest.started_at
 
@@ -68,6 +74,7 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
 
     return {
         "current_cast_name": current_cast_name,
+        "current_casts": current_casts,
         "e_started_at": e_started_at,
         "last_drink_times": last_drink_times,
         "customer_name": customer_name,
@@ -153,6 +160,7 @@ class TicketResponse(BaseModel):
     set_paused_seconds: int = 0
     # computed extras
     current_cast_name: Optional[str] = None
+    current_casts: Optional[List[dict]] = None
     e_started_at: Optional[datetime] = None
     last_drink_times: Optional[dict] = None
     customer_name: Optional[str] = None
@@ -193,6 +201,7 @@ def _to_response(ticket: models.Ticket) -> dict:
         "set_paused_at": ticket.set_paused_at,
         "set_paused_seconds": ticket.set_paused_seconds or 0,
         "current_cast_name": extra["current_cast_name"],
+        "current_casts": extra["current_casts"],
         "e_started_at": extra["e_started_at"],
         "last_drink_times": extra["last_drink_times"],
         "customer_name": extra["customer_name"],
@@ -635,6 +644,59 @@ def set_cast(
             started_at=now,
         )
         db.add(new_assignment)
+    db.commit()
+    db.refresh(ticket)
+    return _to_response(ticket)
+
+
+class SetAssignmentsRequest(BaseModel):
+    cast_ids: List[int]
+    assignment_type: str = "jounai"
+
+
+@router.post("/{ticket_id}/assignments/set", response_model=TicketResponse)
+def set_assignments(
+    ticket_id: int,
+    data: SetAssignmentsRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """付け回しを一括設定する。
+    - その卓の現在 active な assignments を全て ended_at にする
+    - 各 cast_id について、他の卓で active なら ended_at にして移動
+    - 新規 active 行を追加
+    """
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="伝票が見つかりません")
+
+    now = datetime.utcnow()
+    new_cast_ids = list(dict.fromkeys(data.cast_ids))  # 重複除去・順序保持
+
+    # 1. この卓の現在 active を全て終了
+    for a in (ticket.assignments or []):
+        if a.ended_at is None:
+            a.ended_at = now
+
+    if new_cast_ids:
+        # 2. 他の卓で active なものを終了（移動）
+        other_active = db.query(models.CastAssignment).filter(
+            models.CastAssignment.cast_id.in_(new_cast_ids),
+            models.CastAssignment.ended_at.is_(None),
+            models.CastAssignment.ticket_id != ticket_id,
+        ).all()
+        for a in other_active:
+            a.ended_at = now
+
+        # 3. 新規 active を追加
+        for cid in new_cast_ids:
+            db.add(models.CastAssignment(
+                ticket_id=ticket_id,
+                cast_id=cid,
+                assignment_type=data.assignment_type,
+                started_at=now,
+            ))
+
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)

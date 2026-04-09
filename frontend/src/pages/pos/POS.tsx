@@ -474,9 +474,10 @@ export default function POS() {
       {castModalTicket && (
         <CastAssignModal
           storeId={selectedStoreId}
-          currentCastName={castModalTicket.current_cast_name}
-          onSelect={id => {
-            apiClient.post(`/api/tickets/${castModalTicket.id}/set-cast`, { cast_id: id })
+          ticketId={castModalTicket.id}
+          currentCastIds={(castModalTicket.current_casts || []).map((c: any) => c.cast_id).filter((x: any) => typeof x === 'number')}
+          onSubmit={ids => {
+            apiClient.post(`/api/tickets/${castModalTicket.id}/assignments/set`, { cast_ids: ids })
               .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
             setCastModalTicket(null)
           }}
@@ -1818,7 +1819,9 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         </button>
         <button onClick={e => { e.stopPropagation(); onOpenCastModal(ticket) }}
           className="w-fit text-left text-primary-400 hover:text-primary-300 transition-colors underline decoration-dotted">
-          {ticket.current_cast_name || '担当未設定'}
+          {(ticket.current_casts && ticket.current_casts.length > 0)
+            ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
+            : '担当未設定'}
         </button>
       </div>
 
@@ -2272,44 +2275,98 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
   )
 }
 
-function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
+function CastAssignModal({ storeId, currentCastIds, ticketId, onSubmit, onClose }: {
   storeId: number
-  currentCastName: string | null
-  onSelect: (id: number | null) => void
+  currentCastIds: number[]
+  ticketId: number
+  onSubmit: (ids: number[]) => void
   onClose: () => void
 }) {
   const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<number[]>(currentCastIds)
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
   })
-  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  // 出勤中キャスト
+  const { data: workingAttendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
+  })
+  const workingCastIds = new Set(
+    (workingAttendance as any[])
+      .filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
+      .map((a: any) => a.cast_id)
+  )
+  // 他の卓で接客中のキャストを集めるため、オープン中の伝票を取得
+  const { data: openTickets = [] } = useQuery({
+    queryKey: ['tickets', storeId, 'open'],
+    queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
+    staleTime: 5000,
+  })
+  // cast_id → 接客中の他卓の table_no
+  const castOnOtherTable: Record<number, string> = {}
+  for (const t of (openTickets as any[])) {
+    if (t.id === ticketId) continue
+    for (const c of (t.current_casts || [])) {
+      if (typeof c.cast_id === 'number') castOnOtherTable[c.cast_id] = t.table_no || `#${t.id}`
+    }
+  }
+
+  const casts = (castsAll as any[]).filter((c: any) => c.is_active && workingCastIds.has(c.id))
   const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
+
+  const toggle = (cid: number) => {
+    if (selected.includes(cid)) {
+      setSelected(selected.filter(x => x !== cid))
+      return
+    }
+    const otherTable = castOnOtherTable[cid]
+    if (otherTable) {
+      if (!confirm(`${otherTable} で接客中です。\nこの卓に移しますか？`)) return
+    }
+    setSelected([...selected, cid])
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
       <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center">
-          <h3 className="font-bold text-white">担当キャストを設定</h3>
+          <h3 className="font-bold text-white">接客中キャストを設定</h3>
           <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <input type="text" value={q} onChange={e => setQ(e.target.value)}
           placeholder="キャスト名で検索"
           className="input-field w-full text-sm" autoFocus />
         <div className="space-y-1 max-h-64 overflow-y-auto">
-          {currentCastName && (
-            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
-              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
-              担当を外す
-            </button>
-          )}
-          {filtered.map((c: any) => (
-            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.stage_name === currentCastName ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
-              <span className="font-medium">{c.stage_name}</span>
-            </button>
-          ))}
+          {filtered.map((c: any) => {
+            const isSelected = selected.includes(c.id)
+            const otherTable = castOnOtherTable[c.id]
+            return (
+              <button key={c.id} onClick={e => { e.stopPropagation(); toggle(c.id) }}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${isSelected ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+                <span className="font-medium flex items-center gap-2">
+                  <span className={`inline-block w-3.5 h-3.5 border rounded ${isSelected ? 'bg-white border-white' : 'border-gray-500'}`}>
+                    {isSelected && <span className="block w-full h-full text-primary-700 text-[10px] leading-3 text-center">✓</span>}
+                  </span>
+                  {c.stage_name}
+                </span>
+                {otherTable && !isSelected && (
+                  <span className="text-[10px] text-amber-400">{otherTable} 接客中</span>
+                )}
+              </button>
+            )
+          })}
           {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={e => { e.stopPropagation(); setSelected([]) }}
+            className="text-xs px-3 py-1.5 text-gray-400 hover:text-gray-200">全解除</button>
+          <button onClick={e => { e.stopPropagation(); onSubmit(selected); onClose() }}
+            className="text-xs px-4 py-1.5 bg-primary-700 hover:bg-primary-600 text-white rounded-lg">
+            確定（{selected.length}名）
+          </button>
         </div>
       </div>
     </div>
@@ -2681,8 +2738,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   const setCastMutation = useMutation({
-    mutationFn: (castId: number | null) =>
-      apiClient.post(`/api/tickets/${ticketId}/set-cast`, { cast_id: castId }).then(r => r.data),
+    mutationFn: (castIds: number[]) =>
+      apiClient.post(`/api/tickets/${ticketId}/assignments/set`, { cast_ids: castIds }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
@@ -2854,14 +2911,20 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <span className="text-gray-600">/</span>
                   <button onClick={() => setShowCastSearch(true)}
                     className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
-                    {ticket.current_cast_name || '担当未設定'}
+                    {(ticket.current_casts && ticket.current_casts.length > 0)
+                      ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
+                      : '担当未設定'}
                   </button>
                 </>
               ) : (
                 <>
                   <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
                   <span className="text-gray-600">/</span>
-                  <span className="text-primary-400">{ticket.current_cast_name || '担当未設定'}</span>
+                  <span className="text-primary-400">
+                    {(ticket.current_casts && ticket.current_casts.length > 0)
+                      ? ticket.current_casts.map((c: any) => c.cast_name).join('・')
+                      : '担当未設定'}
+                  </span>
                 </>
               )}
             </div>
@@ -3233,12 +3296,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         />
       )}
 
-      {/* キャスト選択モーダル（担当設定用） */}
+      {/* キャスト選択モーダル（担当設定用 / 複数同時 OK） */}
       {showCastSearch && (
         <CastAssignModal
           storeId={storeId}
-          currentCastName={ticket.current_cast_name}
-          onSelect={id => setCastMutation.mutate(id)}
+          ticketId={ticketId}
+          currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((x: any) => typeof x === 'number')}
+          onSubmit={ids => setCastMutation.mutate(ids)}
           onClose={() => setShowCastSearch(false)}
         />
       )}
@@ -4493,15 +4557,12 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
     refetchInterval: 15000,
   })
 
-  // キャスト別の現在担当卓
-  // ticket.assignments の ended_at が null の最新行を抽出
+  // キャスト別の現在担当卓（current_casts ベース）
   const castToTicket: Record<number, any> = {}
   for (const t of tickets) {
-    const active = (t.assignments || []).filter((a: any) => a.ended_at === null && a.cast_id !== null)
-    if (active.length === 0) continue
-    // 同じ卓に複数の active が出ることは無い想定だが、念のため最新
-    const latest = active.reduce((m: any, a: any) => (m && new Date(m.started_at) > new Date(a.started_at) ? m : a), null)
-    if (latest) castToTicket[latest.cast_id] = t
+    for (const c of (t.current_casts || [])) {
+      if (typeof c.cast_id === 'number') castToTicket[c.cast_id] = t
+    }
   }
 
   // 出勤中・接客なしのキャスト
@@ -4529,7 +4590,11 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
                 </div>
                 <div className="text-xs mt-0.5">
                   <span className="text-gray-500">担当: </span>
-                  <span className="text-purple-300">{t.current_cast_name || '未設定'}</span>
+                  <span className="text-purple-300">
+                    {(t.current_casts && t.current_casts.length > 0)
+                      ? t.current_casts.map((c: any) => c.cast_name).join('・')
+                      : '未設定'}
+                  </span>
                 </div>
               </button>
             ))}
