@@ -490,6 +490,9 @@ class DailyReportSnapshot(Base):
     business_date = Column(Date, nullable=False)
     version = Column(Integer, nullable=False, default=1)
     payload = Column(JSON, nullable=False)
+    # 再生成用の生入力データ（勤怠スナップショット等）。close_session 後も
+    # 払い出された raw 値から payload を再構築可能にする。
+    raw_inputs = Column(JSON, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

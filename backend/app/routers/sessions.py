@@ -379,11 +379,14 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
 
     # 日報スナップショット生成（勤怠クリア前なので実データが取れる）
     try:
-        from ..services.report_builder import build_daily_report_payload, save_snapshot
+        from ..services.report_builder import build_daily_report_full, save_snapshot
         from datetime import timedelta as _td
-        payload = build_daily_report_payload(db, session, generated_by=current_user.id)
+        payload, raw_inputs = build_daily_report_full(db, session, generated_by=current_user.id)
         biz_date = (session.opened_at + _td(hours=9)).date()
-        save_snapshot(db, session.store_id, biz_date, payload, generated_by=current_user.id)
+        save_snapshot(
+            db, session.store_id, biz_date, payload,
+            raw_inputs=raw_inputs, generated_by=current_user.id,
+        )
     except Exception as e:
         # 日報生成失敗してもセッションクローズは成功させる
         print(f"[WARNING] Failed to build daily report snapshot: {e}")

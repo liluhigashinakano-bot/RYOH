@@ -20,6 +20,8 @@ from .. import models
 from ..auth import get_current_user
 from ..services.report_builder import (
     build_daily_report_payload,
+    build_daily_report_full,
+    regenerate_from_snapshot,
     save_snapshot,
     get_latest_snapshot,
 )
@@ -51,6 +53,7 @@ def get_daily_latest(
         "created_at": snap.created_at.isoformat() if snap.created_at else None,
         "created_by": snap.created_by,
         "payload": snap.payload,
+        "has_raw_inputs": bool(snap.raw_inputs),
     }
 
 
@@ -140,7 +143,7 @@ def get_daily_by_id(
 
 
 class RegenerateRequest(BaseModel):
-    session_id: int
+    snapshot_id: int
 
 
 @router.post("/daily/regenerate")
@@ -149,19 +152,30 @@ def regenerate_daily(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """指定 session から日報を再生成して新バージョンとして保存"""
-    session = db.query(models.BusinessSession).filter(
-        models.BusinessSession.id == data.session_id
+    """指定スナップショットの raw_inputs を元に日報を再構築し、新バージョンとして保存。
+    raw_inputs が無い古いスナップショットは再生成不可。"""
+    snap = db.query(models.DailyReportSnapshot).filter(
+        models.DailyReportSnapshot.id == data.snapshot_id
     ).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="セッションが見つかりません")
-    payload = build_daily_report_payload(db, session, generated_by=current_user.id)
-    biz_date = (session.opened_at + timedelta(hours=9)).date()
-    snap = save_snapshot(db, session.store_id, biz_date, payload, generated_by=current_user.id)
+    if not snap:
+        raise HTTPException(status_code=404, detail="スナップショットが見つかりません")
+    if not snap.raw_inputs:
+        raise HTTPException(
+            status_code=400,
+            detail="このスナップショットには再生成用データがありません（古い形式）",
+        )
+    try:
+        payload, raw_inputs = regenerate_from_snapshot(db, snap, generated_by=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    new_snap = save_snapshot(
+        db, snap.store_id, snap.business_date, payload,
+        raw_inputs=raw_inputs, generated_by=current_user.id,
+    )
     return {
-        "id": snap.id,
-        "version": snap.version,
-        "business_date": biz_date.isoformat(),
+        "id": new_snap.id,
+        "version": new_snap.version,
+        "business_date": new_snap.business_date.isoformat(),
     }
 
 

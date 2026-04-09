@@ -202,6 +202,99 @@ def _to_staff_input(att: models.StaffAttendance) -> rc.StaffAttendanceInput:
 
 
 # ─────────────────────────────────────────
+# 再生成用 raw inputs シリアライズ / デシリアライズ
+# ─────────────────────────────────────────
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+def _from_iso(s: Optional[str]) -> Optional[datetime]:
+    return datetime.fromisoformat(s) if s else None
+
+
+def _shift_to_dict(s: rc.CastShiftInput) -> dict:
+    return {
+        "cast_id": s.cast_id,
+        "cast_name": s.cast_name,
+        "is_help": s.is_help,
+        "help_from_store_name": s.help_from_store_name,
+        "actual_start_jst": _iso(s.actual_start_jst),
+        "actual_end_jst": _iso(s.actual_end_jst),
+        "is_late": s.is_late,
+        "is_absent": s.is_absent,
+        "hourly_rate": s.hourly_rate,
+        "help_hourly_rate": s.help_hourly_rate,
+    }
+
+
+def _shift_from_dict(d: dict) -> rc.CastShiftInput:
+    return rc.CastShiftInput(
+        cast_id=d.get("cast_id"),
+        cast_name=d.get("cast_name") or "",
+        is_help=bool(d.get("is_help")),
+        help_from_store_name=d.get("help_from_store_name"),
+        actual_start_jst=_from_iso(d.get("actual_start_jst")),
+        actual_end_jst=_from_iso(d.get("actual_end_jst")),
+        is_late=bool(d.get("is_late")),
+        is_absent=bool(d.get("is_absent")),
+        hourly_rate=int(d.get("hourly_rate") or 1400),
+        help_hourly_rate=d.get("help_hourly_rate"),
+    )
+
+
+def _staff_to_dict(s: rc.StaffAttendanceInput) -> dict:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "employee_type": s.employee_type,
+        "actual_start_jst": _iso(s.actual_start_jst),
+        "actual_end_jst": _iso(s.actual_end_jst),
+        "is_late": s.is_late,
+        "is_absent": s.is_absent,
+    }
+
+
+def _staff_from_dict(d: dict) -> rc.StaffAttendanceInput:
+    return rc.StaffAttendanceInput(
+        id=int(d.get("id") or 0),
+        name=d.get("name") or "",
+        employee_type=d.get("employee_type"),
+        actual_start_jst=_from_iso(d.get("actual_start_jst")),
+        actual_end_jst=_from_iso(d.get("actual_end_jst")),
+        is_late=bool(d.get("is_late")),
+        is_absent=bool(d.get("is_absent")),
+    )
+
+
+def _build_raw_inputs(
+    shifts: List[rc.CastShiftInput],
+    staff_atts: List[rc.StaffAttendanceInput],
+    expenses: dict,
+) -> dict:
+    """再生成に必要な生入力データをJSON化"""
+    return {
+        "version": 1,
+        "shifts": [_shift_to_dict(s) for s in shifts],
+        "staff_atts": [_staff_to_dict(s) for s in staff_atts],
+        "expenses": {
+            "alcohol": int(expenses.get("alcohol") or 0),
+            "other": int(expenses.get("other") or 0),
+            "daily_pay_names": sorted(list(expenses.get("daily_pay_names") or [])),
+        },
+    }
+
+
+def _restore_expenses(raw: dict) -> dict:
+    e = (raw or {}).get("expenses") or {}
+    return {
+        "alcohol": int(e.get("alcohol") or 0),
+        "other": int(e.get("other") or 0),
+        "daily_pay_names": set(e.get("daily_pay_names") or []),
+    }
+
+
+# ─────────────────────────────────────────
 # データ取得
 # ─────────────────────────────────────────
 
@@ -296,8 +389,14 @@ def build_daily_report_payload(
     session: models.BusinessSession,
     *,
     generated_by: Optional[int] = None,
+    shifts_override: Optional[List[rc.CastShiftInput]] = None,
+    staff_atts_override: Optional[List[rc.StaffAttendanceInput]] = None,
+    expenses_override: Optional[dict] = None,
 ) -> dict:
-    """指定セッションから日報 JSON を組み立てる"""
+    """指定セッションから日報 JSON を組み立てる。
+    shifts_override / staff_atts_override / expenses_override が指定されれば
+    それを使用し、未指定なら DB から取得する（再生成時は raw_inputs から復元したものを渡す）。
+    """
     store = db.query(models.Store).filter(models.Store.id == session.store_id).first()
     business_date = (session.opened_at + timedelta(hours=9)).date()
 
@@ -309,13 +408,19 @@ def build_daily_report_payload(
     raw_tickets = _fetch_session_tickets(db, session)
     tickets = [_to_ticket_input(t, label_meta) for t in raw_tickets]
 
-    raw_shifts = _fetch_session_shifts(db, session)
-    shifts = [_to_shift_input(s, db) for s in raw_shifts]
+    if shifts_override is not None:
+        shifts = shifts_override
+    else:
+        raw_shifts = _fetch_session_shifts(db, session)
+        shifts = [_to_shift_input(s, db) for s in raw_shifts]
 
-    raw_staff_att = _fetch_session_staff_att(db, session)
-    staff_atts = [_to_staff_input(a) for a in raw_staff_att]
+    if staff_atts_override is not None:
+        staff_atts = staff_atts_override
+    else:
+        raw_staff_att = _fetch_session_staff_att(db, session)
+        staff_atts = [_to_staff_input(a) for a in raw_staff_att]
 
-    expenses = _extract_expenses(session)
+    expenses = expenses_override if expenses_override is not None else _extract_expenses(session)
 
     # ─── 売上集計 ───
     daily_sales = rc.total_sales(tickets)
@@ -535,6 +640,65 @@ def build_daily_report_payload(
     }
 
 
+def build_daily_report_full(
+    db: Session,
+    session: models.BusinessSession,
+    *,
+    generated_by: Optional[int] = None,
+) -> tuple[dict, dict]:
+    """payload と raw_inputs をまとめて返す（営業締めフック用）。
+    raw_inputs は再生成時に勤怠/経費を復元するためのスナップショット。"""
+    raw_shifts = _fetch_session_shifts(db, session)
+    shifts = [_to_shift_input(s, db) for s in raw_shifts]
+    raw_staff_att = _fetch_session_staff_att(db, session)
+    staff_atts = [_to_staff_input(a) for a in raw_staff_att]
+    expenses = _extract_expenses(session)
+
+    payload = build_daily_report_payload(
+        db, session,
+        generated_by=generated_by,
+        shifts_override=shifts,
+        staff_atts_override=staff_atts,
+        expenses_override=expenses,
+    )
+    raw_inputs = _build_raw_inputs(shifts, staff_atts, expenses)
+    return payload, raw_inputs
+
+
+def regenerate_from_snapshot(
+    db: Session,
+    snap: models.DailyReportSnapshot,
+    *,
+    generated_by: Optional[int] = None,
+) -> tuple[dict, dict]:
+    """既存スナップショットの raw_inputs から payload を再構築。
+    raw_inputs が無いスナップショットは再生成不可（呼び出し側で判断）。"""
+    if not snap.raw_inputs:
+        raise ValueError("raw_inputs がないスナップショットは再生成できません")
+    session_id = (snap.payload or {}).get("session_id")
+    if session_id is None:
+        raise ValueError("payload に session_id がありません")
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.id == session_id
+    ).first()
+    if session is None:
+        raise ValueError(f"セッション {session_id} が見つかりません")
+
+    raw = snap.raw_inputs
+    shifts = [_shift_from_dict(d) for d in (raw.get("shifts") or [])]
+    staff_atts = [_staff_from_dict(d) for d in (raw.get("staff_atts") or [])]
+    expenses = _restore_expenses(raw)
+
+    payload = build_daily_report_payload(
+        db, session,
+        generated_by=generated_by,
+        shifts_override=shifts,
+        staff_atts_override=staff_atts,
+        expenses_override=expenses,
+    )
+    return payload, raw
+
+
 # ─────────────────────────────────────────
 # スナップショット保存
 # ─────────────────────────────────────────
@@ -545,6 +709,7 @@ def save_snapshot(
     business_date: date,
     payload: dict,
     *,
+    raw_inputs: Optional[dict] = None,
     generated_by: Optional[int] = None,
 ) -> models.DailyReportSnapshot:
     """新バージョンとして保存（既存は不変）"""
@@ -559,6 +724,7 @@ def save_snapshot(
         business_date=business_date,
         version=next_version,
         payload=payload,
+        raw_inputs=raw_inputs,
         created_by=generated_by,
     )
     db.add(snap)
