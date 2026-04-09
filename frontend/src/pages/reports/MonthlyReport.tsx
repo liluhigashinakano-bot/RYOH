@@ -142,6 +142,13 @@ export default function MonthlyReport() {
               <StatBox label="L/セット" value={summary.drink_l_per_set?.toString() ?? '—'} />
               <StatBox label="MG/セット" value={summary.drink_mg_per_set?.toString() ?? '—'} />
               <StatBox label="シャンパン売上" value={fmtYen(summary.champagne_amount)} accent="yellow" />
+              {(summary.custom_drink_columns || []).map((col: any) => (
+                <StatBox
+                  key={col.short}
+                  label={`${col.label}（${col.short}）`}
+                  value={fmtNum((summary.custom_drinks_total || {})[col.short] ?? 0)}
+                />
+              ))}
             </div>
           </div>
 

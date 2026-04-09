@@ -395,6 +395,9 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
     hourly = defaultdict(int)
     course = defaultdict(int)
     rotation_per_cast = defaultdict(int)
+    custom_drinks_total: dict = defaultdict(int)
+    # 略称 → ラベルマップ（最新の payload から取る）
+    custom_drink_columns_latest: list = []
 
     sums = defaultdict(int)
     sum_n_amount = 0
@@ -438,6 +441,15 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             sum_n_amount += int(s["avg_per_n"]) * int(s["n_count"])
         if s.get("avg_per_r") is not None and s.get("r_count"):
             sum_r_amount += int(s["avg_per_r"]) * int(s["r_count"])
+
+        # custom_drink_columns（最後にロードしたものを採用）
+        cdc = p.get("custom_drink_columns") or []
+        if cdc:
+            custom_drink_columns_latest = cdc
+        # カスタムドリンク総数（伝票毎の custom_drinks を合算）
+        for tb in (p.get("tickets") or []):
+            for short, qty in (tb.get("custom_drinks") or {}).items():
+                custom_drinks_total[short] += int(qty or 0)
 
         # キャスト別累積
         for c in (p.get("cast_attendance") or []):
@@ -511,6 +523,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         "drink_l_per_set": round(sums["drink_l_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_mg_per_set": round(sums["drink_mg_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "cast_summary": cast_summary,
+        "custom_drinks_total": dict(custom_drinks_total),
+        "custom_drink_columns": custom_drink_columns_latest,
     }
 
 

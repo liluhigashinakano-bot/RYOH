@@ -3523,7 +3523,15 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         const closePanel = () => { setEditingOrderId(null); setSelectedOrderId(null); setActionPos(null); setOperatorName(''); setOperatorReason(''); setActionMode('add'); setChampEditCasts([]) }
         return (
           <div
-            style={{ position: 'fixed', top: actionPos.top, left: actionPos.left, width: actionPos.width, zIndex: 200 }}
+            style={{
+              position: 'fixed',
+              top: actionPos.top,
+              left: actionPos.left,
+              width: actionPos.width,
+              zIndex: 200,
+              maxHeight: `calc(100vh - ${actionPos.top + 20}px)`,
+              overflowY: 'auto',
+            }}
             className="bg-night-800 border border-night-600 border-t-0 rounded-b-xl shadow-2xl px-4 py-3 space-y-2"
             onClick={e => e.stopPropagation()}
           >
