@@ -840,7 +840,7 @@ def update_champagne_ratios(
 
     db.commit()
 
-    # 該当日の日報スナップショットを自動再生成（raw_inputs があれば）
+    # 該当日の日報スナップショットを更新
     if ticket and distribution_json is not None:
         try:
             from datetime import timedelta as _td
@@ -852,6 +852,7 @@ def update_champagne_ratios(
                 biz_date = (ref + _td(hours=9)).date()
                 snap = get_latest_snapshot(db, ticket.store_id, biz_date)
                 if snap and snap.raw_inputs:
+                    # raw_inputs があれば完全再生成
                     payload, raw_inputs = regenerate_from_snapshot(
                         db, snap, generated_by=current_user.id
                     )
@@ -859,8 +860,14 @@ def update_champagne_ratios(
                         db, snap.store_id, snap.business_date, payload,
                         raw_inputs=raw_inputs, generated_by=current_user.id,
                     )
+                elif snap:
+                    # raw_inputs 無し → シャンパン額・本数のみ強制再計算して payload を上書き保存
+                    from .reports import _enrich_legacy_payload
+                    new_payload = _enrich_legacy_payload(db, snap.payload, force=True)
+                    snap.payload = new_payload
+                    db.commit()
         except Exception as e:
-            print(f"[WARNING] 日報自動再生成失敗: {e}")
+            print(f"[WARNING] 日報更新失敗: {e}")
 
     return {"ok": True, "total_amount": ticket.total_amount if ticket else None}
 

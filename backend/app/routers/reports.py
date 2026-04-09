@@ -34,10 +34,11 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 # 旧スナップショット補完 (シャンパン額・カスタムメニュー列の追記)
 # ─────────────────────────────────────────
 
-def _enrich_legacy_payload(db: Session, payload: dict) -> dict:
+def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -> dict:
     """過去スナップショットに custom_drink_columns / シャンパン額 / custom_drinks を
     追記して返す（破壊しない）。
-    - すでに新フォーマットなら触らない
+    - すでに新フォーマットで force=False なら触らない
+    - force=True なら新フォーマットでもシャンパン関連と custom_drinks を上書き再計算
     - DBの tickets/orders/menu_configs/incentive_configs を参照して再計算
     """
     if not isinstance(payload, dict):
@@ -47,7 +48,7 @@ def _enrich_legacy_payload(db: Session, payload: dict) -> dict:
     has_champ_amount = (
         sample_cast is not None and "champagne_amount" in sample_cast
     )
-    if has_custom_cols and has_champ_amount:
+    if has_custom_cols and has_champ_amount and not force:
         return payload  # 新フォーマット、補完不要
 
     store_id = payload.get("store_id")
@@ -138,9 +139,14 @@ def _enrich_legacy_payload(db: Session, payload: dict) -> dict:
             for it in items:
                 if (it.unit_price or 0) > 0:
                     champ_amount += (it.unit_price or 0) * (it.quantity or 0)
-        nt.setdefault("champagne_count", champ_count)
-        nt.setdefault("champagne_amount", champ_amount)
-        nt.setdefault("custom_drinks", _custom_drinks_for(active_orders))
+        if force:
+            nt["champagne_count"] = champ_count
+            nt["champagne_amount"] = champ_amount
+            nt["custom_drinks"] = _custom_drinks_for(active_orders)
+        else:
+            nt.setdefault("champagne_count", champ_count)
+            nt.setdefault("champagne_amount", champ_amount)
+            nt.setdefault("custom_drinks", _custom_drinks_for(active_orders))
         new_ticket_blocks.append(nt)
 
     # ─── cast_attendance 補完 ───
@@ -173,17 +179,21 @@ def _enrich_legacy_payload(db: Session, payload: dict) -> dict:
                             champ_amount += int(back_pool * ratio / 100)
                             champ_count += 1
                             break
-        nc.setdefault("champagne_count", champ_count)
-        nc.setdefault("champagne_amount", champ_amount)
         # custom_drinks
+        cd_total = {}
         if cid is not None:
             cd_total = {short: 0 for short in custom_short_map.values()}
             for ot in orm_tickets:
                 for short, qty in _custom_drinks_for(ot.order_items or [], label_filter_cast_id=cid).items():
                     cd_total[short] = cd_total.get(short, 0) + qty
-            nc.setdefault("custom_drinks", cd_total)
+        if force:
+            nc["champagne_count"] = champ_count
+            nc["champagne_amount"] = champ_amount
+            nc["custom_drinks"] = cd_total
         else:
-            nc.setdefault("custom_drinks", {})
+            nc.setdefault("champagne_count", champ_count)
+            nc.setdefault("champagne_amount", champ_amount)
+            nc.setdefault("custom_drinks", cd_total)
         new_cast_blocks.append(nc)
 
     new_payload = dict(payload)
