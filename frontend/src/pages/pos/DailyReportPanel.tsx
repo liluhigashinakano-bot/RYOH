@@ -244,7 +244,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   ))}
                   <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
                   <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
-                  <th className="text-center py-0.5">接客中会計</th>
+                  <th className="text-center py-0.5">対応中会計</th>
                   <th className="text-center py-0.5">ﾃｨｯｼｭ枚</th>
                   <th className="text-right py-0.5">ﾃｨｯｼｭ時間</th>
                   <th className="text-right py-0.5">待機時間</th>
