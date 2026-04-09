@@ -412,7 +412,9 @@ def add_order(
     # インセンティブスナップショット & 分配情報の計算
     snapshot = None
     distribution_json = None
-    if data.cast_id is not None:
+    # シャンパンなど cast_distribution で複数キャストに分配する場合、cast_id は None。
+    # その場合も snapshot は計算する必要がある（バック額の元データになるため）。
+    if data.cast_id is not None or data.cast_distribution:
         imap = build_incentive_map(db, ticket.store_id)
         lmap = build_custom_menu_label_map(db, ticket.store_id)
         snapshot = calc_incentive_snapshot(

@@ -15,6 +15,7 @@ build_daily_report_payload / save_snapshot のみを使う。
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, date
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
@@ -22,6 +23,43 @@ from sqlalchemy import or_
 
 from .. import models
 from . import report_calc as rc
+
+
+def _assign_short_names(labels: List[str]) -> Dict[str, str]:
+    """カスタムメニュー名から略称を生成（衝突回避）。
+    例: "オリカクL" → "オL", "オリカクMG" → "オMG"
+    末尾の連続英字を suffix として残し、先頭の日本語1文字 + suffix。
+    衝突したら頭文字を2文字、3文字…と拡張。それでも衝突したら末尾に番号付与。
+    """
+    result: Dict[str, str] = {}
+    used: set = set()
+    for label in sorted(labels):
+        m = re.match(r'^(.*?)([A-Za-z]+)$', label)
+        if m:
+            head = m.group(1).strip()
+            suffix = m.group(2)
+        else:
+            head = label.strip()
+            suffix = ''
+        if not head:
+            head = label
+        assigned = None
+        for n in range(1, len(head) + 1):
+            cand = head[:n] + suffix
+            if cand not in used:
+                assigned = cand
+                break
+        if assigned is None:
+            i = 2
+            while True:
+                cand = head + suffix + str(i)
+                if cand not in used:
+                    assigned = cand
+                    break
+                i += 1
+        result[label] = assigned
+        used.add(assigned)
+    return result
 
 
 # ─────────────────────────────────────────
@@ -314,6 +352,17 @@ def build_daily_report_payload(
     # ─── キャスト人件費 ───
     cast_payroll_block = rc.cast_payroll_summary(shifts, tickets, daily_sales)
 
+    # ─── カスタムメニュー（キャスト選択あり×インセンティブあり）の略称マップ ───
+    from .incentive import strip_cast_suffix
+    custom_menu_labels = sorted({
+        m.label for m in menu_configs
+        if m.is_active and m.cast_required and m.has_incentive
+    })
+    custom_short_map = _assign_short_names(custom_menu_labels)
+    custom_drink_columns = [
+        {"label": l, "short": custom_short_map[l]} for l in custom_menu_labels
+    ]
+
     # ─── 伝票一覧 ───
     ticket_blocks = []
     for t in tickets:
@@ -347,6 +396,18 @@ def build_daily_report_payload(
                 }
                 for group in rc.champagne_groups(t)
             ],
+            "champagne_count": rc.champagne_count_total([t]),
+            "champagne_amount": rc.champagne_amount_total([t]),
+            "custom_drinks": {
+                custom_short_map[label]: sum(
+                    o.quantity
+                    for o in t.orders
+                    if not o.canceled
+                    and o.item_type == "custom_menu"
+                    and strip_cast_suffix(o.item_name or "") == label
+                )
+                for label in custom_menu_labels
+            },
         })
 
     # ─── キャスト勤怠 ───
@@ -425,6 +486,18 @@ def build_daily_report_payload(
             "shot_cast": sum(o.quantity for t in tickets for o in t.orders if not o.canceled and o.cast_id == cid and o.item_type == "shot_cast"),
             "champagne_count": champagne_count,
             "champagne_amount": champagne_amount,
+            "custom_drinks": {
+                custom_short_map[label]: sum(
+                    o.quantity
+                    for t in tickets
+                    for o in t.orders
+                    if not o.canceled
+                    and o.cast_id == cid
+                    and o.item_type == "custom_menu"
+                    and strip_cast_suffix(o.item_name or "") == label
+                )
+                for label in custom_menu_labels
+            },
         })
 
     # ─── 社員/アルバイト勤怠 ───
@@ -458,6 +531,7 @@ def build_daily_report_payload(
         "tickets": ticket_blocks,
         "cast_attendance": cast_blocks,
         "staff_attendance": staff_blocks,
+        "custom_drink_columns": custom_drink_columns,
     }
 
 

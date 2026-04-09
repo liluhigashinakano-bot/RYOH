@@ -70,6 +70,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
   const tickets = p.tickets || []
   const cast_attendance = p.cast_attendance || []
   const staff_attendance = p.staff_attendance || []
+  const custom_drink_columns: { label: string; short: string }[] = p.custom_drink_columns || []
 
   return (
     <div className="space-y-3">
@@ -210,6 +211,9 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   <th className="text-center py-0.5">L</th>
                   <th className="text-center py-0.5">MG</th>
                   <th className="text-center py-0.5">SH</th>
+                  {custom_drink_columns.map(col => (
+                    <th key={col.short} className="text-center py-0.5">{col.short}</th>
+                  ))}
                   <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
                   <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
                   <th className="text-right py-0.5">22-26ﾊﾟﾌｫ</th>
@@ -233,6 +237,11 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     <td className="py-1 text-center text-gray-300">{c.drink_l || '—'}</td>
                     <td className="py-1 text-center text-gray-300">{c.drink_mg || '—'}</td>
                     <td className="py-1 text-center text-gray-300">{c.shot_cast || '—'}</td>
+                    {custom_drink_columns.map(col => (
+                      <td key={col.short} className="py-1 text-center text-gray-300">
+                        {(c.custom_drinks?.[col.short] ?? 0) || '—'}
+                      </td>
+                    ))}
                     <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
                     <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
                     <td className="py-1 text-right text-blue-300">{c.perf_22_26 !== null && c.perf_22_26 !== undefined ? fmtYen(c.perf_22_26) : '—'}</td>
@@ -292,6 +301,11 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   <th className="text-center py-0.5">延長</th>
                   <th className="text-center py-0.5">交代</th>
                   <th className="text-center py-0.5">S/L/MG/SH</th>
+                  {custom_drink_columns.map(col => (
+                    <th key={col.short} className="text-center py-0.5">{col.short}</th>
+                  ))}
+                  <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
+                  <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
                   <th className="text-right py-0.5">金額</th>
                 </tr>
               </thead>
@@ -315,6 +329,13 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     <td className="py-1 text-center text-gray-400 text-[10px]">
                       {t.drink_s}/{t.drink_l}/{t.drink_mg}/{t.shot_cast}
                     </td>
+                    {custom_drink_columns.map(col => (
+                      <td key={col.short} className="py-1 text-center text-gray-300">
+                        {(t.custom_drinks?.[col.short] ?? 0) || '—'}
+                      </td>
+                    ))}
+                    <td className="py-1 text-center text-yellow-400">{t.champagne_count > 0 ? t.champagne_count : '—'}</td>
+                    <td className="py-1 text-right text-yellow-400">{t.champagne_amount > 0 ? fmtYen(t.champagne_amount) : '—'}</td>
                     <td className="py-1 text-right text-green-400">{fmtYen(t.total_amount)}</td>
                   </tr>
                 ))}
