@@ -194,7 +194,13 @@ const JOIN_DURATION = 40 * 60 * 1000  // 40分
 function JoinAutoExtender({ ticket, storeId }: { ticket: any; storeId: number }) {
   const qc = useQueryClient()
   useNow()  // 1秒ごとに再レンダリングさせるためだけに使用
-  const firedRef = useRef<Record<number, number>>({})
+  // 各 join item の最後に発火した時刻（UNIX ms）。連続発火の安全弁。
+  const lastFireRef = useRef<Record<number, number>>({})
+  // マウント時刻。これより前の合流は「過去分」として無視する（リロード時の暴走防止）
+  const mountedAtRef = useRef<number>(Date.now())
+  // 各 join item をマウント時刻基準で初回処理した intervalNum（マウント以降の経過分のみ加算）
+  const baselineRef = useRef<Record<number, number>>({})
+  const inflightRef = useRef<Set<number>>(new Set())
 
   useEffect(() => {
     if (!ticket || ticket.is_closed) return
@@ -205,30 +211,42 @@ function JoinAutoExtender({ ticket, storeId }: { ticket: any; storeId: number })
 
     const nowMs = Date.now()
     for (const item of joinItems) {
+      // 初回観測時のベースラインを必ず記録
       const startMs = new Date(item.created_at.endsWith('Z') ? item.created_at : item.created_at + 'Z').getTime()
       const elapsed = nowMs - startMs
       const intervalNum = Math.floor(elapsed / JOIN_DURATION)
 
-      if (firedRef.current[item.id] === undefined) {
-        firedRef.current[item.id] = intervalNum
+      if (baselineRef.current[item.id] === undefined) {
+        baselineRef.current[item.id] = intervalNum
         continue
       }
-      if (intervalNum > firedRef.current[item.id]) {
-        firedRef.current[item.id] = intervalNum
-        const isPremium = item.item_name.includes('プレミアム')
-        const extPrice = isPremium ? 4000 : 3000
-        const extName = isPremium ? '合流延長（プレミアム）' : '合流延長（スタンダード）'
-        const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && oi.item_name === extName)
-        const req = existing
-          ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + 1 })
-          : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', item_name: extName, unit_price: extPrice, quantity: 1 })
-        req.then(() => {
-          qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
-          qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
-        })
-      }
+      if (intervalNum <= baselineRef.current[item.id]) continue
+
+      // 連続発火の安全弁: 同じ id で前回 fire してから 60 秒空ける
+      const lastFire = lastFireRef.current[item.id] || 0
+      if (nowMs - lastFire < 60_000) continue
+      // in-flight guard: 同時並行の POST を防ぐ
+      if (inflightRef.current.has(item.id)) continue
+
+      lastFireRef.current[item.id] = nowMs
+      inflightRef.current.add(item.id)
+      baselineRef.current[item.id] = intervalNum
+
+      const isPremium = item.item_name.includes('プレミアム')
+      const extPrice = isPremium ? 4000 : 3000
+      const extName = isPremium ? '合流延長（プレミアム）' : '合流延長（スタンダード）'
+      const existing = (ticket.order_items ?? []).find((oi: any) => !oi.canceled_at && oi.item_type === 'extension' && oi.item_name === extName)
+      const req = existing
+        ? apiClient.patch(`/api/tickets/orders/${existing.id}`, { quantity: existing.quantity + 1 })
+        : apiClient.post(`/api/tickets/${ticket.id}/orders`, { item_type: 'extension', item_name: extName, unit_price: extPrice, quantity: 1 })
+      req.then(() => {
+        qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+        qc.invalidateQueries({ queryKey: ['ticket', ticket.id] })
+      }).finally(() => {
+        inflightRef.current.delete(item.id)
+      })
     }
-  })
+  }, [ticket?.id, ticket?.order_items?.length])
 
   return null
 }
