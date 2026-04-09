@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, X, CreditCard, Banknote, Bot, Play, Pause, QrCode, ClipboardList, Pencil } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
+import DailyReportPanel from './DailyReportPanel'
 
 const ITEM_TYPE_LABELS: Record<string, string> = {
   extension: '延長', drink_s: 'Sドリンク', drink_l: 'Lドリンク',
@@ -4991,6 +4992,9 @@ function SessionReportList({ storeId }: { storeId: number }) {
               <h2 className="text-xl font-black text-white">{selected.date} 日報</h2>
               {selected.event_name && <span className="text-pink-400 text-sm">{selected.event_name}</span>}
             </div>
+
+            {/* 日報スナップショット（Phase D） */}
+            <DailyReportPanel storeId={storeId} date={selected.date} />
 
             {/* サマリー */}
             <div className="grid grid-cols-2 gap-3">
