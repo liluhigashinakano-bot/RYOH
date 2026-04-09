@@ -274,6 +274,7 @@ export default function POS() {
   // カード上の顧客・キャストモーダルをPOSPage レベルで管理（TicketCard内の event propagation 問題を回避）
   const [customerModalTicket, setCustomerModalTicket] = useState<any | null>(null)
   const [castModalTicket, setCastModalTicket] = useState<any | null>(null)
+  const [activeCastsModalTicket, setActiveCastsModalTicket] = useState<any | null>(null)
   const qc = useQueryClient()
 
   const { data: tickets = [] } = useQuery({
@@ -439,6 +440,7 @@ export default function POS() {
             <TicketCard key={ticket.id} ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
               onOpenCustomerModal={t => setCustomerModalTicket(t)}
               onOpenCastModal={t => setCastModalTicket(t)}
+              onOpenActiveCastsModal={t => setActiveCastsModalTicket(t)}
             />
           ))}
           <div className="shrink-0 w-3" />
@@ -481,6 +483,19 @@ export default function POS() {
             setCastModalTicket(null)
           }}
           onClose={() => setCastModalTicket(null)}
+        />
+      )}
+      {activeCastsModalTicket && (
+        <ActiveCastsModal
+          storeId={selectedStoreId}
+          ticketId={activeCastsModalTicket.id}
+          currentCastIds={(activeCastsModalTicket.current_casts || []).map((c: any) => c.cast_id).filter((x: any) => typeof x === 'number')}
+          onSubmit={ids => {
+            apiClient.post(`/api/tickets/${activeCastsModalTicket.id}/assignments/set`, { cast_ids: ids })
+              .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
+            setActiveCastsModalTicket(null)
+          }}
+          onClose={() => setActiveCastsModalTicket(null)}
         />
       )}
 
@@ -1734,10 +1749,11 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
   )
 }
 
-function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal }: {
+function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal, onOpenActiveCastsModal }: {
   ticket: any; storeId: number; onClick: () => void
   onOpenCustomerModal: (ticket: any) => void
   onOpenCastModal: (ticket: any) => void
+  onOpenActiveCastsModal: (ticket: any) => void
 }) {
   const qc = useQueryClient()
   const now = useNow()
@@ -1820,11 +1836,12 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
           className="w-fit text-left text-primary-400 hover:text-primary-300 transition-colors underline decoration-dotted">
           {ticket.featured_cast_name || '担当未設定'}
         </button>
-        {ticket.current_casts && ticket.current_casts.length > 0 && (
-          <span className="text-[10px] text-purple-300">
-            接客中: {ticket.current_casts.map((c: any) => c.cast_name).join('・')}
-          </span>
-        )}
+        <button onClick={e => { e.stopPropagation(); onOpenActiveCastsModal(ticket) }}
+          className="w-fit text-left text-purple-300 hover:text-purple-200 transition-colors underline decoration-dotted text-[10px]">
+          {(ticket.current_casts && ticket.current_casts.length > 0)
+            ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+            : '接客中未設定'}
+        </button>
       </div>
 
       {/* E/残り時間タイマー */}
