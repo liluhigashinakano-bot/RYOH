@@ -192,7 +192,8 @@ def update_cast(
         if current_user.role not in MANAGER_ROLES:
             raise HTTPException(status_code=403, detail="時給変更は管理者・編集者のみ可能です")
 
-    # ヘルプ時給は基本時給+100に自動設定
+    # ヘルプ時給は常に基本時給+100に強制（直接更新は無視）
+    update_data.pop('help_hourly_rate', None)
     if "hourly_rate" in update_data:
         update_data['help_hourly_rate'] = update_data['hourly_rate'] + 100
 
