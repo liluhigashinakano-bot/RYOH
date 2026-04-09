@@ -257,7 +257,7 @@ export default function POS() {
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
   const [showNewTicket, setShowNewTicket] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
-  const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports'>('open')
+  const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports' | 'casts'>('open')
   const [showOpenSessionModal, setShowOpenSessionModal] = useState(false)
   const [showCloseSessionModal, setShowCloseSessionModal] = useState(false)
   const [showSessionThanks, setShowSessionThanks] = useState(false)
@@ -401,6 +401,10 @@ export default function POS() {
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'open' ? 'bg-pink-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               オープン中
             </button>
+            <button onClick={() => setView('casts')}
+              className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'casts' ? 'bg-purple-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+              接客中キャスト
+            </button>
             <button onClick={() => setView('attendance')}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'attendance' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               従業員勤怠
@@ -442,6 +446,8 @@ export default function POS() {
             <div className="flex-1 text-center text-gray-500 py-16">現在オープン中の伝票はありません</div>
           )}
         </div>
+      ) : view === 'casts' ? (
+        <ActiveCastsView storeId={selectedStoreId} tickets={tickets} onTicketClick={(id) => setSelectedTicketId(id)} />
       ) : view === 'attendance' ? (
         <CastAttendanceView storeId={selectedStoreId} />
       ) : view === 'history' ? (
@@ -4477,6 +4483,106 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
     </div>
   )
 }
+
+function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void }) {
+  // 出勤中キャスト一覧
+  const { data: shifts = [] } = useQuery({
+    queryKey: ['casts-working', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    enabled: !!storeId,
+    refetchInterval: 15000,
+  })
+
+  // キャスト別の現在担当卓
+  // ticket.assignments の ended_at が null の最新行を抽出
+  const castToTicket: Record<number, any> = {}
+  for (const t of tickets) {
+    const active = (t.assignments || []).filter((a: any) => a.ended_at === null && a.cast_id !== null)
+    if (active.length === 0) continue
+    // 同じ卓に複数の active が出ることは無い想定だが、念のため最新
+    const latest = active.reduce((m: any, a: any) => (m && new Date(m.started_at) > new Date(a.started_at) ? m : a), null)
+    if (latest) castToTicket[latest.cast_id] = t
+  }
+
+  // 出勤中・接客なしのキャスト
+  const workingCasts = (shifts as any[]).filter((s: any) => !s.is_absent && s.actual_start && !s.actual_end)
+  const idleCasts = workingCasts.filter((s: any) => s.cast_id !== null && !castToTicket[s.cast_id!])
+  const busyCasts = workingCasts.filter((s: any) => s.cast_id !== null && castToTicket[s.cast_id!])
+
+  return (
+    <div className="flex-1 overflow-y-auto space-y-4 px-1 pb-4">
+      {/* 卓ごと */}
+      <div className="card">
+        <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">卓ごと（{tickets.length}卓）</div>
+        {tickets.length === 0 ? (
+          <div className="text-xs text-gray-600 py-4 text-center">オープン中の卓はありません</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {tickets.map((t: any) => (
+              <button key={t.id}
+                onClick={() => onTicketClick(t.id)}
+                className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-white font-bold">{t.table_no || '—'}</span>
+                  <span className="text-[10px] text-gray-500">{t.guest_count}名</span>
+                </div>
+                <div className="text-xs mt-0.5">
+                  <span className="text-gray-500">担当: </span>
+                  <span className="text-purple-300">{t.current_cast_name || '未設定'}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* キャストごと */}
+      <div className="card">
+        <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">出勤中キャスト（{workingCasts.length}名）</div>
+        {workingCasts.length === 0 ? (
+          <div className="text-xs text-gray-600 py-4 text-center">出勤中のキャストはいません</div>
+        ) : (
+          <>
+            <div className="text-[10px] text-gray-500 mb-1">接客中（{busyCasts.length}名）</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
+              {busyCasts.map((s: any) => {
+                const t = castToTicket[s.cast_id!]
+                return (
+                  <button key={s.shift_id}
+                    onClick={() => onTicketClick(t.id)}
+                    className="text-left bg-pink-900/30 hover:bg-pink-900/50 border border-pink-800/50 rounded-lg p-2 transition-colors"
+                  >
+                    <div className="text-white text-sm font-medium">{s.cast_name}</div>
+                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 接客中</div>
+                  </button>
+                )
+              })}
+              {busyCasts.length === 0 && (
+                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">接客中のキャストはいません</div>
+              )}
+            </div>
+            <div className="text-[10px] text-gray-500 mb-1">待機中（{idleCasts.length}名）</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {idleCasts.map((s: any) => (
+                <div key={s.shift_id}
+                  className="bg-night-700 rounded-lg p-2"
+                >
+                  <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">待機中</div>
+                </div>
+              ))}
+              {idleCasts.length === 0 && (
+                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">待機中のキャストはいません</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 
 function CastAttendanceView({ storeId }: { storeId: number }) {
   const qc = useQueryClient()
