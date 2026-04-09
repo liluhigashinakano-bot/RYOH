@@ -331,6 +331,16 @@ def get_tickets(
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
     tickets = query.order_by(models.Ticket.started_at.desc()).all()
+    # オープン中はテーブル番号で並べ替え (A1, A2, ..., A10, B1, ...)
+    if is_closed is False:
+        import re
+        def _sort_key(t):
+            tn = t.table_no or ''
+            m = re.match(r'^([A-Za-z]*)(\d*)$', tn)
+            if m:
+                return (m.group(1), int(m.group(2)) if m.group(2) else 0, tn)
+            return (tn, 0, tn)
+        tickets.sort(key=_sort_key)
     result = []
     for t in tickets:
         data = _to_response(t)
