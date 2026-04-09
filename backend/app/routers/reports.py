@@ -476,6 +476,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
 
     # キャスト別月次累積（cast_id があれば cast_id、無ければ "help:NAME"）
     cast_acc: dict = {}
+    # 社員/アルバイト別月次累積（name でグルーピング）
+    staff_acc: dict = {}
 
     def _cast_key(c: dict) -> str:
         cid = c.get("cast_id")
@@ -566,6 +568,26 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             for short, qty in (c.get("custom_drinks") or {}).items():
                 acc["custom_drinks"][short] = acc["custom_drinks"].get(short, 0) + int(qty or 0)
 
+        # 社員/アルバイト別累積
+        for st in (p.get("staff_attendance") or []):
+            if st.get("is_absent"):
+                continue
+            name = st.get("name") or "?"
+            if name not in staff_acc:
+                staff_acc[name] = {
+                    "name": name,
+                    "employee_type": st.get("employee_type"),
+                    "work_days": 0,
+                    "work_hours_total": 0.0,
+                    "daily_pay_total": 0,
+                }
+            sa = staff_acc[name]
+            sa["work_days"] += 1
+            sa["work_hours_total"] += float(st.get("work_hours") or 0)
+            sa["daily_pay_total"] += int(st.get("daily_pay") or 0)
+            if not sa.get("employee_type") and st.get("employee_type"):
+                sa["employee_type"] = st.get("employee_type")
+
     def _div(num, den):
         return int(num / den) if den else None
 
@@ -579,6 +601,15 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         v["work_hours_total"] = round(v["work_hours_total"], 2)
         cast_summary.append(v)
     cast_summary.sort(key=lambda x: (x["is_help"], -(x["incentive_total"] or 0)))
+
+    # 社員/アルバイト別累積を整形
+    staff_summary = []
+    for v in staff_acc.values():
+        v["work_hours_total"] = round(v["work_hours_total"], 2)
+        staff_summary.append(v)
+    # 社員→アルバイト→その他、同区分内は時間降順
+    _type_order = {"staff": 0, "part_time": 1}
+    staff_summary.sort(key=lambda x: (_type_order.get(x.get("employee_type") or "", 9), -x["work_hours_total"]))
 
     return {
         **sums,
@@ -594,6 +625,7 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         "drink_l_per_set": round(sums["drink_l_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_mg_per_set": round(sums["drink_mg_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "cast_summary": cast_summary,
+        "staff_summary": staff_summary,
         "custom_drinks_total": dict(custom_drinks_total),
         "custom_drink_columns": custom_drink_columns_latest,
     }

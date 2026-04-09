@@ -47,6 +47,7 @@ export default function MonthlyReport() {
   const summary = data?.summary || {}
   const breakdown: any[] = data?.daily_breakdown || []
   const castSummary: any[] = summary.cast_summary || []
+  const staffSummary: any[] = summary.staff_summary || []
 
   // キャスト累積に出てくる custom_drinks のキー（略称）を集めて列定義
   const customDrinkShorts = useMemo(() => {
@@ -282,6 +283,37 @@ export default function MonthlyReport() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* 社員/アルバイト別月次累積 */}
+          {staffSummary.length > 0 && (
+            <div className="card">
+              <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-3">社員/アルバイト別月次累積（{staffSummary.length}名）</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left py-0.5">名前</th>
+                    <th className="text-left py-0.5">区分</th>
+                    <th className="text-right py-0.5">出勤日</th>
+                    <th className="text-right py-0.5">時間</th>
+                    <th className="text-right py-0.5">日払い合計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staffSummary.map((s, i) => (
+                    <tr key={i} className="border-t border-gray-800">
+                      <td className="py-1 text-white">{s.name}</td>
+                      <td className="py-1 text-gray-400">
+                        {s.employee_type === 'staff' ? '社員' : s.employee_type === 'part_time' ? 'アルバイト' : '—'}
+                      </td>
+                      <td className="py-1 text-right text-gray-300">{s.work_days}日</td>
+                      <td className="py-1 text-right text-gray-300">{s.work_hours_total}h</td>
+                      <td className="py-1 text-right text-orange-300">{s.daily_pay_total > 0 ? fmtYen(s.daily_pay_total) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
