@@ -120,19 +120,23 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* シャンパン・カスタムドリンク */}
+                  {/* ドリンク・シャンパン・カスタムドリンク */}
                   <div className="flex items-center gap-3 flex-wrap text-xs pt-1 border-t border-gray-800/60">
-                    <div>
-                      <span className="text-gray-500">ｼｬﾝﾊﾟﾝ </span>
-                      <span className="text-yellow-400 font-bold">{dash.champagne_count ?? 0}本</span>
-                      <span className="text-yellow-400 font-bold ml-1">¥{(dash.champagne_amount ?? 0).toLocaleString()}</span>
-                    </div>
+                    <div><span className="text-gray-500">S </span><span className="text-white font-bold">{dash.drink_s_total ?? 0}</span></div>
+                    <div><span className="text-gray-500">L </span><span className="text-white font-bold">{dash.drink_l_total ?? 0}</span></div>
+                    <div><span className="text-gray-500">MG </span><span className="text-white font-bold">{dash.drink_mg_total ?? 0}</span></div>
+                    <div><span className="text-gray-500">SH </span><span className="text-white font-bold">{dash.shot_cast_total ?? 0}</span></div>
                     {(dash.custom_drink_columns ?? []).map((col: any) => (
                       <div key={col.short}>
                         <span className="text-gray-500">{col.label} </span>
                         <span className="text-white font-bold">{(dash.custom_drinks_total ?? {})[col.short] ?? 0}</span>
                       </div>
                     ))}
+                    <div>
+                      <span className="text-gray-500">ｼｬﾝﾊﾟﾝ </span>
+                      <span className="text-yellow-400 font-bold">{dash.champagne_count ?? 0}本</span>
+                      <span className="text-yellow-400 font-bold ml-1">¥{(dash.champagne_amount ?? 0).toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
               )}

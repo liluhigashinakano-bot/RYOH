@@ -157,9 +157,13 @@ def get_dashboard(
     })
     short_map = _assign_short_names(custom_labels)
     custom_drinks_total: dict = defaultdict(int)
-    # シャンパン本数・金額
+    # シャンパン本数・金額・標準ドリンク本数
     champagne_count = 0
     champagne_amount = 0
+    drink_s_total = 0
+    drink_l_total = 0
+    drink_mg_total = 0
+    shot_cast_total = 0
     all_tickets = closed_tickets + open_tickets
     for t in all_tickets:
         # シャンパン: グループ単位で1本と数える
@@ -173,6 +177,14 @@ def get_dashboard(
                 lbl = _strip(o.item_name or "")
                 if lbl in short_map:
                     custom_drinks_total[short_map[lbl]] += int(o.quantity or 0)
+            elif o.item_type == "drink_s":
+                drink_s_total += int(o.quantity or 0)
+            elif o.item_type == "drink_l":
+                drink_l_total += int(o.quantity or 0)
+            elif o.item_type == "drink_mg":
+                drink_mg_total += int(o.quantity or 0)
+            elif o.item_type == "shot_cast":
+                shot_cast_total += int(o.quantity or 0)
         for items in groups.values():
             champagne_count += 1
             for it in items:
@@ -249,6 +261,10 @@ def get_dashboard(
         "custom_drink_columns": custom_drink_columns,
         "champagne_count": champagne_count,
         "champagne_amount": champagne_amount,
+        "drink_s_total": drink_s_total,
+        "drink_l_total": drink_l_total,
+        "drink_mg_total": drink_mg_total,
+        "shot_cast_total": shot_cast_total,
     }
 
 
