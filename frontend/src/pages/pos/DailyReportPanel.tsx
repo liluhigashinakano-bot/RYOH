@@ -80,6 +80,10 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
   const cast_attendance = p.cast_attendance || []
   const staff_attendance = p.staff_attendance || []
   const custom_drink_columns: { label: string; short: string }[] = p.custom_drink_columns || []
+  const castNameById: Record<number, string> = {}
+  for (const c of cast_attendance) {
+    if (typeof c.cast_id === 'number') castNameById[c.cast_id] = c.cast_name
+  }
 
   return (
     <div className="space-y-3">
@@ -240,6 +244,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   ))}
                   <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
                   <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
+                  <th className="text-center py-0.5">接客中会計</th>
                   <th className="text-right py-0.5">22-26ﾊﾟﾌｫ</th>
                 </tr>
               </thead>
@@ -269,6 +274,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     ))}
                     <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
                     <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
+                    <td className="py-1 text-center text-purple-300">{c.closing_count > 0 ? c.closing_count : '—'}</td>
                     <td className="py-1 text-right text-blue-300">{c.perf_22_26 !== null && c.perf_22_26 !== undefined ? fmtYen(c.perf_22_26) : '—'}</td>
                   </tr>
                 ))}
@@ -331,6 +337,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                   ))}
                   <th className="text-center py-0.5">ｼｬﾝﾊﾟﾝ</th>
                   <th className="text-right py-0.5">ｼｬﾝﾊﾟﾝ額</th>
+                  <th className="text-left py-0.5">会計担当</th>
                   <th className="text-right py-0.5">金額</th>
                 </tr>
               </thead>
@@ -361,6 +368,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     ))}
                     <td className="py-1 text-center text-yellow-400">{t.champagne_count > 0 ? t.champagne_count : '—'}</td>
                     <td className="py-1 text-right text-yellow-400">{t.champagne_amount > 0 ? fmtYen(t.champagne_amount) : '—'}</td>
+                    <td className="py-1 text-purple-300">{t.closing_cast_name || (t.closing_cast_id ? castNameById[t.closing_cast_id] : '') || '—'}</td>
                     <td className="py-1 text-right text-green-400">{fmtYen(t.total_amount)}</td>
                   </tr>
                 ))}
