@@ -605,6 +605,67 @@ def build_daily_report_payload(
             },
         })
 
+    # ─── 出勤外キャストへのシャンパン分配を追加（cast_blocks 末尾に） ───
+    existing_cast_ids = {b.get("cast_id") for b in cast_blocks if b.get("cast_id") is not None}
+    extra_dist_cids: set = set()
+    for t in tickets:
+        for group in rc.champagne_groups(t):
+            dist_holder = next((o for o in group if o.cast_distribution), None)
+            if dist_holder is None:
+                continue
+            for entry in dist_holder.cast_distribution:
+                cid = entry.get("cast_id")
+                if cid is not None and cid not in existing_cast_ids:
+                    extra_dist_cids.add(cid)
+    if extra_dist_cids:
+        extra_casts = db.query(models.Cast).filter(models.Cast.id.in_(extra_dist_cids)).all()
+        extra_cast_map = {c.id: c for c in extra_casts}
+        for cid in sorted(extra_dist_cids):
+            cobj = extra_cast_map.get(cid)
+            if cobj is None:
+                continue
+            champagne_amount = 0
+            champagne_count = 0
+            for t in tickets:
+                for group in rc.champagne_groups(t):
+                    dist_holder = next((o for o in group if o.cast_distribution), None)
+                    if dist_holder is None:
+                        continue
+                    back_pool = dist_holder.incentive_amount
+                    for entry in dist_holder.cast_distribution:
+                        if entry.get("cast_id") == cid:
+                            ratio = entry.get("ratio", 0)
+                            champagne_amount += int(back_pool * ratio / 100)
+                            champagne_count += 1
+                            break
+            cast_blocks.append({
+                "cast_id": cid,
+                "cast_name": cobj.stage_name,
+                "is_help": False,
+                "is_off_shift": True,
+                "help_from_store_name": None,
+                "actual_start": None,
+                "actual_end": None,
+                "is_late": False,
+                "is_absent": False,
+                "work_hours": 0,
+                "applied_hourly_rate": 0,
+                "base_pay": 0,
+                "incentive_total": champagne_amount,
+                "daily_pay": 0,
+                "perf_22_26": None,
+                "n_tissue_count": 0,
+                "r_tissue_count": 0,
+                "customer_names": [],
+                "drink_s": 0,
+                "drink_l": 0,
+                "drink_mg": 0,
+                "shot_cast": 0,
+                "champagne_count": champagne_count,
+                "champagne_amount": champagne_amount,
+                "custom_drinks": {custom_short_map[label]: 0 for label in custom_menu_labels},
+            })
+
     # ─── 社員/アルバイト勤怠 ───
     staff_blocks = []
     for a in staff_atts:

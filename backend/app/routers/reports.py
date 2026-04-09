@@ -196,6 +196,77 @@ def _enrich_legacy_payload(db: Session, payload: dict, *, force: bool = False) -
             nc.setdefault("custom_drinks", cd_total)
         new_cast_blocks.append(nc)
 
+    # 出勤外キャストへのシャンパン分配エントリを追加
+    existing_cids = {c.get("cast_id") for c in new_cast_blocks if c.get("cast_id") is not None}
+    extra_cids: set = set()
+    for ot in orm_tickets:
+        for o in (ot.order_items or []):
+            if o.canceled_at is not None or o.item_type != "champagne":
+                continue
+            if not isinstance(o.cast_distribution, list):
+                continue
+            for entry in o.cast_distribution:
+                cid = entry.get("cast_id")
+                if cid is not None and cid not in existing_cids:
+                    extra_cids.add(cid)
+    if extra_cids:
+        extra_casts = db.query(models.Cast).filter(models.Cast.id.in_(extra_cids)).all()
+        cast_map = {c.id: c for c in extra_casts}
+        for cid in sorted(extra_cids):
+            cobj = cast_map.get(cid)
+            if cobj is None:
+                continue
+            champ_count = 0
+            champ_amount = 0
+            for ot in orm_tickets:
+                active = [o for o in (ot.order_items or []) if o.canceled_at is None and o.item_type == "champagne"]
+                groups: dict = defaultdict(list)
+                for o in active:
+                    groups[o.item_name or ""].append(o)
+                for items in groups.values():
+                    dist_holder = next(
+                        (i for i in items if isinstance(i.cast_distribution, list) and i.cast_distribution),
+                        None
+                    )
+                    if not dist_holder:
+                        continue
+                    if not any((e.get("cast_id") == cid) for e in dist_holder.cast_distribution):
+                        continue
+                    back_pool = _champ_back_pool(items)
+                    for entry in dist_holder.cast_distribution:
+                        if entry.get("cast_id") == cid:
+                            ratio = entry.get("ratio") or 0
+                            champ_amount += int(back_pool * ratio / 100)
+                            champ_count += 1
+                            break
+            new_cast_blocks.append({
+                "cast_id": cid,
+                "cast_name": cobj.stage_name,
+                "is_help": False,
+                "is_off_shift": True,
+                "help_from_store_name": None,
+                "actual_start": None,
+                "actual_end": None,
+                "is_late": False,
+                "is_absent": False,
+                "work_hours": 0,
+                "applied_hourly_rate": 0,
+                "base_pay": 0,
+                "incentive_total": champ_amount,
+                "daily_pay": 0,
+                "perf_22_26": None,
+                "n_tissue_count": 0,
+                "r_tissue_count": 0,
+                "customer_names": [],
+                "drink_s": 0,
+                "drink_l": 0,
+                "drink_mg": 0,
+                "shot_cast": 0,
+                "champagne_count": champ_count,
+                "champagne_amount": champ_amount,
+                "custom_drinks": {short: 0 for short in custom_short_map.values()},
+            })
+
     new_payload = dict(payload)
     new_payload["custom_drink_columns"] = custom_drink_columns
     new_payload["tickets"] = new_ticket_blocks

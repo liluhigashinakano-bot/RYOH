@@ -249,6 +249,7 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     <td className="py-1 text-white font-medium">
                       {c.cast_name}
                       {c.is_help && <span className="ml-1 text-[10px] text-blue-300">[ヘルプ{c.help_from_store_name ? `:${c.help_from_store_name}` : ''}]</span>}
+                      {c.is_off_shift && <span className="ml-1 text-[10px] text-gray-500">[出勤外]</span>}
                     </td>
                     <td className="py-1 text-center text-gray-300 font-mono">{c.is_absent ? <span className="text-red-400">当欠</span> : fmtTime(c.actual_start)}</td>
                     <td className="py-1 text-center text-gray-300 font-mono">{c.is_absent ? '—' : fmtTime(c.actual_end)}</td>
