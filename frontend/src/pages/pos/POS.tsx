@@ -3697,17 +3697,18 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <button
                       onClick={() => {
                         if (item.item_type === 'champagne' && champEditCasts.length > 0) {
-                          // シャンパン: 表示用 item_name と構造化 cast_distribution の両方を更新
+                          // シャンパン: 全員 castId 必須
+                          const missing = champEditCasts.filter(c => typeof c.castId !== 'number')
+                          if (missing.length > 0) {
+                            alert(`キャストがリンクされていません: ${missing.map(m => m.castName).join(', ')}\n一旦×ボタンで削除して、プルダウンから追加し直してください。`)
+                            return
+                          }
                           const baseName = (item.item_name || '').replace(/[［\[].*[］\]]/, '').trim()
                           const useBracket = (item.item_name || '').includes('［') ? '［' : '['
                           const closeBracket = useBracket === '［' ? '］' : ']'
                           const castsStr = champEditCasts.map(c => `${c.castName} ${c.ratio}%`).join('・')
                           const newItemName = `${baseName}${useBracket}${castsStr}${closeBracket}`
-                          // cast_id が全員揃っている場合のみ構造化データも送る
-                          const allHaveCastId = champEditCasts.every(c => typeof c.castId === 'number')
-                          const distribution = allHaveCastId
-                            ? champEditCasts.map(c => ({ cast_id: c.castId as number, ratio: c.ratio }))
-                            : undefined
+                          const distribution = champEditCasts.map(c => ({ cast_id: c.castId as number, ratio: c.ratio }))
                           updateChampagneMutation.mutate({ oldName: item.item_name, newName: newItemName, operator: operatorName, reason: operatorReason, distribution })
                         } else if (editingGroupItemIds.length > 1) {
                           groupReduceMutation.mutate({ item, targetQty: editingQty, operator: operatorName, reason: operatorReason })

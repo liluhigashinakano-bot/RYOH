@@ -771,21 +771,24 @@ def update_champagne_ratios(
 
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
 
+    # cast_distribution は必須（item_name 文字列だけの更新は許可しない）
+    if not data.cast_distribution:
+        raise HTTPException(status_code=400, detail="cast_distribution が必要です")
+
     # ratio バリデーション
-    if data.cast_distribution:
-        total = sum(e.ratio for e in data.cast_distribution)
-        if total != 100:
-            raise HTTPException(status_code=400, detail=f"分配率の合計は100%必須です（現在 {total}%）")
-        if any(e.ratio < 0 for e in data.cast_distribution):
-            raise HTTPException(status_code=400, detail="分配率は 0 以上にしてください")
-        # キャスト存在チェック
-        cast_ids = list({e.cast_id for e in data.cast_distribution})
-        casts = db.query(models.Cast).filter(
-            models.Cast.id.in_(cast_ids),
-            models.Cast.store_id == ticket.store_id,
-        ).all() if ticket else []
-        if len(casts) != len(cast_ids):
-            raise HTTPException(status_code=400, detail="無効なキャストIDが含まれています")
+    total = sum(e.ratio for e in data.cast_distribution)
+    if total != 100:
+        raise HTTPException(status_code=400, detail=f"分配率の合計は100%必須です（現在 {total}%）")
+    if any(e.ratio < 0 for e in data.cast_distribution):
+        raise HTTPException(status_code=400, detail="分配率は 0 以上にしてください")
+    # キャスト存在チェック
+    cast_ids = list({e.cast_id for e in data.cast_distribution})
+    casts = db.query(models.Cast).filter(
+        models.Cast.id.in_(cast_ids),
+        models.Cast.store_id == ticket.store_id,
+    ).all() if ticket else []
+    if len(casts) != len(cast_ids):
+        raise HTTPException(status_code=400, detail="無効なキャストIDが含まれています")
 
     # 新形式: cast_distribution が指定されていればそれを全行に適用
     distribution_json = None
