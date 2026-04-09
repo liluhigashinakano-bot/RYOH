@@ -330,6 +330,7 @@ def _fetch_session_tickets(db: Session, session: models.BusinessSession) -> List
         models.Ticket.store_id == session.store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= session.opened_at,
+        models.Ticket.deleted_at.is_(None),
     )
     if session.closed_at:
         q = q.filter(models.Ticket.ended_at <= session.closed_at)

@@ -113,12 +113,14 @@ def get_dashboard(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= since,
+        models.Ticket.deleted_at.is_(None),
     ).all()
 
     # 未会計伝票（現在オープン中）
     open_tickets = db.query(models.Ticket).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == False,
+        models.Ticket.deleted_at.is_(None),
     ).all()
 
     def grand_total(t):
@@ -282,6 +284,7 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
         models.Ticket.store_id == session.store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= session.opened_at,
+        models.Ticket.deleted_at.is_(None),
     ).all()
 
     def _grand(t):
@@ -459,6 +462,7 @@ def get_session_cast_drinks(session_id: int, db: Session = Depends(get_db), curr
         models.Ticket.store_id == session.store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= session.opened_at,
+        models.Ticket.deleted_at.is_(None),
     )
     if session.closed_at:
         query = query.filter(models.Ticket.ended_at <= session.closed_at)
@@ -699,6 +703,7 @@ def get_session_tickets(session_id: int, db: Session = Depends(get_db), current_
         models.Ticket.store_id == session.store_id,
         models.Ticket.is_closed == True,
         models.Ticket.ended_at >= session.opened_at,
+        models.Ticket.deleted_at.is_(None),
     )
     if session.closed_at:
         query = query.filter(models.Ticket.ended_at <= session.closed_at)

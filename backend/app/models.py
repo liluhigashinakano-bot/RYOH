@@ -263,6 +263,8 @@ class Ticket(Base):
     motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト
     motivation_note = Column(String(200), nullable=True)   # 紹介用テキスト
     featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）
+    deleted_at = Column(DateTime, nullable=True)  # 論理削除タイムスタンプ
+    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")

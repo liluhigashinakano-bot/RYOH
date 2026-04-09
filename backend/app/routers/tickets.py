@@ -324,7 +324,10 @@ def get_tickets(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    query = db.query(models.Ticket).filter(models.Ticket.store_id == store_id)
+    query = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.deleted_at.is_(None),
+    )
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
     tickets = query.order_by(models.Ticket.started_at.desc()).all()
@@ -751,6 +754,44 @@ def set_assignments(
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
+
+
+class TicketDeleteRequest(BaseModel):
+    operator_name: str
+    reason: Optional[str] = None
+
+
+@router.post("/{ticket_id}/delete")
+def delete_ticket(
+    ticket_id: int,
+    data: TicketDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """伝票を論理削除（deleted_at セット）。
+    変更履歴に「ticket_delete」アクションを記録。"""
+    if not data.operator_name or not data.operator_name.strip():
+        raise HTTPException(status_code=400, detail="担当者名は必須です")
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="伝票が見つかりません")
+    if ticket.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="既に削除されています")
+    ticket.deleted_at = datetime.utcnow()
+    ticket.deleted_by = current_user.id
+    log = models.OrderItemLog(
+        ticket_id=ticket_id,
+        order_item_id=None,
+        action='ticket_delete',
+        item_type=None,
+        item_name=f"伝票削除 (卓 {ticket.table_no or '-'} / 合計 ¥{ticket.total_amount or 0})",
+        changed_by=current_user.id,
+        operator_name=data.operator_name,
+        reason=data.reason,
+    )
+    db.add(log)
+    db.commit()
+    return {"ok": True}
 
 
 class GroupReduceRequest(BaseModel):

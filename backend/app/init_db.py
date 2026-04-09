@@ -41,6 +41,9 @@ def _run_migrations(engine):
         "UPDATE casts SET help_hourly_rate = hourly_rate + 100 WHERE hourly_rate IS NOT NULL AND (help_hourly_rate IS NULL OR help_hourly_rate <> hourly_rate + 100)",
         # Ticket: featured_cast_id (推しキャスト)
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS featured_cast_id INTEGER REFERENCES casts(id)",
+        # Ticket: 論理削除
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id)",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:

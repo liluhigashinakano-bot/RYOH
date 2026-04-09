@@ -2359,6 +2359,54 @@ function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
   )
 }
 
+// 伝票削除確認モーダル
+function TicketDeleteModal({ ticket, onSubmit, onClose }: {
+  ticket: any
+  onSubmit: (operator: string, reason: string) => void
+  onClose: () => void
+}) {
+  const [operator, setOperator] = useState('')
+  const [reason, setReason] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4" onClick={onClose}>
+      <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-red-300">伝票を削除</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="text-xs text-gray-400 bg-red-900/20 border border-red-800/50 rounded-lg p-2 space-y-0.5">
+          <div>卓: <span className="text-white font-medium">{ticket?.table_no || '—'}</span></div>
+          <div>合計: <span className="text-white font-medium">¥{(ticket?.total_amount || 0).toLocaleString()}</span></div>
+          <div className="text-[10px] text-red-400">※削除すると売上集計・日報から除外されます</div>
+        </div>
+        <input
+          type="text" placeholder="担当者名（必須）"
+          value={operator} onChange={e => setOperator(e.target.value)}
+          className="input-field w-full text-sm" autoFocus
+        />
+        <input
+          type="text" placeholder="理由（任意）"
+          value={reason} onChange={e => setReason(e.target.value)}
+          className="input-field w-full text-sm"
+        />
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose}
+            className="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg">
+            キャンセル
+          </button>
+          <button
+            onClick={() => onSubmit(operator, reason)}
+            disabled={!operator.trim()}
+            className="text-xs px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white rounded-lg disabled:opacity-40">
+            削除する
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ティッシュ配り開始モーダル（出勤中キャストから複数選択）
 function TissueStartModal({ storeId, onClose, onStarted }: {
   storeId: number
@@ -2715,6 +2763,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showWarikanModal, setShowWarikanModal] = useState(false)
   const [showSenkaikeiModal, setShowSenkaikeiModal] = useState(false)
   const [showSentaitenModal, setShowSentaitenModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showDiscountModal, setShowDiscountModal] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
@@ -3047,6 +3096,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={() => setShowDeleteModal(true)}
+                className="text-xs px-3 py-1.5 bg-red-900/60 hover:bg-red-800/70 text-red-300 rounded-lg transition-colors">
+                削除
+              </button>
               {!isClosed && (
                 <>
                   <button onClick={() => setShowSentaitenModal(true)}
@@ -3687,6 +3740,25 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             </div>
           </div>
         </div>
+      )}
+
+      {/* 削除確認モーダル */}
+      {showDeleteModal && (
+        <TicketDeleteModal
+          ticket={ticket}
+          onSubmit={(operator, reason) => {
+            apiClient.post(`/api/tickets/${ticketId}/delete`, {
+              operator_name: operator,
+              reason: reason || null,
+            }).then(() => {
+              qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+              qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+              setShowDeleteModal(false)
+              onClose()
+            }).catch(e => alert('削除に失敗しました: ' + (e?.response?.data?.detail || e?.message)))
+          }}
+          onClose={() => setShowDeleteModal(false)}
+        />
       )}
 
       {/* 先退店モーダル */}
