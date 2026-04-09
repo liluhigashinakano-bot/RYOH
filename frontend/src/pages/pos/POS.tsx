@@ -402,7 +402,7 @@ export default function POS() {
             </button>
             <button onClick={() => setView('casts')}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'casts' ? 'bg-purple-700 text-white' : 'text-gray-400 hover:text-white'}`}>
-              接客中キャスト
+              対応中キャスト
             </button>
             <button onClick={() => setView('attendance')}
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'attendance' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
@@ -1933,8 +1933,8 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         <button onClick={e => { e.stopPropagation(); onOpenActiveCastsModal(ticket) }}
           className="w-fit text-left text-purple-300 hover:text-purple-200 transition-colors underline decoration-dotted text-[10px]">
           {(ticket.current_casts && ticket.current_casts.length > 0)
-            ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
-            : '接客中未設定'}
+            ? `対応中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+            : '対応中未設定'}
         </button>
       </div>
 
@@ -2562,7 +2562,7 @@ function TissueStartModal({ storeId, onClose, onStarted }: {
 }
 
 
-// 接客中キャスト = 出勤中から複数選択
+// 対応中キャスト = 出勤中から複数選択
 function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose }: {
   storeId: number
   currentCastIds: number[]
@@ -2609,7 +2609,7 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
     }
     const otherTable = castOnOtherTable[cid]
     if (otherTable) {
-      if (!confirm(`${otherTable} で接客中です。\nこの卓に移しますか？`)) return
+      if (!confirm(`${otherTable} で対応中です。\nこの卓に移しますか？`)) return
     }
     setSelected([...selected, cid])
   }
@@ -2618,7 +2618,7 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
       <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center">
-          <h3 className="font-bold text-white">接客中キャストを設定</h3>
+          <h3 className="font-bold text-white">対応中キャストを設定</h3>
           <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <input type="text" value={q} onChange={e => setQ(e.target.value)}
@@ -2638,7 +2638,7 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
                   {c.stage_name}
                 </span>
                 {otherTable && !isSelected && (
-                  <span className="text-[10px] text-amber-400">{otherTable} 接客中</span>
+                  <span className="text-[10px] text-amber-400">{otherTable} 対応中</span>
                 )}
               </button>
             )
@@ -3257,8 +3257,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <button onClick={() => setShowActiveCastsModal(true)}
                     className="text-purple-300 hover:text-purple-200 underline decoration-dotted transition-colors">
                     {(ticket.current_casts && ticket.current_casts.length > 0)
-                      ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
-                      : '接客中未設定'}
+                      ? `対応中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+                      : '対応中未設定'}
                   </button>
                 </>
               ) : (
@@ -3269,8 +3269,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <span className="text-gray-600">/</span>
                   <span className="text-purple-300">
                     {(ticket.current_casts && ticket.current_casts.length > 0)
-                      ? `接客中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
-                      : '接客中未設定'}
+                      ? `対応中: ${ticket.current_casts.map((c: any) => c.cast_name).join('・')}`
+                      : '対応中未設定'}
                   </span>
                 </>
               )}
@@ -3653,7 +3653,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           onClose={() => setShowCastSearch(false)}
         />
       )}
-      {/* 接客中キャスト選択モーダル */}
+      {/* 対応中キャスト選択モーダル */}
       {showActiveCastsModal && (
         <ActiveCastsModal
           storeId={storeId}
@@ -5040,7 +5040,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
           <div className="text-xs text-gray-600 py-4 text-center">出勤中のキャストはいません</div>
         ) : (
           <>
-            <div className="text-[10px] text-gray-500 mb-1">接客中（{busyCasts.length}名）</div>
+            <div className="text-[10px] text-gray-500 mb-1">対応中（{busyCasts.length}名）</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
               {busyCasts.map((s: any) => {
                 const t = castToTicket[s.cast_id!]
@@ -5050,12 +5050,12 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                     className="text-left bg-pink-900/30 hover:bg-pink-900/50 border border-pink-800/50 rounded-lg p-2 transition-colors"
                   >
                     <div className="text-white text-sm font-medium">{s.cast_name}</div>
-                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 接客中</div>
+                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 対応中</div>
                   </button>
                 )
               })}
               {busyCasts.length === 0 && (
-                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">接客中のキャストはいません</div>
+                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">対応中のキャストはいません</div>
               )}
             </div>
             <div className="text-[10px] text-gray-500 mb-1">待機中（{idleCasts.length}名）</div>
