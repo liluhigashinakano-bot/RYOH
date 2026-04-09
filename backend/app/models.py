@@ -476,6 +476,21 @@ class DailyReport(Base):
     is_closed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+# ─────────────────────────────────────────
+# 日報スナップショット（バージョン管理付き・JSON保存）
+# ─────────────────────────────────────────
+class DailyReportSnapshot(Base):
+    __tablename__ = "daily_report_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    business_date = Column(Date, nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    payload = Column(JSON, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
     store = relationship("Store", back_populates="daily_reports")
 
 
