@@ -82,42 +82,28 @@ export default function Dashboard() {
               ) : isLoading || !dash ? (
                 <p className="text-gray-600 text-xs px-3 py-2">読み込み中...</p>
               ) : (
-                <div className="px-3 py-2 space-y-2">
+                <div className="px-3 py-1.5 space-y-1">
                   {/* 売上行 */}
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <span className="text-gray-500">会計済</span>
-                      <p className="text-white font-bold">¥{(dash.closed_sales ?? 0).toLocaleString()}</p>
-                      <p className="text-[10px] text-gray-500">{dash.closed_groups ?? 0}組 / {dash.closed_guests ?? 0}名</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">未会計</span>
-                      <p className="text-yellow-400 font-bold">¥{(dash.open_sales ?? 0).toLocaleString()}</p>
-                      <p className="text-[10px] text-yellow-500/80">{dash.open_groups ?? 0}組 / {dash.open_guests ?? 0}名</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">合計</span>
-                      <p className="text-white font-bold">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</p>
-                      <p className="text-[10px] text-gray-500">{(dash.closed_groups ?? 0) + (dash.open_groups ?? 0)}組 / {(dash.closed_guests ?? 0) + (dash.open_guests ?? 0)}名</p>
-                    </div>
+                  <div className="flex items-center gap-3 flex-wrap text-xs">
+                    <span><span className="text-gray-500">会計済 </span><span className="text-white font-bold">¥{(dash.closed_sales ?? 0).toLocaleString()}</span><span className="text-[10px] text-gray-500 ml-1">{dash.closed_groups ?? 0}組/{dash.closed_guests ?? 0}名</span></span>
+                    <span><span className="text-gray-500">未会計 </span><span className="text-yellow-400 font-bold">¥{(dash.open_sales ?? 0).toLocaleString()}</span><span className="text-[10px] text-yellow-500/80 ml-1">{dash.open_groups ?? 0}組/{dash.open_guests ?? 0}名</span></span>
+                    <span><span className="text-gray-500">合計 </span><span className="text-white font-bold">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</span><span className="text-[10px] text-gray-500 ml-1">{(dash.closed_groups ?? 0) + (dash.open_groups ?? 0)}組/{(dash.closed_guests ?? 0) + (dash.open_guests ?? 0)}名</span></span>
                   </div>
 
                   {/* スタッフ・キャスト行 */}
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-gray-500">勤務中スタッフ</span>
+                  <div className="flex items-center gap-4 flex-wrap text-xs">
+                    <span>
+                      <span className="text-gray-500">スタッフ </span>
                       {(dash.working_staff ?? []).length === 0
-                        ? <p className="text-gray-700">なし</p>
-                        : <p className="text-white">{(dash.working_staff as any[]).map((s: any) => s.name).join('、')}</p>
-                      }
-                    </div>
-                    <div>
-                      <span className="text-gray-500">勤務中キャスト</span>
+                        ? <span className="text-gray-700">なし</span>
+                        : <span className="text-white">{(dash.working_staff as any[]).map((s: any) => s.name).join('、')}</span>}
+                    </span>
+                    <span>
+                      <span className="text-gray-500">キャスト </span>
                       {(dash.working_casts ?? []).length === 0
-                        ? <p className="text-gray-700">なし</p>
-                        : <p className="text-white">{(dash.working_casts as any[]).map((c: any) => c.stage_name).join('、')}</p>
-                      }
-                    </div>
+                        ? <span className="text-gray-700">なし</span>
+                        : <span className="text-white">{(dash.working_casts as any[]).map((c: any) => c.stage_name).join('、')}</span>}
+                    </span>
                   </div>
 
                   {/* ドリンク・シャンパン・カスタムドリンク */}

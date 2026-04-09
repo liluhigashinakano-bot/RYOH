@@ -40,7 +40,6 @@ const CHAMPAGNE_MENU = [
 ]
 
 const ITEM_TYPES = [
-  { type: 'extension', label: '延長', defaultPrice: 2700 },
   { type: 'drink_s', label: 'Sドリンク', defaultPrice: 900 },
   { type: 'drink_l', label: 'Lドリンク', defaultPrice: 1700 },
   { type: 'drink_mg', label: 'MGドリンク', defaultPrice: 3700 },
@@ -245,6 +244,10 @@ export default function POS() {
   const [selectedStoreId, setSelectedStoreId] = useState(stores[0]?.id ?? 0)
   const [showNewTicket, setShowNewTicket] = useState(false)
   const [showTissueStartModal, setShowTissueStartModal] = useState(false)
+  const [showAIAdvisor, setShowAIAdvisor] = useState(false)
+  const [aiAdvisorLoading, setAIAdvisorLoading] = useState(false)
+  const [aiAdvisorResult, setAIAdvisorResult] = useState<any>(null)
+  const [aiAdvisorError, setAIAdvisorError] = useState<string>('')
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
   const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports' | 'casts'>('open')
   const [showOpenSessionModal, setShowOpenSessionModal] = useState(false)
@@ -372,6 +375,27 @@ export default function POS() {
               className="bg-amber-700 hover:bg-amber-600 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0"
             >
               ティッシュ配り
+            </button>
+          )}
+          {currentSession && !currentSession.is_closed && (
+            <button
+              onClick={async () => {
+                setShowAIAdvisor(true)
+                setAIAdvisorLoading(true)
+                setAIAdvisorError('')
+                setAIAdvisorResult(null)
+                try {
+                  const r = await apiClient.post(`/api/ai/suggest-rotation/${selectedStoreId}`)
+                  setAIAdvisorResult(r.data)
+                } catch (e: any) {
+                  setAIAdvisorError(e?.response?.data?.detail || e?.message || 'エラーが発生しました')
+                } finally {
+                  setAIAdvisorLoading(false)
+                }
+              }}
+              className="bg-pink-800 hover:bg-pink-700 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0 border border-pink-500/50"
+            >
+              🤖 付け回しAIアドバイス
             </button>
           )}
           {/* 右: 売上サマリ + 営業ボタン */}
@@ -542,6 +566,58 @@ export default function POS() {
             setShowTissueStartModal(false)
           }}
         />
+      )}
+      {showAIAdvisor && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowAIAdvisor(false)}>
+          <div className="bg-night-900 border border-pink-500/30 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+              <h3 className="text-white font-bold text-sm">🤖 付け回しAIアドバイス</h3>
+              <button onClick={() => setShowAIAdvisor(false)} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-3">
+              {aiAdvisorLoading && (
+                <div className="text-center text-gray-400 py-8 text-sm">分析中... (Gemini 2.5 Flash)</div>
+              )}
+              {aiAdvisorError && (
+                <div className="text-red-400 text-xs bg-red-900/20 border border-red-800 rounded p-3">{aiAdvisorError}</div>
+              )}
+              {aiAdvisorResult && (
+                <>
+                  {aiAdvisorResult.overall_advice && (
+                    <div className="bg-pink-900/20 border border-pink-700/40 rounded-lg px-3 py-2 text-pink-200 text-xs">
+                      💡 {aiAdvisorResult.overall_advice}
+                    </div>
+                  )}
+                  {(aiAdvisorResult.suggestions || []).length === 0 && !aiAdvisorResult.overall_advice && (
+                    <div className="text-gray-500 text-center py-6 text-xs">提案なし</div>
+                  )}
+                  {(aiAdvisorResult.suggestions || []).map((s: any) => (
+                    <div key={s.ticket_id} className="bg-night-800 border border-gray-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-white font-bold text-sm">{s.table_no}</span>
+                        <span className="text-gray-400 text-xs">{s.customer_name}</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {(s.recommended_casts || []).map((c: any, i: number) => (
+                          <div key={i} className="flex items-start gap-2 text-xs">
+                            <span className="text-pink-400 font-bold w-6 shrink-0">#{i + 1}</span>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-medium">{c.stage_name}</span>
+                                <span className="text-[10px] text-gray-500">スコア {c.score}</span>
+                              </div>
+                              <div className="text-gray-400 text-[11px]">{c.reason}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
       {activeCastsModalTicket && (
         <ActiveCastsModal
@@ -3129,9 +3205,23 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const fetchAI = async () => {
     setLoadingAI(true)
     try {
-      const res = await apiClient.post('/api/ai/rotation-advice', { store_id: storeId })
-      setAiAdvice(res.data.advice)
-    } catch { setAiAdvice('AIアドバイスを取得できませんでした') }
+      const res = await apiClient.post(`/api/ai/suggest-rotation/${storeId}`)
+      const data = res.data
+      // この伝票の提案だけ抽出
+      const mySuggestion = (data.suggestions || []).find((s: any) => s.ticket_id === ticketId)
+      let text = ''
+      if (mySuggestion && mySuggestion.recommended_casts?.length) {
+        text = mySuggestion.recommended_casts
+          .map((c: any, i: number) => `${i + 1}位 ${c.stage_name}（${c.score}点）\n  ${c.reason}`)
+          .join('\n\n')
+      } else {
+        text = 'この卓への推薦は見つかりませんでした'
+      }
+      if (data.overall_advice) text += `\n\n💡 ${data.overall_advice}`
+      setAiAdvice(text)
+    } catch (e: any) {
+      setAiAdvice(e?.response?.data?.detail || 'AIアドバイスを取得できませんでした')
+    }
     setLoadingAI(false)
   }
 

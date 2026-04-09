@@ -1,6 +1,9 @@
 import os
+import json
+from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import Optional
 from ..database import get_db
@@ -10,6 +13,7 @@ from ..auth import get_current_user
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 
 def get_claude_client():
@@ -222,3 +226,213 @@ def update_customer_profile(
     db.commit()
 
     return {"summary": summary}
+
+
+# ─────────────────────────────────────────
+# Gemini ベース 付け回しAIアドバイザー
+# ─────────────────────────────────────────
+
+ADVISOR_SYSTEM = """あなたはガールズバーの付け回し（テーブル割り当て）専門AIです。
+以下のJSONデータを分析し、最適なキャスト配置を提案してください。
+
+判断基準：
+1. 未接客優先: その客に一度も付いたことがないキャストを優先
+2. 相性マッチ: 過去にそのキャストが付いた時に売上(MG/シャンパン/ショット)が伸びた実績
+3. 客の好み: 客の注文傾向に合うキャスト(例: ショット好き客→キャストショット実績多いキャスト)
+4. 公平性: 既に対応中の卓数が少ないキャストを優先
+5. 推しキャスト在席時はそれを尊重
+
+出力は必ず以下のJSON形式のみ:
+{
+  "suggestions": [
+    {
+      "ticket_id": <番号>,
+      "table_no": "<卓番>",
+      "customer_name": "<客名>",
+      "recommended_casts": [
+        {"cast_id": <id>, "stage_name": "<名前>", "reason": "<推薦理由 30文字程度>", "score": <1-100>}
+      ]
+    }
+  ],
+  "overall_advice": "<店舗全体への一言アドバイス 100文字程度>"
+}
+余計な文章・マークダウンは出力しないこと。"""
+
+
+def call_gemini_json(prompt: str, system: str = "") -> dict:
+    if not GEMINI_API_KEY:
+        return {"error": "GEMINI_API_KEYが設定されていません"}
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            system_instruction=system or None,
+            generation_config={
+                "response_mime_type": "application/json",
+                "temperature": 0.4,
+            },
+        )
+        resp = model.generate_content(prompt)
+        text = resp.text or "{}"
+        return json.loads(text)
+    except Exception as e:
+        return {"error": f"Gemini呼び出しエラー: {str(e)}"}
+
+
+def _build_advisor_context(db: Session, store_id: int) -> dict:
+    """店舗の現状況とAI判断材料を集約"""
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+
+    # 営業中(未会計)の伝票
+    open_tickets = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.is_closed == False,
+        models.Ticket.deleted_at.is_(None),
+    ).all()
+
+    # 本日対応中(本日伝票に紐付くキャスト assignment 全員)を「出勤中」とみなす
+    today_ticket_ids = [t.id for t in db.query(models.Ticket.id).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.started_at >= today_start,
+        models.Ticket.deleted_at.is_(None),
+    ).all()]
+
+    working_cast_ids = set()
+    if today_ticket_ids:
+        rows = db.query(models.CastAssignment.cast_id).filter(
+            models.CastAssignment.ticket_id.in_(today_ticket_ids)
+        ).distinct().all()
+        working_cast_ids = {r[0] for r in rows}
+
+    # 出勤中キャストが現在対応中の卓数(未会計のみ)
+    busy_count: dict[int, int] = {}
+    for t in open_tickets:
+        for a in t.assignments:
+            if a.ended_at is None:
+                busy_count[a.cast_id] = busy_count.get(a.cast_id, 0) + 1
+
+    # キャスト情報 + 過去実績(MG/champagne/shot_cast の総注文数)
+    casts_info = []
+    if working_cast_ids:
+        casts = db.query(models.Cast).filter(models.Cast.id.in_(working_cast_ids)).all()
+        for c in casts:
+            stats_rows = db.query(
+                models.OrderItem.item_type,
+                func.coalesce(func.sum(models.OrderItem.quantity), 0)
+            ).filter(
+                models.OrderItem.cast_id == c.id,
+                models.OrderItem.canceled_at.is_(None),
+                models.OrderItem.item_type.in_(["drink_mg", "champagne", "shot_cast"]),
+            ).group_by(models.OrderItem.item_type).all()
+            stats = {row[0]: int(row[1]) for row in stats_rows}
+            casts_info.append({
+                "cast_id": c.id,
+                "stage_name": c.stage_name,
+                "rank": c.rank,
+                "alcohol": c.alcohol_tolerance,
+                "busy_tables_now": busy_count.get(c.id, 0),
+                "lifetime_mg_count": stats.get("drink_mg", 0),
+                "lifetime_champagne_count": stats.get("champagne", 0),
+                "lifetime_shot_cast_count": stats.get("shot_cast", 0),
+            })
+
+    # 各営業中卓の情報
+    tickets_info = []
+    for t in open_tickets:
+        cust = t.customer
+        # 顧客の注文傾向(過去全伝票)
+        cust_pref = {}
+        if cust:
+            cust_ticket_ids = [r[0] for r in db.query(models.Ticket.id).filter(
+                models.Ticket.customer_id == cust.id,
+                models.Ticket.deleted_at.is_(None),
+            ).all()]
+            if cust_ticket_ids:
+                rows = db.query(
+                    models.OrderItem.item_type,
+                    func.coalesce(func.sum(models.OrderItem.quantity), 0),
+                ).filter(
+                    models.OrderItem.ticket_id.in_(cust_ticket_ids),
+                    models.OrderItem.canceled_at.is_(None),
+                    models.OrderItem.item_type.in_(["drink_mg", "champagne", "shot_cast", "drink_l", "drink_s"]),
+                ).group_by(models.OrderItem.item_type).all()
+                cust_pref = {row[0]: int(row[1]) for row in rows}
+
+        # 顧客×キャストの過去接客回数(出勤中キャストとの過去履歴)
+        past_cast_counts: dict[int, int] = {}
+        if cust and working_cast_ids:
+            cust_ticket_ids2 = [r[0] for r in db.query(models.Ticket.id).filter(
+                models.Ticket.customer_id == cust.id,
+                models.Ticket.deleted_at.is_(None),
+            ).all()]
+            if cust_ticket_ids2:
+                rows = db.query(
+                    models.CastAssignment.cast_id,
+                    func.count(models.CastAssignment.id),
+                ).filter(
+                    models.CastAssignment.ticket_id.in_(cust_ticket_ids2),
+                    models.CastAssignment.cast_id.in_(working_cast_ids),
+                ).group_by(models.CastAssignment.cast_id).all()
+                past_cast_counts = {r[0]: int(r[1]) for r in rows}
+
+        # 現在対応中のキャスト
+        current_casts = [
+            {"cast_id": a.cast_id, "stage_name": (a.cast.stage_name if a.cast else "")}
+            for a in t.assignments if a.ended_at is None
+        ]
+
+        elapsed_min = 0
+        if t.started_at:
+            elapsed_min = int((datetime.utcnow() - t.started_at).total_seconds() / 60)
+
+        tickets_info.append({
+            "ticket_id": t.id,
+            "table_no": t.table_no,
+            "customer_id": cust.id if cust else None,
+            "customer_name": (cust.alias or cust.name) if cust else "未登録客",
+            "customer_total_visits": cust.total_visits if cust else 0,
+            "customer_preferences": cust_pref,
+            "past_cast_counts_with_working": past_cast_counts,
+            "guest_count": t.guest_count or 1,
+            "elapsed_minutes": elapsed_min,
+            "current_total": t.total_amount or 0,
+            "featured_cast_id": t.featured_cast_id,
+            "current_casts": current_casts,
+        })
+
+    return {
+        "store_id": store_id,
+        "now": datetime.utcnow().isoformat(),
+        "working_casts": casts_info,
+        "open_tickets": tickets_info,
+    }
+
+
+@router.post("/suggest-rotation/{store_id}")
+def suggest_rotation(
+    store_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    context = _build_advisor_context(db, store_id)
+    if not context["working_casts"]:
+        return {"suggestions": [], "overall_advice": "出勤中のキャストが見つかりません。", "context": context}
+    if not context["open_tickets"]:
+        return {"suggestions": [], "overall_advice": "現在営業中の卓がありません。", "context": context}
+
+    prompt = f"""以下の店舗状況を分析して、各卓に最適なキャスト推薦をJSONで出力してください。
+
+【データ】
+{json.dumps(context, ensure_ascii=False, indent=2)}
+
+各卓につき推薦キャストを最大3名(score降順)で提案。past_cast_counts_with_working が 0 のキャストは「未接客」として優先度UP。
+"""
+
+    result = call_gemini_json(prompt, ADVISOR_SYSTEM)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return result
