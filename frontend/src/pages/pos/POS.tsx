@@ -3583,26 +3583,30 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     )
                     // cast_distribution を持つ代表行を探す
                     const distHolder = champItems.find((i: any) => Array.isArray(i.cast_distribution) && i.cast_distribution.length > 0)
+                    // 名前 → id 引き当て用（castsAll 全店舗キャスト）
+                    const findCastByName = (name: string): number | null => {
+                      const c = (castsAll as any[]).find((x: any) => x.stage_name === name)
+                      return c ? c.id : null
+                    }
                     if (distHolder && distHolder.cast_distribution) {
                       // 構造化データから組み立て（cast_id でキャスト名解決）
                       const parsed = distHolder.cast_distribution.map((d: any) => {
-                        const ci = champItems.find((x: any) => x.cast_id === d.cast_id)
+                        const c = (castsAll as any[]).find((x: any) => x.id === d.cast_id)
                         return {
                           castId: d.cast_id,
-                          castName: ci?.cast?.stage_name || `Cast${d.cast_id}`,
+                          castName: c?.stage_name || `Cast${d.cast_id}`,
                           ratio: d.ratio || 0,
                         }
                       })
                       setChampEditCasts(parsed)
                     } else {
-                      // 旧形式: item_name パース＋ticket の order_items から cast_id を引き当て
+                      // 旧形式: item_name パース → castsAll から名前で引き当て
                       const inner = (item.item_name || '').match(/[［\[](.+?)[］\]]/)?.[1] || ''
                       const parsed = inner.split('・').map((p: string) => {
                         const m = p.match(/^(.+?)\s+(\d+)%$/)
                         const castName = m ? m[1] : p
                         const ratio = m ? parseInt(m[2]) : 0
-                        const ci = champItems.find((x: any) => x.cast?.stage_name === castName)
-                        return { castId: ci?.cast_id ?? null, castName, ratio }
+                        return { castId: findCastByName(castName), castName, ratio }
                       }).filter((c: { castName: string; ratio: number }) => c.castName)
                       setChampEditCasts(parsed)
                     }
