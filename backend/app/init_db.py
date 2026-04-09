@@ -32,6 +32,9 @@ def _run_migrations(engine):
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS incentive_snapshot JSON",
         # StaffAttendance: 社員/アルバイト区分追加
         "ALTER TABLE staff_attendances ADD COLUMN IF NOT EXISTS employee_type VARCHAR(20)",
+        # Ticket: N/R 個別人数カラム追加（visit_type 1個では混在表現できないため）
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS n_count INTEGER DEFAULT 0",
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS r_count INTEGER DEFAULT 0",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:

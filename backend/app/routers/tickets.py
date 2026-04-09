@@ -80,6 +80,8 @@ class TicketCreate(BaseModel):
     table_no: Optional[str] = None
     notes: Optional[str] = None
     guest_count: int = 1
+    n_count: Optional[int] = None  # 指定なしなら visit_type から自動算出
+    r_count: Optional[int] = None
     plan_type: Optional[str] = None
     visit_type: Optional[str] = None
     visit_motivation: Optional[str] = None
@@ -179,6 +181,8 @@ def _to_response(ticket: models.Ticket) -> dict:
         "discount_amount": ticket.discount_amount,
         "notes": ticket.notes,
         "guest_count": ticket.guest_count or 1,
+        "n_count": ticket.n_count or 0,
+        "r_count": ticket.r_count or 0,
         "plan_type": ticket.plan_type,
         "visit_type": ticket.visit_type,
         "visit_motivation": ticket.visit_motivation,
@@ -293,6 +297,17 @@ def create_ticket(
     guest_count = data.guest_count or 1
     total_set = unit_set_price * guest_count
 
+    # n_count/r_count: 明示指定優先・無ければ visit_type から自動算出
+    if data.n_count is not None or data.r_count is not None:
+        n_count = data.n_count or 0
+        r_count = data.r_count or 0
+    elif data.visit_type == "N":
+        n_count, r_count = guest_count, 0
+    elif data.visit_type == "R":
+        n_count, r_count = 0, guest_count
+    else:
+        n_count, r_count = 0, 0
+
     ticket = models.Ticket(
         store_id=data.store_id,
         customer_id=data.customer_id,
@@ -300,6 +315,8 @@ def create_ticket(
         staff_id=current_user.id,
         notes=data.notes,
         guest_count=guest_count,
+        n_count=n_count,
+        r_count=r_count,
         plan_type=data.plan_type,
         visit_type=data.visit_type,
         visit_motivation=data.visit_motivation,
@@ -785,6 +802,8 @@ def update_champagne_ratios(
 class TicketPatch(BaseModel):
     started_at: Optional[datetime] = None
     guest_count: Optional[int] = None
+    n_count: Optional[int] = None
+    r_count: Optional[int] = None
     table_no: Optional[str] = None
     visit_type: Optional[str] = None
     plan_type: Optional[str] = None
@@ -864,6 +883,17 @@ def patch_ticket(
         new_guest_count = max(1, data.guest_count)
         ticket.guest_count = new_guest_count
 
+    # n_count / r_count の更新（明示指定のみ反映、合計が guest_count を超えないよう調整）
+    if data.n_count is not None or data.r_count is not None:
+        new_n = max(0, data.n_count if data.n_count is not None else (ticket.n_count or 0))
+        new_r = max(0, data.r_count if data.r_count is not None else (ticket.r_count or 0))
+        gc = ticket.guest_count or 1
+        # 合計が gc を超える場合は r 側を切り詰め
+        if new_n + new_r > gc:
+            new_r = max(0, gc - new_n)
+        ticket.n_count = new_n
+        ticket.r_count = new_r
+
     if data.visit_motivation is not None or data.update_header:
         new_motivation = data.visit_motivation or None
         if new_motivation != ticket.visit_motivation:
@@ -901,6 +931,14 @@ def patch_ticket(
                 reason=data.reason,
             )
             db.add(log)
+            # 旧UIから visit_type だけ更新された場合、n_count/r_count も同期
+            # （n_count/r_count が明示指定された場合は上の分岐で既に上書きされている）
+            if data.n_count is None and data.r_count is None:
+                gc = ticket.guest_count or 1
+                if new_visit_type == "N":
+                    ticket.n_count, ticket.r_count = gc, 0
+                elif new_visit_type == "R":
+                    ticket.n_count, ticket.r_count = 0, gc
 
     if data.plan_type is not None or data.update_header:
         new_plan_type = data.plan_type if data.plan_type is not None else (ticket.plan_type or 'standard')
@@ -983,6 +1021,8 @@ def close_ticket(
 
 class JoinRequest(BaseModel):
     guest_count: int = 1
+    n_count: Optional[int] = None             # 指定なしなら visit_type から自動算出
+    r_count: Optional[int] = None
     visit_type: Optional[str] = None          # N / R
     customer_name: Optional[str] = None
     visit_motivation: Optional[str] = None
@@ -1034,6 +1074,20 @@ def join_ticket(
     db.add(item)
     ticket.total_amount += amount
     ticket.guest_count = (ticket.guest_count or 1) + data.guest_count
+
+    # n_count/r_count の加算
+    if data.n_count is not None or data.r_count is not None:
+        add_n = data.n_count or 0
+        add_r = data.r_count or 0
+    elif data.visit_type == "N":
+        add_n, add_r = data.guest_count, 0
+    elif data.visit_type == "R":
+        add_n, add_r = 0, data.guest_count
+    else:
+        add_n, add_r = 0, 0
+    ticket.n_count = (ticket.n_count or 0) + add_n
+    ticket.r_count = (ticket.r_count or 0) + add_r
+
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
@@ -1076,6 +1130,8 @@ def merge_ticket(
             target.extension_count += 1
 
     target.guest_count = (target.guest_count or 1) + (source.guest_count or 1)
+    target.n_count = (target.n_count or 0) + (source.n_count or 0)
+    target.r_count = (target.r_count or 0) + (source.r_count or 0)
 
     # source を閉じる（合算済みとして 0 円）
     source.is_closed = True

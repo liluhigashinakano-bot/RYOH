@@ -250,8 +250,10 @@ class Ticket(Base):
     staff_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     notes = Column(Text)
     guest_count = Column(Integer, default=1)
+    n_count = Column(Integer, default=0)  # 新規(New)人数
+    r_count = Column(Integer, default=0)  # リピーター(Repeat)人数
     plan_type = Column(String(20), nullable=True)
-    visit_type = Column(String(5), nullable=True)
+    visit_type = Column(String(5), nullable=True)  # 後方互換用に残す（n_count/r_countが正本）
     set_started_at = Column(DateTime, nullable=True)
     set_is_paused = Column(Boolean, default=False)
     set_paused_at = Column(DateTime, nullable=True)
