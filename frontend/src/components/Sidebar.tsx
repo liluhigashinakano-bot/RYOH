@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, LogOut } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, BarChart3, LogOut } from 'lucide-react'
 import { useAuthStore, type PermPage } from '../store/authStore'
 
 const navItems: { to: string; icon: any; label: string; exact?: boolean; page: PermPage }[] = [
@@ -7,6 +7,7 @@ const navItems: { to: string; icon: any; label: string; exact?: boolean; page: P
   { to: '/pos', icon: ShoppingCart, label: 'POS・伝票', page: 'pos' },
   { to: '/customers', icon: Users, label: '顧客管理', page: 'customers' },
   { to: '/casts', icon: Star, label: '従業員管理', page: 'employees' },
+  { to: '/reports/monthly', icon: BarChart3, label: '月次レポート', page: 'accounts' },
   { to: '/admin', icon: UserCog, label: 'アカウント管理', page: 'accounts' },
   { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理', page: 'menus' },
 ]
