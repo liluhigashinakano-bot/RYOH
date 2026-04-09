@@ -1796,7 +1796,14 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {startDate ? `${toBarHour(startDate.getHours()).toString().padStart(2,'0')}:${startDate.getMinutes().toString().padStart(2,'0')} 入店` : ''}
-                    {ticket.extension_count > 0 && <span className="ml-2">延長{ticket.extension_count}回</span>}
+                    {(() => {
+                      const guest = Math.max(1, ticket.guest_count || 1)
+                      const totalQty = (ticket.order_items || [])
+                        .filter((i: any) => i.item_type === 'extension' && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
+                        .reduce((s: number, i: any) => s + (i.quantity || 0), 0)
+                      const periods = Math.floor(totalQty / guest)
+                      return periods > 0 ? <span className="ml-2">延長{periods}回</span> : null
+                    })()}
                   </div>
                 </div>
                 {/* 金額・支払方法 */}
@@ -2030,7 +2037,13 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         const grand = Math.round(sub * 1.21) - sk
         return (
           <div className="border-t border-night-600 pt-2 space-y-0.5">
-            <p className="text-xs text-gray-400">延長 {ticket.extension_count}回</p>
+            <p className="text-xs text-gray-400">延長 {(() => {
+              const guest = Math.max(1, ticket.guest_count || 1)
+              const totalQty = (ticket.order_items || [])
+                .filter((i: any) => i.item_type === 'extension' && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
+                .reduce((s: number, i: any) => s + (i.quantity || 0), 0)
+              return Math.floor(totalQty / guest)
+            })()}回</p>
             <div className="flex justify-between items-center">
               <span className="text-xs text-gray-500">小計</span>
               <span className="text-sm text-gray-400">¥{sub.toLocaleString()}</span>
