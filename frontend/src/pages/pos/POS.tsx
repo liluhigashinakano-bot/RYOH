@@ -1826,23 +1826,25 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         </div>
       </div>
 
-      {/* バッジ */}
-      <div className="flex gap-1 flex-wrap mb-2">
-        {ticket.visit_type && (
-          <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{ticket.visit_type}</span>
-        )}
-        {ticket.plan_type && (
-          <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'}`}>
-            {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
-          </span>
-        )}
-        {ticket.guest_count > 0 && <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>}
+      {/* バッジ（クリックで詳細モーダルを開く） */}
+      <div className="flex gap-1 flex-wrap mb-2" data-nopropagate>
+        <button onClick={e => { e.stopPropagation(); onClick() }}
+          className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : ticket.visit_type === 'R' ? 'bg-purple-900/40 text-purple-400' : 'bg-night-700 text-gray-500'} hover:opacity-80`}
+        >{ticket.visit_type || 'N/R'}</button>
+        <button onClick={e => { e.stopPropagation(); onClick() }}
+          className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-400'} hover:opacity-80`}
+        >{ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}</button>
+        <button onClick={e => { e.stopPropagation(); onClick() }}
+          className="badge text-xs bg-night-600 text-gray-300 hover:opacity-80"
+        >{ticket.guest_count || 1}名様</button>
         {ticket.visit_motivation && (
-          <span className="badge text-xs bg-teal-900/40 text-teal-400">
+          <button onClick={e => { e.stopPropagation(); onClick() }}
+            className="badge text-xs bg-teal-900/40 text-teal-400 hover:opacity-80"
+          >
             {ticket.visit_motivation}
             {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
             {ticket.motivation_note && `／${ticket.motivation_note}`}
-          </span>
+          </button>
         )}
       </div>
 
@@ -3052,49 +3054,58 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         {/* ヘッダー */}
         <div className="px-4 py-3 border-b border-night-600 shrink-0 space-y-2">
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1">
-                <p className="text-xl font-bold text-white">{ticket.table_no || '—'}</p>
-                {!isClosed && (
+            {(() => {
+              const openHeader = () => {
+                setHeaderEditForm({
+                  table_no: ticket.table_no || '',
+                  guest_count: ticket.guest_count || 1,
+                  visit_type: ticket.visit_type || '',
+                  plan_type: ticket.plan_type || 'standard',
+                  visit_motivation: ticket.visit_motivation || '',
+                  motivation_cast_id: ticket.motivation_cast_id || null,
+                })
+                setHeaderEditError('')
+                setShowHeaderEdit(true)
+              }
+              const clickable = !isClosed
+              return (
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={() => {
-                      setHeaderEditForm({
-                        table_no: ticket.table_no || '',
-                        guest_count: ticket.guest_count || 1,
-                        visit_type: ticket.visit_type || '',
-                        plan_type: ticket.plan_type || 'standard',
-                        visit_motivation: ticket.visit_motivation || '',
-                        motivation_cast_id: ticket.motivation_cast_id || null,
-                      })
-                      setHeaderEditError('')
-                      setShowHeaderEdit(true)
-                    }}
-                    className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
-                    title="卓情報を編集"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-1.5 flex-wrap">
-                {ticket.visit_type && (
-                  <span className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{ticket.visit_type}</span>
-                )}
-                {ticket.plan_type && (
-                  <span className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-300'}`}>
-                    {ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}
-                  </span>
-                )}
-                {ticket.guest_count > 0 && <span className="badge text-xs bg-night-600 text-gray-300">{ticket.guest_count}名様</span>}
-                {ticket.visit_motivation && (
-                  <span className="badge text-xs bg-teal-900/40 text-teal-400">
-                    {ticket.visit_motivation}
-                    {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
-                    {ticket.motivation_note && `／${ticket.motivation_note}`}
-                  </span>
-                )}
-              </div>
-            </div>
+                    disabled={!clickable}
+                    onClick={openHeader}
+                    className={`text-xl font-bold text-white ${clickable ? 'hover:text-primary-300 transition-colors' : ''}`}
+                  >{ticket.table_no || '—'}</button>
+                  <div className="flex gap-1.5 flex-wrap">
+                    <button
+                      disabled={!clickable}
+                      onClick={openHeader}
+                      className={`badge text-xs ${ticket.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : ticket.visit_type === 'R' ? 'bg-purple-900/40 text-purple-400' : 'bg-night-700 text-gray-500'} ${clickable ? 'hover:opacity-80' : ''}`}
+                    >{ticket.visit_type || 'N/R'}</button>
+                    <button
+                      disabled={!clickable}
+                      onClick={openHeader}
+                      className={`badge text-xs ${ticket.plan_type === 'premium' ? 'bg-yellow-900/40 text-yellow-400' : 'bg-gray-700 text-gray-300'} ${clickable ? 'hover:opacity-80' : ''}`}
+                    >{ticket.plan_type === 'premium' ? 'プレミアム' : 'スタンダード'}</button>
+                    <button
+                      disabled={!clickable}
+                      onClick={openHeader}
+                      className={`badge text-xs bg-night-600 text-gray-300 ${clickable ? 'hover:opacity-80' : ''}`}
+                    >{ticket.guest_count || 1}名様</button>
+                    {ticket.visit_motivation && (
+                      <button
+                        disabled={!clickable}
+                        onClick={openHeader}
+                        className={`badge text-xs bg-teal-900/40 text-teal-400 ${clickable ? 'hover:opacity-80' : ''}`}
+                      >
+                        {ticket.visit_motivation}
+                        {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
+                        {ticket.motivation_note && `／${ticket.motivation_note}`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
             <div className="flex items-center gap-2">
               <button onClick={() => setShowDeleteModal(true)}
                 className="text-xs px-3 py-1.5 bg-red-900/60 hover:bg-red-800/70 text-red-300 rounded-lg transition-colors">
