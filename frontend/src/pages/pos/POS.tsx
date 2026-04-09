@@ -2593,6 +2593,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+      qc.invalidateQueries({ queryKey: ['daily-report', storeId] })
       setEditingOrderId(null)
       setSelectedOrderId(null)
       setActionPos(null)
@@ -2600,6 +2601,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       setOperatorReason('')
       setActionMode('add')
       setChampEditCasts([])
+    },
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail || e?.message || '保存に失敗しました'
+      alert(`シャンパン分配の保存に失敗しました\n${detail}`)
     },
   })
 
