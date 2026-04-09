@@ -476,6 +476,8 @@ class DailyReport(Base):
     is_closed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    store = relationship("Store", back_populates="daily_reports")
+
 
 # ─────────────────────────────────────────
 # 日報スナップショット（バージョン管理付き・JSON保存）
@@ -490,8 +492,6 @@ class DailyReportSnapshot(Base):
     payload = Column(JSON, nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
-    store = relationship("Store", back_populates="daily_reports")
 
 
 # ─────────────────────────────────────────
