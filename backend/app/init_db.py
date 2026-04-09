@@ -114,9 +114,40 @@ def _seed_role_permissions(db):
     db.commit()
 
 
+def _cleanup_broken_snapshots():
+    """cast_attendance が空の壊れた日報スナップショットを削除（前バージョンがある場合のみ）。
+    再生成事故の自動復旧。"""
+    db = SessionLocal()
+    try:
+        snaps = db.query(models.DailyReportSnapshot).all()
+        deleted = 0
+        for s in snaps:
+            payload = s.payload if isinstance(s.payload, dict) else {}
+            cast_att = payload.get("cast_attendance") or []
+            if len(cast_att) == 0:
+                prev = db.query(models.DailyReportSnapshot).filter(
+                    models.DailyReportSnapshot.store_id == s.store_id,
+                    models.DailyReportSnapshot.business_date == s.business_date,
+                    models.DailyReportSnapshot.version < s.version,
+                ).order_by(models.DailyReportSnapshot.version.desc()).first()
+                if prev is not None:
+                    print(f"[CLEANUP] 壊れた日報削除: id={s.id} store={s.store_id} date={s.business_date} v{s.version} (前version v{prev.version})")
+                    db.delete(s)
+                    deleted += 1
+        if deleted > 0:
+            db.commit()
+            print(f"[CLEANUP] 計 {deleted} 件の壊れた日報スナップショットを削除")
+    except Exception as e:
+        print(f"[CLEANUP SKIP] {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def init_db():
     models.Base.metadata.create_all(bind=engine)
     _run_migrations(engine)
+    _cleanup_broken_snapshots()
 
     db = SessionLocal()
     try:
