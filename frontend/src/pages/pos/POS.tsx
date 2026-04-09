@@ -3468,7 +3468,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         {/* 本体: 左(伝票) + 右(操作) */}
         <div className="flex flex-1 overflow-hidden">
           {/* 左: 伝票（クローズ済みは全幅） */}
-          <div className={`${isClosed ? 'w-full' : 'w-1/2 border-r border-night-600'} flex flex-col overflow-hidden`}>
+          <div className={`${isClosed ? 'w-1/2 border-r border-night-600' : 'w-1/2 border-r border-night-600'} flex flex-col overflow-hidden`}>
             <div className="px-4 py-2 border-b border-night-700">
               {editingStartTime ? (
                 <div className="space-y-1.5">
@@ -3630,6 +3630,34 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               </div>
             </div>
           </div>
+
+          {/* 右: 会計済み伝票では領収書発行のみ表示 */}
+          {isClosed && (
+            <div className="w-1/2 flex flex-col overflow-hidden border-l border-night-600">
+              <div className="p-3 space-y-2">
+                <p className="text-xs text-gray-500">印刷</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
+                      window.open(URL.createObjectURL(r.data), '_blank')
+                    } catch { alert('概算伝票の生成に失敗しました') }
+                  }}
+                  className="bg-blue-800 hover:bg-blue-700 text-white text-xs py-2 rounded-lg w-full"
+                >🖨️ 概算伝票</button>
+                <button
+                  onClick={async () => {
+                    setShowReceiptModal(true)
+                    try {
+                      const h = await apiClient.get(`/api/receipts/history/${ticketId}`)
+                      setReceiptHistory(h.data)
+                    } catch {}
+                  }}
+                  className="bg-emerald-800 hover:bg-emerald-700 text-white text-xs py-2 rounded-lg w-full"
+                >📄 領収書発行</button>
+              </div>
+            </div>
+          )}
 
           {/* 右: 操作（オープン中のみ） */}
           {!isClosed && <div className="w-1/2 flex flex-col overflow-hidden">
