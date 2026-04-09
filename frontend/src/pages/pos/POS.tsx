@@ -435,9 +435,37 @@ export default function POS() {
         <CrossTicketTimerContext tickets={tickets}>
         {(castLatestMap) => (
         /* 伝票カード一覧：残り高さを全部使う */
-        <div className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start">
+        <div
+          className="flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-x-auto flex-1 min-h-0 px-1 pb-1 md:items-start"
+          onDragOver={e => {
+            if (dragFromIdxRef.current !== null) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }
+          }}
+          onDrop={e => {
+            const fromIdx = dragFromIdxRef.current
+            dragFromIdxRef.current = null
+            if (fromIdx === null) return
+            e.preventDefault()
+            // ドロップ位置のカードを座標から判定
+            const target = e.target as HTMLElement
+            const card = target.closest('[data-ticket-idx]') as HTMLElement | null
+            let toIdx = card ? parseInt(card.dataset.ticketIdx || '', 10) : tickets.length - 1
+            if (isNaN(toIdx)) toIdx = tickets.length - 1
+            if (fromIdx === toIdx) return
+            const newOrder = [...tickets]
+            const [moved] = newOrder.splice(fromIdx, 1)
+            newOrder.splice(toIdx, 0, moved)
+            const orderedIds = newOrder.map((t: any) => t.id)
+            qc.setQueryData(['tickets', selectedStoreId, 'open'], newOrder)
+            apiClient.post('/api/tickets/reorder', { store_id: selectedStoreId, ordered_ids: orderedIds })
+              .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
+          }}
+        >
           {tickets.map((ticket: any, idx: number) => (
             <div key={ticket.id}
+              data-ticket-idx={idx}
               draggable
               onDragStart={e => {
                 const target = e.target as HTMLElement
@@ -449,25 +477,7 @@ export default function POS() {
                 e.dataTransfer.effectAllowed = 'move'
                 try { e.dataTransfer.setData('text/plain', String(idx)) } catch {}
               }}
-              onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
               onDragEnd={() => { dragFromIdxRef.current = null }}
-              onDrop={e => {
-                e.preventDefault()
-                let fromIdx = dragFromIdxRef.current
-                if (fromIdx === null) {
-                  const v = parseInt(e.dataTransfer.getData('text/plain'), 10)
-                  if (!isNaN(v)) fromIdx = v
-                }
-                dragFromIdxRef.current = null
-                if (fromIdx === null || fromIdx === idx) return
-                const newOrder = [...tickets]
-                const [moved] = newOrder.splice(fromIdx, 1)
-                newOrder.splice(idx, 0, moved)
-                const orderedIds = newOrder.map((t: any) => t.id)
-                qc.setQueryData(['tickets', selectedStoreId, 'open'], newOrder)
-                apiClient.post('/api/tickets/reorder', { store_id: selectedStoreId, ordered_ids: orderedIds })
-                  .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
-              }}
               className="shrink-0"
             >
               <TicketCard ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
