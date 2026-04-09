@@ -597,6 +597,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
                     "closing_count": 0,
                     "tissue_count": 0,
                     "tissue_hours": 0.0,
+                    "service_hours": 0.0,
+                    "idle_hours": 0.0,
                     "custom_drinks": {},
                 }
             acc = cast_acc[key]
@@ -617,6 +619,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             acc["closing_count"] += int(c.get("closing_count") or 0)
             acc["tissue_count"] += int(c.get("tissue_count") or 0)
             acc["tissue_hours"] += float(c.get("tissue_hours") or 0)
+            acc["service_hours"] += float(c.get("service_hours") or 0)
+            acc["idle_hours"] += float(c.get("idle_hours") or 0)
             for short, qty in (c.get("custom_drinks") or {}).items():
                 acc["custom_drinks"][short] = acc["custom_drinks"].get(short, 0) + int(qty or 0)
 
@@ -652,6 +656,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
     for v in cast_acc.values():
         v["work_hours_total"] = round(v["work_hours_total"], 2)
         v["tissue_hours"] = round(v.get("tissue_hours", 0.0), 2)
+        v["service_hours"] = round(v.get("service_hours", 0.0), 2)
+        v["idle_hours"] = round(v.get("idle_hours", 0.0), 2)
         cast_summary.append(v)
     cast_summary.sort(key=lambda x: (x["is_help"], -(x["incentive_total"] or 0)))
 

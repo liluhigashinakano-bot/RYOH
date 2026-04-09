@@ -357,6 +357,33 @@ def _fetch_session_staff_att(db: Session, session: models.BusinessSession) -> Li
     ).all()
 
 
+def _fetch_session_assignments(db: Session, session: models.BusinessSession) -> List[models.CastAssignment]:
+    """セッション期間内の付け回し（接客中）を取得"""
+    q = db.query(models.CastAssignment).join(models.Ticket).filter(
+        models.Ticket.store_id == session.store_id,
+        models.Ticket.deleted_at.is_(None),
+        models.CastAssignment.started_at >= session.opened_at,
+    )
+    if session.closed_at:
+        q = q.filter(models.CastAssignment.started_at <= session.closed_at)
+    return q.all()
+
+
+def _aggregate_assignment_hours_per_cast(rows: List[models.CastAssignment], session_end: Optional[datetime]) -> dict:
+    """cast_id -> 接客時間（時間）。ended_at が null の場合は session_end (or now) で打ち切る"""
+    out: dict = {}
+    fallback_end = session_end or datetime.utcnow()
+    for r in rows:
+        if r.cast_id is None or r.started_at is None:
+            continue
+        end = r.ended_at or fallback_end
+        delta = (end - r.started_at).total_seconds() / 3600
+        if delta < 0:
+            delta = 0
+        out[r.cast_id] = out.get(r.cast_id, 0.0) + delta
+    return out
+
+
 def _fetch_session_tissue(db: Session, session: models.BusinessSession) -> List[models.TissueDistribution]:
     """セッション期間内に開始されたティッシュ配り（完了済みのみ集計対象）"""
     q = db.query(models.TissueDistribution).filter(
@@ -483,6 +510,9 @@ def build_daily_report_payload(
 
     tissue_rows = _fetch_session_tissue(db, session)
     tissue_per_cast = _aggregate_tissue_per_cast(tissue_rows)
+
+    assignment_rows = _fetch_session_assignments(db, session)
+    assignment_hours_per_cast = _aggregate_assignment_hours_per_cast(assignment_rows, session.closed_at)
 
     # ─── 売上集計 ───
     daily_sales = rc.total_sales(tickets)
@@ -667,6 +697,8 @@ def build_daily_report_payload(
             "closing_count": closing_counts.get(cid, 0) if cid is not None else 0,
             "tissue_count": (tissue_per_cast.get(cid, {}).get("count", 0)) if cid is not None else 0,
             "tissue_hours": (tissue_per_cast.get(cid, {}).get("hours", 0.0)) if cid is not None else 0.0,
+            "service_hours": round(assignment_hours_per_cast.get(cid, 0.0), 2) if cid is not None else 0.0,
+            "idle_hours": round(max(0.0, hours - assignment_hours_per_cast.get(cid, 0.0) - (tissue_per_cast.get(cid, {}).get("hours", 0.0) if cid is not None else 0.0)), 2) if cid is not None else 0.0,
             "custom_drinks": {
                 custom_short_map[label]: sum(
                     o.quantity
@@ -748,6 +780,8 @@ def build_daily_report_payload(
                 "closing_count": closing_counts.get(cid, 0),
                 "tissue_count": (tissue_per_cast.get(cid, {}).get("count", 0)),
                 "tissue_hours": (tissue_per_cast.get(cid, {}).get("hours", 0.0)),
+                "service_hours": round(assignment_hours_per_cast.get(cid, 0.0), 2),
+                "idle_hours": 0.0,
                 "custom_drinks": {custom_short_map[label]: 0 for label in custom_menu_labels},
             })
 
