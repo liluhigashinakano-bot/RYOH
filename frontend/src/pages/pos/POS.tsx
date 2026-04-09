@@ -2632,6 +2632,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
   const addOrderMutation = useMutation({
     mutationFn: (item: { item_type: string; unit_price: number; quantity: number; cast_id?: number | null; item_name?: string }) => {
+      // キャスト選択ありのドリンク系（タイマー対象）は新規行追加にする
+      // → 追加注文時に created_at を更新してドリンクタイマーをリセットする
+      const isCastDrink = CAST_SELECT_TYPES.has(item.item_type) || item.item_type === 'custom_menu'
+      if (isCastDrink && item.cast_id != null) {
+        return apiClient.post(`/api/tickets/${ticketId}/orders`, item).then(r => r.data)
+      }
       // キャッシュから最新データを取得（クロージャのticketは更新が遅延する場合があるため）
       const latestTicket = qc.getQueryData<any>(['ticket', ticketId])
       const orderItems = (latestTicket?.order_items ?? []) as any[]
