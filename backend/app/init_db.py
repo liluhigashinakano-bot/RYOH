@@ -48,6 +48,10 @@ def _run_migrations(engine):
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS display_order INTEGER",
         # OrderItem: 延長の期番号
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS period_no INTEGER",
+        # Store: 領収書関連
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(20)",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_footer TEXT",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:

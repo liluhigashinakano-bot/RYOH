@@ -2923,6 +2923,11 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showCastSearch, setShowCastSearch] = useState(false)
   const [showActiveCastsModal, setShowActiveCastsModal] = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
+  const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const [receiptHistory, setReceiptHistory] = useState<any[]>([])
+  const [receiptRecipient, setReceiptRecipient] = useState('')
+  const [receiptPaperSize, setReceiptPaperSize] = useState<'80mm' | 'a4'>('80mm')
+  const [receiptIssuing, setReceiptIssuing] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
   const [showWarikanModal, setShowWarikanModal] = useState(false)
   const [showSenkaikeiModal, setShowSenkaikeiModal] = useState(false)
@@ -3694,6 +3699,35 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   className="btn-secondary w-full text-xs py-1.5">合流</button>
               </div>
 
+              <div className="border-t border-night-700 pt-1.5 grid grid-cols-2 gap-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
+                      const url = URL.createObjectURL(r.data)
+                      window.open(url, '_blank')
+                    } catch (e: any) {
+                      alert('概算伝票の生成に失敗しました')
+                    }
+                  }}
+                  className="bg-blue-800 hover:bg-blue-700 text-white text-xs py-1.5 rounded-lg"
+                >
+                  🖨️ 概算伝票
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowReceiptModal(true)
+                    try {
+                      const h = await apiClient.get(`/api/receipts/history/${ticketId}`)
+                      setReceiptHistory(h.data)
+                    } catch {}
+                  }}
+                  className="bg-emerald-800 hover:bg-emerald-700 text-white text-xs py-1.5 rounded-lg"
+                >
+                  📄 領収書発行
+                </button>
+              </div>
+
               <div className="border-t border-night-700 pt-1.5">
                 <button onClick={fetchAI} disabled={loadingAI}
                   className="flex items-center gap-1.5 text-primary-400 text-xs font-medium disabled:opacity-50">
@@ -3723,6 +3757,105 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           </div>}
         </div>
       </div>
+
+      {/* 領収書発行モーダル */}
+      {showReceiptModal && (
+        <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-4" onClick={() => setShowReceiptModal(false)}>
+          <div className="bg-night-900 border border-emerald-700/40 rounded-xl max-w-md w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+              <h3 className="text-white font-bold text-sm">📄 領収書発行</h3>
+              <button onClick={() => setShowReceiptModal(false)} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="text-center bg-night-800 rounded-lg py-3">
+                <div className="text-gray-500 text-xs">発行金額</div>
+                <div className="text-white text-2xl font-bold">¥{(grandTotal || 0).toLocaleString()}</div>
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs">宛名（空欄可）</label>
+                <input type="text" value={receiptRecipient} onChange={e => setReceiptRecipient(e.target.value)}
+                  placeholder="例: 株式会社○○ / 上様"
+                  className="input-field w-full text-sm mt-1" />
+              </div>
+              <div>
+                <label className="text-gray-400 text-xs">用紙サイズ</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button onClick={() => setReceiptPaperSize('80mm')}
+                    className={`text-xs py-2 rounded-lg ${receiptPaperSize === '80mm' ? 'bg-emerald-700 text-white' : 'bg-night-800 text-gray-400'}`}>
+                    レシート(80mm)
+                  </button>
+                  <button onClick={() => setReceiptPaperSize('a4')}
+                    className={`text-xs py-2 rounded-lg ${receiptPaperSize === 'a4' ? 'bg-emerald-700 text-white' : 'bg-night-800 text-gray-400'}`}>
+                    A4
+                  </button>
+                </div>
+              </div>
+              <div className="text-[10px] text-gray-500">但し書き: ご飲食代として（固定）</div>
+              <button
+                disabled={receiptIssuing}
+                onClick={async () => {
+                  setReceiptIssuing(true)
+                  try {
+                    const r = await apiClient.post(`/api/receipts/issue/${ticketId}`, {
+                      recipient_name: receiptRecipient,
+                      note: 'ご飲食代として',
+                      paper_size: receiptPaperSize,
+                    }, { responseType: 'blob' })
+                    const url = URL.createObjectURL(r.data)
+                    window.open(url, '_blank')
+                    // 履歴更新
+                    const h = await apiClient.get(`/api/receipts/history/${ticketId}`)
+                    setReceiptHistory(h.data)
+                  } catch (e: any) {
+                    alert('領収書発行に失敗しました')
+                  } finally {
+                    setReceiptIssuing(false)
+                  }
+                }}
+                className="btn-primary w-full text-sm py-2.5 disabled:opacity-50"
+              >
+                {receiptIssuing ? '発行中...' : '領収書を発行 (PDF)'}
+              </button>
+
+              {/* 発行履歴 */}
+              <div className="border-t border-gray-800 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-xs font-bold">発行履歴</span>
+                  <button
+                    onClick={async () => {
+                      const h = await apiClient.get(`/api/receipts/history/${ticketId}`)
+                      setReceiptHistory(h.data)
+                    }}
+                    className="text-[10px] text-gray-500 hover:text-white"
+                  >更新</button>
+                </div>
+                {receiptHistory.length === 0 && <div className="text-gray-600 text-xs">履歴なし</div>}
+                <div className="space-y-1">
+                  {receiptHistory.map(r => (
+                    <div key={r.id} className="bg-night-800 rounded px-2 py-1.5 flex items-center gap-2 text-xs">
+                      <div className="flex-1">
+                        <div className="text-white">{r.receipt_no}</div>
+                        <div className="text-[10px] text-gray-500">
+                          {r.recipient_name || '無記名'} / ¥{r.amount.toLocaleString()} / {r.paper_size}
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const rr = await apiClient.get(`/api/receipts/reissue/${r.id}`, { responseType: 'blob' })
+                            window.open(URL.createObjectURL(rr.data), '_blank')
+                          } catch { alert('再発行に失敗しました') }
+                        }}
+                        className="text-emerald-400 text-[10px] hover:underline"
+                      >再発行</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 会計確認ダイアログ */}
       {pendingAction && (

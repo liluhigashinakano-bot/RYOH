@@ -73,6 +73,9 @@ class Store(Base):
     close_time = Column(String(5), nullable=True)  # "05:00"
     address = Column(String(200))
     phone = Column(String(20))
+    postal_code = Column(String(10), nullable=True)
+    invoice_number = Column(String(20), nullable=True)  # インボイス登録番号 T+13桁
+    receipt_footer = Column(Text, nullable=True)         # 領収書フッター
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -600,3 +603,27 @@ class AIAdvice(Base):
     context = Column(JSON, default={})
     advice = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────
+# 領収書発行履歴
+# ─────────────────────────────────────────
+class ReceiptIssuance(Base):
+    __tablename__ = "receipt_issuances"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    receipt_no = Column(String(30), nullable=False, index=True)  # 例: 20260410-001
+    recipient_name = Column(String(200), nullable=True)           # 宛名(空可)
+    note = Column(String(200), default="ご飲食代として")          # 但し書き
+    amount = Column(Integer, nullable=False)                       # 税サ込み合計
+    service_charge = Column(Integer, default=0)                    # サービス料分
+    tax = Column(Integer, default=0)                                # 消費税分
+    issued_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    issued_by_name = Column(String(100), nullable=True)
+    paper_size = Column(String(10), default="80mm")                # 80mm | a4
+    issued_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket")
+    store = relationship("Store")

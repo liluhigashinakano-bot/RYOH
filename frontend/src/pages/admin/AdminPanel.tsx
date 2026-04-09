@@ -510,6 +510,11 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
     extension_price: store.extension_price || 2700,
     open_time: store.open_time || '19:00',
     close_time: store.close_time || '29:00',
+    postal_code: store.postal_code || '',
+    address: store.address || '',
+    phone: store.phone || '',
+    invoice_number: store.invoice_number || '',
+    receipt_footer: store.receipt_footer || '',
   })
 
   const mutation = useMutation({
@@ -537,6 +542,14 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
           <div>
             <label className="text-xs text-gray-400 block mb-1">営業終了時間（翌5:00 → 29:00）</label>
             <TimeSelect value={form.close_time} onChange={v => setForm({ ...form, close_time: v })} />
+          </div>
+          <div className="border-t border-gray-800 pt-3">
+            <div className="text-xs text-gray-500 mb-2 font-bold">領収書情報</div>
+            <input value={form.postal_code} onChange={e => setForm({ ...form, postal_code: e.target.value })} className="input-field w-full mb-2" placeholder="郵便番号 (例: 164-0003)" />
+            <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="input-field w-full mb-2" placeholder="住所" />
+            <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input-field w-full mb-2" placeholder="電話番号" />
+            <input value={form.invoice_number} onChange={e => setForm({ ...form, invoice_number: e.target.value })} className="input-field w-full mb-2" placeholder="インボイス登録番号 (T+13桁)" />
+            <textarea value={form.receipt_footer} onChange={e => setForm({ ...form, receipt_footer: e.target.value })} className="input-field w-full text-xs" rows={2} placeholder="領収書フッター(任意)" />
           </div>
         </div>
         <div className="flex gap-3">

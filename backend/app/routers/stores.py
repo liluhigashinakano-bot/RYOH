@@ -16,6 +16,9 @@ class StoreCreate(BaseModel):
     extension_price: int = 0
     address: Optional[str] = None
     phone: Optional[str] = None
+    postal_code: Optional[str] = None
+    invoice_number: Optional[str] = None
+    receipt_footer: Optional[str] = None
 
 
 class StoreUpdate(BaseModel):
@@ -24,6 +27,9 @@ class StoreUpdate(BaseModel):
     extension_price: Optional[int] = None
     address: Optional[str] = None
     phone: Optional[str] = None
+    postal_code: Optional[str] = None
+    invoice_number: Optional[str] = None
+    receipt_footer: Optional[str] = None
     is_active: Optional[bool] = None
     open_time: Optional[str] = None   # "19:00"
     close_time: Optional[str] = None  # "29:00"
@@ -37,6 +43,9 @@ class StoreResponse(BaseModel):
     extension_price: Optional[int] = 0
     address: Optional[str]
     phone: Optional[str]
+    postal_code: Optional[str] = None
+    invoice_number: Optional[str] = None
+    receipt_footer: Optional[str] = None
     is_active: bool
     open_time: Optional[str] = None
     close_time: Optional[str] = None
