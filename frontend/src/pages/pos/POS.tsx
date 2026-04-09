@@ -458,7 +458,7 @@ export default function POS() {
           )}
         </div>
       ) : view === 'casts' ? (
-        <ActiveCastsView storeId={selectedStoreId} tickets={tickets} onTicketClick={(id) => setSelectedTicketId(id)} />
+        <ActiveCastsView storeId={selectedStoreId} tickets={tickets} onTicketClick={(id) => setSelectedTicketId(id)} onOpenActiveCastsModal={t => setActiveCastsModalTicket(t)} />
       ) : view === 'attendance' ? (
         <CastAttendanceView storeId={selectedStoreId} />
       ) : view === 'history' ? (
@@ -4743,7 +4743,7 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
   )
 }
 
-function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void }) {
+function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsModal }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void; onOpenActiveCastsModal: (ticket: any) => void }) {
   const qc = useQueryClient()
   // 出勤中キャスト一覧
   const { data: shifts = [] } = useQuery({
@@ -4803,23 +4803,24 @@ function ActiveCastsView({ storeId, tickets, onTicketClick }: { storeId: number;
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
             {tickets.map((t: any) => (
-              <button key={t.id}
-                onClick={() => onTicketClick(t.id)}
-                className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
+              <div key={t.id}
+                className="bg-night-700 rounded-lg p-2"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-white font-bold">{t.table_no || '—'}</span>
+                  <button onClick={() => onTicketClick(t.id)}
+                    className="text-white font-bold hover:text-primary-300">{t.table_no || '—'}</button>
                   <span className="text-[10px] text-gray-500">{t.guest_count}名</span>
                 </div>
-                <div className="text-xs mt-0.5">
+                <button onClick={() => onOpenActiveCastsModal(t)}
+                  className="block w-full text-left text-xs mt-0.5 hover:bg-night-600 rounded px-1 py-0.5 transition-colors">
                   <span className="text-gray-500">担当: </span>
-                  <span className="text-purple-300">
+                  <span className="text-purple-300 underline decoration-dotted">
                     {(t.current_casts && t.current_casts.length > 0)
                       ? t.current_casts.map((c: any) => c.cast_name).join('・')
                       : '未設定'}
                   </span>
-                </div>
-              </button>
+                </button>
+              </div>
             ))}
           </div>
         )}
