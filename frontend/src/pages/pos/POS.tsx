@@ -2458,7 +2458,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [editingGroupItemIds, setEditingGroupItemIds] = useState<number[]>([])
   const [operatorName, setOperatorName] = useState('')
   const [operatorReason, setOperatorReason] = useState('')
-  const [champEditCasts, setChampEditCasts] = useState<{ castName: string; ratio: number }[]>([])
+  const [champEditCasts, setChampEditCasts] = useState<{ castId: number | null; castName: string; ratio: number }[]>([])
   const [actionPos, setActionPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const [showCustomerSearch, setShowCustomerSearch] = useState(false)
   const [showCastSearch, setShowCastSearch] = useState(false)
@@ -2559,12 +2559,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   const updateChampagneMutation = useMutation({
-    mutationFn: ({ oldName, newName, operator, reason }: { oldName: string; newName: string; operator: string; reason: string }) =>
+    mutationFn: ({ oldName, newName, operator, reason, distribution }: { oldName: string; newName: string; operator: string; reason: string; distribution?: { cast_id: number; ratio: number }[] }) =>
       apiClient.patch(`/api/tickets/${ticketId}/update-champagne`, {
         old_item_name: oldName,
         new_item_name: newName,
         operator_name: operator || null,
         reason: reason || null,
+        cast_distribution: distribution || null,
       }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
@@ -3228,6 +3229,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             if (isChampagne && selections.length > 0) {
               const castsStr = selections.map(s => `${s.castName} ${s.ratio}%`).join('・')
               const itemName = `${castSelectItem.label}［${castsStr}］`
+              // 構造化された分配情報（cast_id ベース・全行に同じJSONをコピー）
+              const castDistribution = selections.map(s => ({ cast_id: s.castId, ratio: s.ratio }))
               // 最初のキャストに全額、残りは0円マーカー（D時間追跡用）
               const orders = selections.map((s, i) => ({
                 item_type: 'champagne',
@@ -3235,6 +3238,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 unit_price: i === 0 ? castSelectItem.price : 0,
                 quantity: 1,
                 cast_id: s.castId,
+                cast_distribution: castDistribution,
               }))
               Promise.all(orders.map(o => apiClient.post(`/api/tickets/${ticketId}/orders`, o).then(r => r.data)))
                 .then(() => {
@@ -3533,14 +3537,37 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   setEditingOrderId(selectedOrderId)
                   setOperatorName('')
                   setOperatorReason('')
-                  // シャンパンの場合: item_name からキャスト配分を解析
+                  // シャンパンの場合: cast_distribution 優先・無ければ item_name パース
                   if (item.item_type === 'champagne') {
-                    const inner = (item.item_name || '').match(/[［\[](.+?)[］\]]/)?.[1] || ''
-                    const parsed = inner.split('・').map((p: string) => {
-                      const m = p.match(/^(.+?)\s+(\d+)%$/)
-                      return m ? { castName: m[1], ratio: parseInt(m[2]) } : { castName: p, ratio: 0 }
-                    }).filter((c: { castName: string; ratio: number }) => c.castName)
-                    setChampEditCasts(parsed)
+                    // 同一グループ（同じ item_name）の全行を取得
+                    const champItems = (ticket.order_items || []).filter((i: any) =>
+                      i.item_type === 'champagne' && i.item_name === item.item_name && !i.canceled_at
+                    )
+                    // cast_distribution を持つ代表行を探す
+                    const distHolder = champItems.find((i: any) => Array.isArray(i.cast_distribution) && i.cast_distribution.length > 0)
+                    if (distHolder && distHolder.cast_distribution) {
+                      // 構造化データから組み立て（cast_id でキャスト名解決）
+                      const parsed = distHolder.cast_distribution.map((d: any) => {
+                        const ci = champItems.find((x: any) => x.cast_id === d.cast_id)
+                        return {
+                          castId: d.cast_id,
+                          castName: ci?.cast?.stage_name || `Cast${d.cast_id}`,
+                          ratio: d.ratio || 0,
+                        }
+                      })
+                      setChampEditCasts(parsed)
+                    } else {
+                      // 旧形式: item_name パース＋ticket の order_items から cast_id を引き当て
+                      const inner = (item.item_name || '').match(/[［\[](.+?)[］\]]/)?.[1] || ''
+                      const parsed = inner.split('・').map((p: string) => {
+                        const m = p.match(/^(.+?)\s+(\d+)%$/)
+                        const castName = m ? m[1] : p
+                        const ratio = m ? parseInt(m[2]) : 0
+                        const ci = champItems.find((x: any) => x.cast?.stage_name === castName)
+                        return { castId: ci?.cast_id ?? null, castName, ratio }
+                      }).filter((c: { castName: string; ratio: number }) => c.castName)
+                      setChampEditCasts(parsed)
+                    }
                   } else {
                     setChampEditCasts([])
                   }
@@ -3611,13 +3638,18 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <button
                       onClick={() => {
                         if (item.item_type === 'champagne' && champEditCasts.length > 0) {
-                          // シャンパン: キャスト配分率をitem_nameに反映して一括更新
+                          // シャンパン: 表示用 item_name と構造化 cast_distribution の両方を更新
                           const baseName = (item.item_name || '').replace(/[［\[].*[］\]]/, '').trim()
                           const useBracket = (item.item_name || '').includes('［') ? '［' : '['
                           const closeBracket = useBracket === '［' ? '］' : ']'
                           const castsStr = champEditCasts.map(c => `${c.castName} ${c.ratio}%`).join('・')
                           const newItemName = `${baseName}${useBracket}${castsStr}${closeBracket}`
-                          updateChampagneMutation.mutate({ oldName: item.item_name, newName: newItemName, operator: operatorName, reason: operatorReason })
+                          // cast_id が全員揃っている場合のみ構造化データも送る
+                          const allHaveCastId = champEditCasts.every(c => typeof c.castId === 'number')
+                          const distribution = allHaveCastId
+                            ? champEditCasts.map(c => ({ cast_id: c.castId as number, ratio: c.ratio }))
+                            : undefined
+                          updateChampagneMutation.mutate({ oldName: item.item_name, newName: newItemName, operator: operatorName, reason: operatorReason, distribution })
                         } else if (editingGroupItemIds.length > 1) {
                           groupReduceMutation.mutate({ item, targetQty: editingQty, operator: operatorName, reason: operatorReason })
                         } else {
