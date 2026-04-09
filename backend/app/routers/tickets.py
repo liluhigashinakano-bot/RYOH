@@ -1599,11 +1599,14 @@ def get_live_summary(
     open_tickets = db.query(models.Ticket).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == False,
+        models.Ticket.deleted_at.is_(None),
+        models.Ticket.started_at >= day_start_utc,
     ).all()
 
     closed_today = db.query(models.Ticket).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == True,
+        models.Ticket.deleted_at.is_(None),
         models.Ticket.ended_at >= day_start_utc,
         models.Ticket.ended_at < day_end_utc,
     ).all()
