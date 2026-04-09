@@ -38,40 +38,80 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
     # 後方互換: current_cast_name は推しキャスト名（既存表示用）
     current_cast_name = featured_cast_name
 
-    # 種別×キャストごとの最終注文時刻
-    # 構造: { "drink_l": [{"cast_id": 1, "cast_name": "すずな", "last_at": datetime}, ...], ... }
+    # ドリンクタイマーの最終注文時刻
+    # 仕様:
+    # - シャンパン以外は1キャストにつき最新の1件だけ表示（古い品目は消える）
+    # - シャンパンは品目別にすべて表示（複数並ぶ）
+    # 構造: { "drink_l": [{...}], ..., "champagne": [...], ... }
     drink_clears = getattr(ticket, 'drink_clears', None) or {}
-    last_drink_times: dict = {}
-    for drink_type in CAST_DRINK_TYPES:
-        orders = [
-            i for i in (ticket.order_items or [])
-            if i.item_type == drink_type and i.canceled_at is None and i.cast_id is not None
-        ]
-        if not orders:
-            last_drink_times[drink_type] = []
+    last_drink_times: dict = {dt: [] for dt in CAST_DRINK_TYPES}
+
+    # 1キャストの最新ドリンク（シャンパン以外）を求める
+    latest_per_cast: dict = {}  # cid -> {drink_type, cast_name, last_at, item_name}
+    for item in (ticket.order_items or []):
+        if item.canceled_at is not None or item.cast_id is None:
             continue
-        # キャストIDごとにグループ化して最終時刻を取得
-        cast_map_local: dict = {}
-        for item in orders:
-            cid = item.cast_id
-            last_at_iso = item.created_at.isoformat() if item.created_at else None
-            if cid not in cast_map_local or (last_at_iso and last_at_iso > (cast_map_local[cid]["last_at"] or "")):
-                cast_name = item.cast.stage_name if item.cast else f"Cast{cid}"
-                cast_map_local[cid] = {"cast_id": cid, "cast_name": cast_name, "last_at": last_at_iso, "item_name": item.item_name}
-        # クリア済み（cleared_at >= last_at）のキャストを除外
-        result = []
-        for entry in cast_map_local.values():
-            clear_key = f"{entry['cast_id']}_{drink_type}"
-            cleared_at_iso = drink_clears.get(clear_key)
-            if cleared_at_iso:
-                try:
-                    cleared_at = datetime.fromisoformat(cleared_at_iso)
-                except Exception:
-                    cleared_at = None
-                if cleared_at and cleared_at.isoformat() >= entry["last_at"]:
-                    continue  # クリア済みのためスキップ
-            result.append(entry)
-        last_drink_times[drink_type] = result
+        if item.item_type not in CAST_DRINK_TYPES or item.item_type == "champagne":
+            continue
+        cid = item.cast_id
+        last_at_iso = item.created_at.isoformat() if item.created_at else None
+        if last_at_iso is None:
+            continue
+        cur = latest_per_cast.get(cid)
+        if cur is None or last_at_iso > cur["last_at"]:
+            latest_per_cast[cid] = {
+                "drink_type": item.item_type,
+                "cast_id": cid,
+                "cast_name": item.cast.stage_name if item.cast else f"Cast{cid}",
+                "last_at": last_at_iso,
+                "item_name": item.item_name,
+            }
+
+    for entry in latest_per_cast.values():
+        clear_key = f"{entry['cast_id']}_{entry['drink_type']}"
+        cleared_at_iso = drink_clears.get(clear_key)
+        if cleared_at_iso:
+            try:
+                cleared_at = datetime.fromisoformat(cleared_at_iso)
+            except Exception:
+                cleared_at = None
+            if cleared_at and cleared_at.isoformat() >= entry["last_at"]:
+                continue
+        last_drink_times[entry["drink_type"]].append({
+            "cast_id": entry["cast_id"],
+            "cast_name": entry["cast_name"],
+            "last_at": entry["last_at"],
+            "item_name": entry["item_name"],
+        })
+
+    # シャンパンは従来通り（item_name 別、cast_id 別に並べる）
+    champ_map: dict = {}  # (cid, item_name) -> entry
+    for item in (ticket.order_items or []):
+        if item.canceled_at is not None or item.cast_id is None or item.item_type != "champagne":
+            continue
+        last_at_iso = item.created_at.isoformat() if item.created_at else None
+        if last_at_iso is None:
+            continue
+        key = (item.cast_id, item.item_name or "")
+        cur = champ_map.get(key)
+        if cur is None or last_at_iso > cur["last_at"]:
+            champ_map[key] = {
+                "cast_id": item.cast_id,
+                "cast_name": item.cast.stage_name if item.cast else f"Cast{item.cast_id}",
+                "last_at": last_at_iso,
+                "item_name": item.item_name,
+            }
+    for entry in champ_map.values():
+        clear_key = f"{entry['cast_id']}_champagne"
+        cleared_at_iso = drink_clears.get(clear_key)
+        if cleared_at_iso:
+            try:
+                cleared_at = datetime.fromisoformat(cleared_at_iso)
+            except Exception:
+                cleared_at = None
+            if cleared_at and cleared_at.isoformat() >= entry["last_at"]:
+                continue
+        last_drink_times["champagne"].append(entry)
 
     # 顧客名
     customer_name = ticket.customer.name if ticket.customer else None
