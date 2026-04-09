@@ -331,15 +331,16 @@ def get_tickets(
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
     tickets = query.order_by(models.Ticket.started_at.desc()).all()
-    # オープン中はテーブル番号で並べ替え (A1, A2, ..., A10, B1, ...)
+    # オープン中は display_order ASC → 卓番号自然順
     if is_closed is False:
         import re
         def _sort_key(t):
+            order = t.display_order if t.display_order is not None else 10**9
             tn = t.table_no or ''
             m = re.match(r'^([A-Za-z]*)(\d*)$', tn)
             if m:
-                return (m.group(1), int(m.group(2)) if m.group(2) else 0, tn)
-            return (tn, 0, tn)
+                return (order, m.group(1), int(m.group(2)) if m.group(2) else 0, tn)
+            return (order, tn, 0, tn)
         tickets.sort(key=_sort_key)
     result = []
     for t in tickets:
@@ -764,6 +765,31 @@ def set_assignments(
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
+
+
+class ReorderRequest(BaseModel):
+    store_id: int
+    ordered_ids: List[int]
+
+
+@router.post("/reorder")
+def reorder_tickets(
+    data: ReorderRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """ドラッグ後の伝票並び順を保存"""
+    rows = db.query(models.Ticket).filter(
+        models.Ticket.id.in_(data.ordered_ids),
+        models.Ticket.store_id == data.store_id,
+    ).all()
+    by_id = {r.id: r for r in rows}
+    for idx, tid in enumerate(data.ordered_ids):
+        t = by_id.get(tid)
+        if t is not None:
+            t.display_order = idx
+    db.commit()
+    return {"ok": True}
 
 
 class TicketDeleteRequest(BaseModel):

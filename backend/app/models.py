@@ -265,6 +265,7 @@ class Ticket(Base):
     featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）
     deleted_at = Column(DateTime, nullable=True)  # 論理削除タイムスタンプ
     deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    display_order = Column(Integer, nullable=True)  # POS画面でのドラッグ並び順
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="tickets")

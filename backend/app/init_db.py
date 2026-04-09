@@ -44,6 +44,8 @@ def _run_migrations(engine):
         # Ticket: 論理削除
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id)",
+        # Ticket: ドラッグ並び順
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS display_order INTEGER",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:
