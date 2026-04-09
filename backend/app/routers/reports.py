@@ -28,65 +28,6 @@ from ..services.report_builder import (
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
-# 一時的な管理API: 壊れた（cast_attendance が空の）スナップショットを削除
-# 復旧完了後に削除予定
-@router.get("/admin-rollback-broken-snapshots")
-def rollback_broken_snapshots(
-    apply: bool = Query(False, description="True で実行、False で DRY RUN"),
-    store_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
-):
-    if not getattr(current_user, "is_admin", False) and current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="管理者のみ実行可能")
-
-    q = db.query(models.DailyReportSnapshot)
-    if store_id:
-        q = q.filter(models.DailyReportSnapshot.store_id == store_id)
-    snaps = q.order_by(
-        models.DailyReportSnapshot.store_id,
-        models.DailyReportSnapshot.business_date,
-        models.DailyReportSnapshot.version.desc(),
-    ).all()
-
-    results = []
-    deleted = 0
-    for s in snaps:
-        payload = s.payload if isinstance(s.payload, dict) else {}
-        cast_att = payload.get("cast_attendance") or []
-        if len(cast_att) == 0:
-            prev = db.query(models.DailyReportSnapshot).filter(
-                models.DailyReportSnapshot.store_id == s.store_id,
-                models.DailyReportSnapshot.business_date == s.business_date,
-                models.DailyReportSnapshot.version < s.version,
-            ).order_by(models.DailyReportSnapshot.version.desc()).first()
-            entry = {
-                "id": s.id,
-                "store_id": s.store_id,
-                "business_date": s.business_date.isoformat(),
-                "version": s.version,
-                "prev_version": prev.version if prev else None,
-            }
-            if apply and prev is not None:
-                db.delete(s)
-                deleted += 1
-                entry["action"] = "deleted"
-            elif prev is None:
-                entry["action"] = "skip (no prev)"
-            else:
-                entry["action"] = "would delete"
-            results.append(entry)
-
-    if apply:
-        db.commit()
-
-    return {
-        "mode": "APPLY" if apply else "DRY RUN",
-        "deleted": deleted,
-        "results": results,
-    }
-
-
 # ─────────────────────────────────────────
 # 日報
 # ─────────────────────────────────────────
