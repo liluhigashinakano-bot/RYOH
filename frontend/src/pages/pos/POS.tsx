@@ -4724,11 +4724,11 @@ function SentaitenModal({ currentGuestCount, onSubmit, onClose }: {
 // ─────────────────────────────────────────
 // キャスト勤怠
 // ─────────────────────────────────────────
-// 30分刻みの時刻スロット生成（営業時間: 19:00〜29:00）
+// 30分刻みの時刻スロット生成（営業時間: 18:00〜30:00）
 // label: バー表記 "24:00" 等, value: 実際の HH:MM をバックエンドへ送る
 function genTimeSlots(): { label: string; value: string }[] {
   const slots: { label: string; value: string }[] = []
-  for (let i = 19 * 2; i <= 29 * 2; i++) {
+  for (let i = 18 * 2; i <= 30 * 2; i++) {
     const totalMins = i * 30
     const displayH = Math.floor(totalMins / 60)
     const displayM = totalMins % 60
