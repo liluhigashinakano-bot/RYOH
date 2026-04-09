@@ -482,6 +482,24 @@ def add_order(
 
     amount = data.quantity * data.unit_price
 
+    # extension は cast_id を持たないので、同じ item_name の既存行があれば数量加算してマージ
+    if data.item_type == "extension" and data.cast_id is None:
+        existing = db.query(models.OrderItem).filter(
+            models.OrderItem.ticket_id == ticket_id,
+            models.OrderItem.item_type == "extension",
+            models.OrderItem.cast_id.is_(None),
+            models.OrderItem.canceled_at.is_(None),
+            models.OrderItem.unit_price == data.unit_price,
+            (models.OrderItem.item_name == data.item_name) if data.item_name else (models.OrderItem.item_name.is_(None)),
+        ).order_by(models.OrderItem.id.asc()).first()
+        if existing is not None:
+            existing.quantity = (existing.quantity or 0) + data.quantity
+            existing.amount = (existing.unit_price or 0) * existing.quantity
+            ticket.total_amount += amount
+            ticket.extension_count = (ticket.extension_count or 0) + data.quantity
+            db.commit()
+            return {"message": "注文を追加しました", "id": existing.id, "total_amount": ticket.total_amount}
+
     # インセンティブスナップショット & 分配情報の計算
     snapshot = None
     distribution_json = None

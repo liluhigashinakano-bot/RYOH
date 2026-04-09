@@ -155,10 +155,47 @@ def _cleanup_broken_snapshots():
         db.close()
 
 
+def _merge_split_extensions():
+    """同じ ticket × extension × item_name × unit_price の分裂行を1行にマージ。
+    AutoExtender の重複POST等で生まれた残骸を起動時に修復する。"""
+    from collections import defaultdict
+    db = SessionLocal()
+    try:
+        rows = db.query(models.OrderItem).filter(
+            models.OrderItem.item_type == "extension",
+            models.OrderItem.canceled_at.is_(None),
+            models.OrderItem.cast_id.is_(None),
+        ).order_by(models.OrderItem.ticket_id, models.OrderItem.id).all()
+        groups: dict = defaultdict(list)
+        for r in rows:
+            key = (r.ticket_id, r.item_name or "", r.unit_price or 0)
+            groups[key].append(r)
+        merged = 0
+        for items in groups.values():
+            if len(items) <= 1:
+                continue
+            keeper = items[0]
+            total_qty = sum((i.quantity or 0) for i in items)
+            keeper.quantity = total_qty
+            keeper.amount = (keeper.unit_price or 0) * total_qty
+            for i in items[1:]:
+                db.delete(i)
+            merged += 1
+        if merged > 0:
+            db.commit()
+            print(f"[CLEANUP] 分裂延長行 {merged} グループをマージ")
+    except Exception as e:
+        print(f"[CLEANUP SKIP] merge_split_extensions: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def init_db():
     models.Base.metadata.create_all(bind=engine)
     _run_migrations(engine)
     _cleanup_broken_snapshots()
+    _merge_split_extensions()
 
     db = SessionLocal()
     try:
