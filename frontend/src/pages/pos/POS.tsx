@@ -248,6 +248,8 @@ export default function POS() {
   const [aiAdvisorLoading, setAIAdvisorLoading] = useState(false)
   const [aiAdvisorResult, setAIAdvisorResult] = useState<any>(null)
   const [aiAdvisorError, setAIAdvisorError] = useState<string>('')
+  const [aiAdvisorHistory, setAIAdvisorHistory] = useState<any[]>([])
+  const [aiAdvisorTab, setAIAdvisorTab] = useState<'current' | 'history'>('current')
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
   const [view, setView] = useState<'open' | 'attendance' | 'history' | 'logs' | 'reports' | 'casts'>('open')
   const [showOpenSessionModal, setShowOpenSessionModal] = useState(false)
@@ -637,9 +639,19 @@ export default function POS() {
           <div className="bg-night-900 border border-pink-500/30 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
               <h3 className="text-white font-bold text-sm">🤖 付け回しAIアドバイス</h3>
-              <button onClick={() => setShowAIAdvisor(false)} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
+              <div className="flex items-center gap-2">
+                <div className="flex bg-gray-800 rounded p-0.5 gap-0.5">
+                  <button onClick={() => setAIAdvisorTab('current')} className={`text-[10px] px-2 py-0.5 rounded ${aiAdvisorTab === 'current' ? 'bg-pink-700 text-white' : 'text-gray-400'}`}>最新</button>
+                  <button onClick={async () => {
+                    setAIAdvisorTab('history')
+                    try { const r = await apiClient.get(`/api/ai/rotation-history/${selectedStoreId}`); setAIAdvisorHistory(r.data) } catch {}
+                  }} className={`text-[10px] px-2 py-0.5 rounded ${aiAdvisorTab === 'history' ? 'bg-pink-700 text-white' : 'text-gray-400'}`}>履歴</button>
+                </div>
+                <button onClick={() => setShowAIAdvisor(false)} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
+              </div>
             </div>
             <div className="overflow-y-auto p-4 space-y-3">
+              {aiAdvisorTab === 'current' ? (<>
               {aiAdvisorLoading && (
                 <div className="text-center text-gray-400 py-8 text-sm">分析中... (Gemini 2.5 Flash)</div>
               )}
@@ -676,6 +688,30 @@ export default function POS() {
                           </div>
                         ))}
                       </div>
+                    </div>
+                  ))}
+                </>
+              )}
+              </>) : (
+                <>
+                  {aiAdvisorHistory.length === 0 && <div className="text-gray-500 text-center py-6 text-xs">履歴なし</div>}
+                  {aiAdvisorHistory.map((h: any) => (
+                    <div key={h.id} className="bg-night-800 border border-gray-800 rounded-lg p-3">
+                      <div className="text-[10px] text-gray-500 mb-2">{h.created_at ? new Date(h.created_at + 'Z').toLocaleString('ja-JP') : ''}</div>
+                      {h.advice?.overall_advice && (
+                        <div className="text-pink-200 text-xs mb-2">💡 {h.advice.overall_advice}</div>
+                      )}
+                      {(h.advice?.suggestions || []).map((s: any, si: number) => (
+                        <div key={si} className="mb-1.5">
+                          <span className="text-white text-xs font-bold">{s.table_no}</span>
+                          <span className="text-gray-400 text-xs ml-1">{s.customer_name}</span>
+                          <div className="ml-3">
+                            {(s.recommended_casts || []).map((c: any, ci: number) => (
+                              <div key={ci} className="text-[10px] text-gray-400">#{ci+1} {c.stage_name} ({c.score}) {c.reason}</div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </>
@@ -5275,7 +5311,7 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
 function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPending }: {
   taikenName: string
   setTaikenName: (v: string) => void
-  onSubmit: (name: string, time: string) => void
+  onSubmit: (name: string, time: string, hourlyRate: number) => void
   onCancel: () => void
   isPending: boolean
 }) {
@@ -5293,6 +5329,7 @@ function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPe
     const m = n.getMinutes() < 30 ? '00' : '30'
     return `${String(h).padStart(2, '0')}:${m}`
   })
+  const [hourlyRate, setHourlyRate] = useState('1400')
 
   return (
     <div className="space-y-3">
@@ -5300,6 +5337,11 @@ function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPe
         <label className="text-xs text-gray-400 block mb-1">キャスト名</label>
         <input type="text" value={taikenName} onChange={e => setTaikenName(e.target.value)}
           placeholder="体験入店キャスト名" className="input-field w-full text-sm" autoFocus />
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">時給（円）</label>
+        <input type="number" value={hourlyRate} onChange={e => setHourlyRate(e.target.value)}
+          placeholder="1400" className="input-field w-full text-sm" min={0} />
       </div>
       <div>
         <label className="text-xs text-gray-400 block mb-1">出勤時間</label>
@@ -5310,7 +5352,7 @@ function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPe
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="btn-secondary flex-1 text-sm py-2">キャンセル</button>
         <button
-          onClick={() => taikenName.trim() && onSubmit(taikenName.trim(), time)}
+          onClick={() => taikenName.trim() && onSubmit(taikenName.trim(), time, parseInt(hourlyRate) || 1400)}
           disabled={!taikenName.trim() || isPending}
           className="flex-1 text-sm py-2 rounded-lg bg-pink-700 hover:bg-pink-600 text-white font-medium disabled:opacity-40 transition-colors"
         >
@@ -5684,11 +5726,12 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   })
 
   const taikenClockInMutation = useMutation({
-    mutationFn: ({ name, time }: { name: string; time: string }) =>
+    mutationFn: ({ name, time, hourlyRate }: { name: string; time: string; hourlyRate: number }) =>
       apiClient.post('/api/casts/attendance/taiken-clock-in', {
         store_id: storeId,
         cast_name: name,
         actual_start: time || undefined,
+        hourly_rate: hourlyRate,
       }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['attendance', storeId] })
@@ -6007,7 +6050,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
               <TaikenClockInForm
                 taikenName={taikenName}
                 setTaikenName={setTaikenName}
-                onSubmit={(name, time) => taikenClockInMutation.mutate({ name, time })}
+                onSubmit={(name, time, hourlyRate) => taikenClockInMutation.mutate({ name, time, hourlyRate })}
                 onCancel={() => { setShowClockIn(false); setClockInTab('normal'); setTaikenName('') }}
                 isPending={taikenClockInMutation.isPending}
               />

@@ -612,6 +612,7 @@ class TaikenClockInRequest(BaseModel):
     store_id: int
     cast_name: str
     actual_start: Optional[str] = None  # "HH:MM" JST
+    hourly_rate: Optional[int] = 1400
 
 
 @router.post("/attendance/taiken-clock-in")
@@ -633,13 +634,14 @@ def taiken_clock_in(data: TaikenClockInRequest, db: Session = Depends(get_db), c
         models.Cast.stage_name == taiken_name,
     ).first()
     if not cast:
+        rate = data.hourly_rate or 1400
         cast = models.Cast(
             store_id=data.store_id,
             stage_name=taiken_name,
             real_name=data.cast_name,
             rank="C",
-            hourly_rate=1400,
-            help_hourly_rate=1500,
+            hourly_rate=rate,
+            help_hourly_rate=rate + 100,
             is_active=True,
             taiken_status="taiken",
             notes="体験入店",

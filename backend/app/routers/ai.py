@@ -445,4 +445,35 @@ def suggest_rotation(
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
+    # 履歴に保存
+    ai_record = models.AIAdvice(
+        store_id=store_id,
+        advice_type=models.AIAdviceType.rotation,
+        context=context,
+        advice=json.dumps(result, ensure_ascii=False),
+    )
+    db.add(ai_record)
+    db.commit()
+
     return result
+
+
+@router.get("/rotation-history/{store_id}")
+def rotation_history(
+    store_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """付け回しAIアドバイスの履歴（直近20件）"""
+    rows = db.query(models.AIAdvice).filter(
+        models.AIAdvice.store_id == store_id,
+        models.AIAdvice.advice_type == models.AIAdviceType.rotation,
+    ).order_by(models.AIAdvice.created_at.desc()).limit(20).all()
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "advice": json.loads(r.advice) if r.advice else {},
+        }
+        for r in rows
+    ]
