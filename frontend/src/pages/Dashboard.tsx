@@ -22,7 +22,7 @@ const STORE_META: Record<string, {
 }> = {
   higashinakano: {
     lat: 35.7075, lon: 139.6782,
-    relatedLines: ['JR中央・総武線', 'JR中央線(快速)', 'JR総武線(快速)', '都営大江戸線'],
+    relatedLines: ['中央総武線', '中央線(快速)', '総武線(快速)', '都営大江戸線'],
   },
   shinnakano: {
     lat: 35.6975, lon: 139.6615,
@@ -87,8 +87,8 @@ function StoreWeatherTrain({ storeCode, trainData }: { storeCode: string; trainD
   const current = hours[0]
   const rainyHours = hours.filter((h: any) => h.rain >= 40)
 
-  // この店舗に関連する路線の運行情報
-  const storeTrains = trainData.filter(t => meta.relatedLines.includes(t.line))
+  // この店舗に関連する路線の運行情報（部分一致）
+  const storeTrains = trainData.filter(t => meta.relatedLines.some(rl => t.line.includes(rl) || rl.includes(t.line)))
 
   return (
     <div className="space-y-1 pt-1 border-t border-gray-800/60">
