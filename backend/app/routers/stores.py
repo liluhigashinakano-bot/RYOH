@@ -18,6 +18,7 @@ class StoreCreate(BaseModel):
     phone: Optional[str] = None
     postal_code: Optional[str] = None
     invoice_number: Optional[str] = None
+    receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
 
 
@@ -29,6 +30,7 @@ class StoreUpdate(BaseModel):
     phone: Optional[str] = None
     postal_code: Optional[str] = None
     invoice_number: Optional[str] = None
+    receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
     is_active: Optional[bool] = None
     open_time: Optional[str] = None   # "19:00"
@@ -45,6 +47,7 @@ class StoreResponse(BaseModel):
     phone: Optional[str]
     postal_code: Optional[str] = None
     invoice_number: Optional[str] = None
+    receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
     is_active: bool
     open_time: Optional[str] = None

@@ -48,6 +48,7 @@ def _run_migrations(engine):
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS display_order INTEGER",
         # OrderItem: 延長の期番号
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS period_no INTEGER",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_name VARCHAR(100)",
         # Cast: 体入ステータス
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS taiken_status VARCHAR(20)",
         # Store: 領収書関連

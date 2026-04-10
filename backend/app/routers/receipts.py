@@ -150,7 +150,7 @@ def _generate_receipt_80mm(ticket: models.Ticket, store: models.Store, amounts: 
 
         # 店舗情報
         c.setFont(JP_FONT, 22)
-        c.drawString(margin + 2 * mm, y, store.name or "")
+        c.drawString(margin + 2 * mm, y, store.receipt_name or store.name or "")
         y -= 8 * mm
         c.setFont(JP_FONT, 8)
         if store.postal_code:
@@ -260,7 +260,7 @@ def _generate_receipt_a4(ticket: models.Ticket, store: models.Store, amounts: di
 
     # 店舗情報
     c.setFont(JP_FONT, 28)
-    c.drawString(margin, y, store.name or "")
+    c.drawString(margin, y, store.receipt_name or store.name or "")
     y -= 12 * mm
     c.setFont(JP_FONT, 11)
     if store.postal_code:
@@ -300,7 +300,7 @@ def _generate_estimate_80mm(ticket: models.Ticket, store: models.Store, amounts:
     cx = width / 2
     y = height - 8 * mm
 
-    _draw_centered(c, cx, y, store.name or "", size=12)
+    _draw_centered(c, cx, y, store.receipt_name or store.name or "", size=12)
     y -= 6 * mm
     if store.address:
         c.setFont(JP_FONT, 7)
@@ -383,7 +383,7 @@ def _generate_estimate_a4(ticket: models.Ticket, store: models.Store, amounts: d
     cx = width / 2
     y = height - 25 * mm
 
-    _draw_centered(c, cx, y, store.name or "", size=18)
+    _draw_centered(c, cx, y, store.receipt_name or store.name or "", size=18)
     y -= 8 * mm
     c.setFont(JP_FONT, 10)
     if store.address:

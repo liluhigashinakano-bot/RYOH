@@ -75,6 +75,7 @@ class Store(Base):
     phone = Column(String(20))
     postal_code = Column(String(10), nullable=True)
     invoice_number = Column(String(20), nullable=True)  # インボイス登録番号 T+13桁
+    receipt_name = Column(String(100), nullable=True)    # 領収書用店舗名（空ならnameを使用）
     receipt_footer = Column(Text, nullable=True)         # 領収書フッター
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

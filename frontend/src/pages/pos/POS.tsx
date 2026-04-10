@@ -2094,16 +2094,29 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
             </tr>
           </thead>
           <tbody>
-            {(ticket.order_items || []).map((item: any) => (
-              <tr key={item.id} className="border-t border-night-700/30">
-                <td className="text-gray-300 py-0.5 truncate max-w-[100px]">{displayItemName(item)}</td>
-                <td className="text-center text-gray-500 py-0.5">{item.quantity}</td>
-                <td className="text-right text-gray-300 py-0.5">¥{item.amount.toLocaleString()}</td>
-              </tr>
-            ))}
-            {(!ticket.order_items || ticket.order_items.length === 0) && (
-              <tr><td colSpan={3} className="text-gray-600 py-2">注文なし</td></tr>
-            )}
+            {(() => {
+              const items = ticket.order_items || []
+              if (items.length === 0) return <tr><td colSpan={3} className="text-gray-600 py-2">注文なし</td></tr>
+              // 同じ item_name をグルーピング
+              const grouped: { name: string; qty: number; amount: number; item: any }[] = []
+              for (const item of items) {
+                const name = displayItemName(item)
+                const existing = grouped.find(g => g.name === name)
+                if (existing) {
+                  existing.qty += (item.quantity || 1)
+                  existing.amount += (item.amount || 0)
+                } else {
+                  grouped.push({ name, qty: item.quantity || 1, amount: item.amount || 0, item })
+                }
+              }
+              return grouped.map((g, i) => (
+                <tr key={i} className="border-t border-night-700/30">
+                  <td className="text-gray-300 py-0.5 truncate max-w-[100px]">{g.name}</td>
+                  <td className="text-center text-gray-500 py-0.5">{g.qty}</td>
+                  <td className="text-right text-gray-300 py-0.5">¥{g.amount.toLocaleString()}</td>
+                </tr>
+              ))
+            })()}
           </tbody>
         </table>
       </div>

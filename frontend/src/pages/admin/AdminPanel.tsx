@@ -514,6 +514,7 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
     address: store.address || '',
     phone: store.phone || '',
     invoice_number: store.invoice_number || '',
+    receipt_name: store.receipt_name || '',
     receipt_footer: store.receipt_footer || '',
   })
 
@@ -548,6 +549,7 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
             <input value={form.postal_code} onChange={e => setForm({ ...form, postal_code: e.target.value })} className="input-field w-full mb-2" placeholder="郵便番号 (例: 164-0003)" />
             <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="input-field w-full mb-2" placeholder="住所" />
             <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="input-field w-full mb-2" placeholder="電話番号" />
+            <input value={form.receipt_name} onChange={e => setForm({ ...form, receipt_name: e.target.value })} className="input-field w-full mb-2" placeholder="領収書用店舗名（空欄ならアプリ内名と同じ）" />
             <input value={form.invoice_number} onChange={e => setForm({ ...form, invoice_number: e.target.value })} className="input-field w-full mb-2" placeholder="インボイス登録番号 (T+13桁)" />
             <textarea value={form.receipt_footer} onChange={e => setForm({ ...form, receipt_footer: e.target.value })} className="input-field w-full text-xs" rows={2} placeholder="領収書フッター(任意)" />
           </div>

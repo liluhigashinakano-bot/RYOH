@@ -349,7 +349,7 @@ def get_tickets(
     for t in tickets:
         data = _to_response(t)
         data["order_items"] = [
-            {"id": i.id, "item_name": i.item_name or i.item_type, "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount,
+            {"id": i.id, "item_type": i.item_type, "item_name": i.item_name or i.item_type, "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount,
              "created_at": i.created_at.isoformat() if i.created_at else None}
             for i in t.order_items if i.canceled_at is None
         ]
