@@ -23,20 +23,20 @@ const STORE_META: Record<string, {
   higashinakano: {
     lat: 35.7075, lon: 139.6782,
     lines: [
-      { name: 'JR中央線', lastTrains: [{ dir: '新宿↑', time: '0:36' }, { dir: '三鷹↓', time: '0:22' }], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
-      { name: '大江戸線', lastTrains: [{ dir: '新宿↑', time: '0:07' }, { dir: '都庁前↓', time: '0:07' }], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
+      { name: 'JR総武線', lastTrains: [{ dir: '中野行(終)', time: '0:57' }], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
+      { name: '大江戸線', lastTrains: [{ dir: '六本木・大門方面', time: '0:33' }, { dir: '練馬・光が丘方面', time: '0:43' }], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
     ],
   },
   shinnakano: {
     lat: 35.6975, lon: 139.6615,
     lines: [
-      { name: '丸ノ内線', lastTrains: [{ dir: '池袋↑', time: '0:12' }, { dir: '荻窪↓', time: '0:19' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+      { name: '丸ノ内線', lastTrains: [{ dir: '池袋方面', time: '0:12' }, { dir: '荻窪方面', time: '0:19' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
     ],
   },
   honancho: {
     lat: 35.6835, lon: 139.6480,
     lines: [
-      { name: '丸ノ内線支線', lastTrains: [{ dir: '中野坂上↑', time: '0:03' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+      { name: '丸ノ内線支線', lastTrains: [{ dir: '中野坂上方面', time: '0:03' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
     ],
   },
 }
@@ -50,7 +50,7 @@ function useWeather(lat: number, lon: number) {
           latitude: lat, longitude: lon,
           hourly: 'temperature_2m,weathercode,precipitation_probability,windspeed_10m',
           timezone: 'Asia/Tokyo',
-          forecast_days: 1,
+          forecast_days: 2,
         },
       })
       return r.data
@@ -63,16 +63,19 @@ function useWeather(lat: number, lon: number) {
 function parseWeatherHours(weather: any) {
   if (!weather?.hourly) return []
   const hourly = weather.hourly
-  const nowHour = new Date().getHours()
-  const startIdx = hourly.time.findIndex((t: string) => new Date(t).getHours() >= nowHour)
+  const now = new Date()
+  // 現在時刻以降の最初のインデックスを探す（日付込みで比較）
+  const startIdx = hourly.time.findIndex((t: string) => new Date(t) >= now)
   if (startIdx < 0) return []
   return hourly.time.slice(startIdx, startIdx + 8).map((_: any, i: number) => {
     const idx = startIdx + i
     if (idx >= hourly.time.length) return null
     const code = hourly.weathercode[idx] ?? 0
     const wmo = WMO_CODES[code] || { icon: '❓', label: '不明' }
+    const h = new Date(hourly.time[idx]).getHours()
     return {
-      hour: new Date(hourly.time[idx]).getHours(),
+      hour: h,
+      hourLabel: `${h}時`,
       temp: Math.round(hourly.temperature_2m[idx]),
       icon: wmo.icon,
       label: wmo.label,
