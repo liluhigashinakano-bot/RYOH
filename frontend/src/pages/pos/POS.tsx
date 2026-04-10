@@ -289,8 +289,23 @@ export default function POS() {
     shinnakano: { lat: 35.6975, lon: 139.6615, lines: ['東京メトロ丸ノ内線'] },
     honancho: { lat: 35.6835, lon: 139.6480, lines: ['東京メトロ丸ノ内線'] },
   }
+  const POS_LAST_TRAINS: Record<string, { label: string; time: string }[]> = {
+    higashinakano: [
+      { label: '総武線(中野行)', time: '0:57' },
+      { label: '大江戸(大門)', time: '0:33' },
+      { label: '大江戸(光が丘)', time: '0:43' },
+    ],
+    shinnakano: [
+      { label: '丸ノ内(池袋)', time: '0:12' },
+      { label: '丸ノ内(荻窪)', time: '0:19' },
+    ],
+    honancho: [
+      { label: '丸ノ内(中野坂上)', time: '0:03' },
+    ],
+  }
   const posStoreCode = (storeInfo as any)?.code || ''
   const posCoords = POS_STORE_COORDS[posStoreCode]
+  const posLastTrains = POS_LAST_TRAINS[posStoreCode] || []
   const WMO: Record<number, string> = { 0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️' }
 
   const { data: posWeather } = useQuery({
@@ -483,17 +498,30 @@ export default function POS() {
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'reports' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               日報一覧
             </button>
-            {/* 天気+運行情報 */}
+            {/* 天気+運行情報(遅延/運休のみ)+終電 */}
             <div className="ml-auto flex items-center gap-2 text-[10px] shrink-0 pl-3">
               {posCurrentWeather && (
                 <span className="text-gray-300">{posCurrentWeather.icon}{posCurrentWeather.temp}° 風{posCurrentWeather.wind}</span>
               )}
-              {posTrainLines.map((t: any) => (
-                <span key={t.line} className={t.status === 'normal' ? 'text-green-500' : t.status === 'delay' ? 'text-yellow-400' : 'text-red-400'}>
+              {posTrainLines.filter((t: any) => t.status !== 'normal').map((t: any) => (
+                <span key={t.line} className={t.status === 'delay' ? 'text-yellow-400' : 'text-red-400'}>
                   {t.line.replace(/\[.*\]/, '').replace('東京メトロ', '').replace('都営', '')}
-                  {t.status === 'normal' ? '✓' : t.status === 'delay' ? '⚠遅延' : '🚫運休'}
+                  {t.status === 'delay' ? '⚠遅延' : '🚫運休'}
                 </span>
               ))}
+              {posLastTrains.map((lt: any) => {
+                const remaining = (() => { const now = new Date(); const h = now.getHours(); const m = now.getMinutes(); const nowMin = (h < 5 ? h + 24 : h) * 60 + m; const [th, tm] = lt.time.split(':').map(Number); return (th < 5 ? th + 24 : th) * 60 + tm - nowMin })()
+                const isPast = remaining < 0
+                const isUrgent = remaining >= 0 && remaining <= 30
+                return (
+                  <span key={lt.label} className="text-gray-400">
+                    {lt.label}
+                    <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>{lt.time}</span>
+                    {isUrgent && <span className="text-red-400 ml-0.5">({remaining}分)</span>}
+                    {isPast && <span className="text-gray-600 ml-0.5">終</span>}
+                  </span>
+                )
+              })}
             </div>
           </div>
         </div>
