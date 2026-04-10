@@ -1180,8 +1180,10 @@ function WithdrawalRow({ w, storeId, onUpdate, onRemove }: {
   const { data: attendance = [] } = useQuery({
     queryKey: ['attendance', storeId],
     queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
-    enabled: isDailyPay && !!storeId,
+    enabled: !!storeId,
+    staleTime: 30000,
   })
+  const workingCastsForHeader = (attendance as any[]).filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
   const { data: staffAttendance = [] } = useQuery({
     queryKey: ['staff-attendance', storeId],
     queryFn: () => apiClient.get(`/api/casts/staff-attendance/today/${storeId}`).then(r => r.data),
@@ -2406,11 +2408,12 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
   const [motivationCastIds, setMotivationCastIds] = useState<number[]>([])
   const [motivationNote, setMotivationNote] = useState('')
 
-  const { data: castsAll = [] } = useQuery({
-    queryKey: ['casts', storeId],
-    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  const { data: workingAtt = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
   })
-  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const workingCastsNew = (workingAtt as any[]).filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
 
   const needsCast = MOTIVATION_CAST_REQUIRED.has(motivation)
   const toggleCast = (id: number) => setMotivationCastIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -2481,12 +2484,13 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
               <span className="text-[10px] text-gray-500">複数選択可</span>
             </div>
             <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-              {casts.map((c: any) => (
-                <button key={c.id} onClick={() => toggleCast(c.id)}
-                  className={`text-xs px-2 py-1 rounded-lg transition-colors ${motivationCastIds.includes(c.id) ? 'bg-pink-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
-                  {c.stage_name}
+              {workingCastsNew.map((w: any) => (
+                <button key={w.cast_id} onClick={() => toggleCast(w.cast_id)}
+                  className={`text-xs px-2 py-1 rounded-lg transition-colors ${motivationCastIds.includes(w.cast_id) ? 'bg-pink-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                  {w.cast_name}
                 </button>
               ))}
+              {workingCastsNew.length === 0 && <span className="text-[10px] text-gray-500">出勤中のキャストがいません</span>}
             </div>
           </div>
         )}
@@ -3099,7 +3103,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showLog, setShowLog] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
-  const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null })
+  const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null; motivation_cast_ids: number[] }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null, motivation_cast_ids: [] })
   const [headerEditOperator, setHeaderEditOperator] = useState('')
   const [headerEditError, setHeaderEditError] = useState('')
 
@@ -3430,6 +3434,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   plan_type: ticket.plan_type || 'standard',
                   visit_motivation: ticket.visit_motivation || '',
                   motivation_cast_id: ticket.motivation_cast_id || null,
+                  motivation_cast_ids: ticket.motivation_cast_ids || [],
                 })
                 setHeaderEditError('')
                 setShowHeaderEdit(true)
@@ -4231,7 +4236,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 {['', ...MOTIVATION_OPTIONS].map(m => (
                   <button
                     key={m || 'none'}
-                    onClick={() => setHeaderEditForm(f => ({ ...f, visit_motivation: m, motivation_cast_id: null }))}
+                    onClick={() => setHeaderEditForm(f => ({ ...f, visit_motivation: m, motivation_cast_id: null, motivation_cast_ids: [] }))}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                       headerEditForm.visit_motivation === m
                         ? 'bg-teal-700 text-white'
@@ -4241,16 +4246,21 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 ))}
               </div>
               {MOTIVATION_CAST_REQUIRED.has(headerEditForm.visit_motivation) && (
-                <select
-                  value={headerEditForm.motivation_cast_id ?? ''}
-                  onChange={e => setHeaderEditForm(f => ({ ...f, motivation_cast_id: e.target.value ? Number(e.target.value) : null }))}
-                  className="input-field w-full text-sm py-1 mt-1"
-                >
-                  <option value="">キャスト選択</option>
-                  {(castsAll as any[]).filter((c: any) => c.is_active).map((c: any) => (
-                    <option key={c.id} value={c.id}>{c.stage_name}</option>
-                  ))}
-                </select>
+                <div className="mt-1">
+                  <span className="text-[10px] text-gray-500">出勤中キャストから複数選択</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {workingCastsForHeader.map((w: any) => (
+                      <button key={w.cast_id} onClick={() => {
+                        const ids = headerEditForm.motivation_cast_ids || []
+                        const newIds = ids.includes(w.cast_id) ? ids.filter((x: number) => x !== w.cast_id) : [...ids, w.cast_id]
+                        setHeaderEditForm(f => ({ ...f, motivation_cast_ids: newIds, motivation_cast_id: newIds[0] ?? null }))
+                      }}
+                        className={`text-xs px-2 py-1 rounded-lg transition-colors ${(headerEditForm.motivation_cast_ids || []).includes(w.cast_id) ? 'bg-pink-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                        {w.cast_name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
             {/* オペレーター名 */}
@@ -4279,6 +4289,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     plan_type: headerEditForm.plan_type,
                     visit_motivation: headerEditForm.visit_motivation || null,
                     motivation_cast_id: headerEditForm.motivation_cast_id || null,
+                    motivation_cast_ids: headerEditForm.motivation_cast_ids.length > 0 ? headerEditForm.motivation_cast_ids : null,
                     update_header: true,
                     operator_name: headerEditOperator || null,
                   })
@@ -4648,6 +4659,7 @@ function JoinModal({ storeId, onSubmit, onClose, isPending }: {
     customer_name?: string
     visit_motivation?: string
     motivation_cast_id?: number | null
+    motivation_cast_ids?: number[]
     motivation_note?: string
     plan_type: string
   }) => void
@@ -4658,17 +4670,19 @@ function JoinModal({ storeId, onSubmit, onClose, isPending }: {
   const [visitType, setVisitType] = useState('N')
   const [customerName, setCustomerName] = useState('')
   const [motivation, setMotivation] = useState('')
-  const [motivationCastId, setMotivationCastId] = useState<number | null>(null)
+  const [motivationCastIds, setMotivationCastIds2] = useState<number[]>([])
   const [motivationNote, setMotivationNote] = useState('')
   const [planType, setPlanType] = useState('standard')
 
-  const { data: castsAll = [] } = useQuery({
-    queryKey: ['casts', storeId],
-    queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+  const { data: workingAttendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
   })
-  const casts = (castsAll as any[]).filter((c: any) => c.is_active)
+  const workingCasts = (workingAttendance as any[]).filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
 
   const needsCast = MOTIVATION_CAST_REQUIRED.has(motivation)
+  const toggleCast2 = (id: number) => setMotivationCastIds2(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const needsNote = motivation === '紹介'
 
   const row = "flex items-center gap-2"
@@ -4680,7 +4694,8 @@ function JoinModal({ storeId, onSubmit, onClose, isPending }: {
       visit_type: visitType,
       customer_name: customerName || undefined,
       visit_motivation: motivation || undefined,
-      motivation_cast_id: needsCast ? motivationCastId : null,
+      motivation_cast_id: needsCast ? (motivationCastIds[0] ?? null) : null,
+      motivation_cast_ids: needsCast && motivationCastIds.length > 0 ? motivationCastIds : undefined,
       motivation_note: needsNote ? motivationNote : undefined,
       plan_type: planType,
     })
@@ -4722,7 +4737,7 @@ function JoinModal({ storeId, onSubmit, onClose, isPending }: {
 
         <div className={row}>
           <span className={label}>来店動機</span>
-          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastId(null); setMotivationNote('') }}
+          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastIds2([]); setMotivationNote('') }}
             className="input-field flex-1 text-sm py-1.5">
             <option value="">未選択</option>
             {MOTIVATION_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
@@ -4730,13 +4745,20 @@ function JoinModal({ storeId, onSubmit, onClose, isPending }: {
         </div>
 
         {needsCast && (
-          <div className={row}>
-            <span className={label}>キャスト</span>
-            <select value={motivationCastId ?? ''} onChange={e => setMotivationCastId(e.target.value ? Number(e.target.value) : null)}
-              className="input-field flex-1 text-sm py-1.5">
-              <option value="">選択してください</option>
-              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
-            </select>
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={label}>キャスト</span>
+              <span className="text-[10px] text-gray-500">出勤中から複数選択可</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+              {workingCasts.map((w: any) => (
+                <button key={w.cast_id} onClick={() => toggleCast2(w.cast_id)}
+                  className={`text-xs px-2 py-1 rounded-lg transition-colors ${motivationCastIds.includes(w.cast_id) ? 'bg-pink-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                  {w.cast_name}
+                </button>
+              ))}
+              {workingCasts.length === 0 && <span className="text-[10px] text-gray-500">出勤中のキャストがいません</span>}
+            </div>
           </div>
         )}
 
