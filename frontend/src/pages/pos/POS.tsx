@@ -1622,9 +1622,10 @@ function CrossTicketTimerContext({ tickets, children }: {
 }
 
 
-function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap }: {
+function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, currentCastIds }: {
   lastDrinkTimes: any; now: number; ticketId?: number; onCleared?: () => void
   castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
+  currentCastIds?: number[]
 }) {
   const [confirming, setConfirming] = useState<string | null>(null) // key
   // key -> clearedAt (ms)。last_at がクリア時刻より新しければ再表示する
@@ -1661,6 +1662,8 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap }
     const clearedAt = clearedKeys.get(e.key)
     const lastAtMs = new Date(e.lastAt.endsWith('Z') ? e.lastAt : e.lastAt + 'Z').getTime()
     if (clearedAt !== undefined && lastAtMs <= clearedAt) return true
+    // キャストがこの卓の対応中でなければ非表示（ティッシュ配り等で外れた場合）
+    if (currentCastIds && e.castId != null && !currentCastIds.includes(e.castId)) return true
     // 他の卓で同じキャストにより新しい注文があれば、こちらは隠す
     if (castLatestMap && e.castId != null) {
       const latest = castLatestMap[e.castId]
@@ -2043,6 +2046,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
       <div className="mb-3" data-nopropagate>
         <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticket.id}
           castLatestMap={castLatestMap}
+          currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
           onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
       </div>
 
@@ -3461,6 +3465,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           {!isClosed && (
             <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticketId}
               castLatestMap={detailCastLatestMap}
+              currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
               onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
           )}
         </div>
