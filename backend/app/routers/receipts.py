@@ -148,10 +148,11 @@ def _generate_receipt_80mm(ticket: models.Ticket, store: models.Store, amounts: 
         c.line(margin, y, width - margin, y)
         y -= 5 * mm
 
-        # 店舗情報（左寄せ）
-        c.setFont(JP_FONT, 8)
+        # 店舗情報
+        c.setFont(JP_FONT, 22)
         c.drawString(margin + 2 * mm, y, store.name or "")
-        y -= 4 * mm
+        y -= 8 * mm
+        c.setFont(JP_FONT, 8)
         if store.postal_code:
             c.drawString(margin + 2 * mm, y, f"〒{store.postal_code}")
             y -= 4 * mm
@@ -258,9 +259,10 @@ def _generate_receipt_a4(ticket: models.Ticket, store: models.Store, amounts: di
     y -= 8 * mm
 
     # 店舗情報
-    c.setFont(JP_FONT, 11)
+    c.setFont(JP_FONT, 28)
     c.drawString(margin, y, store.name or "")
-    y -= 6 * mm
+    y -= 12 * mm
+    c.setFont(JP_FONT, 11)
     if store.postal_code:
         c.drawString(margin, y, f"〒{store.postal_code}")
         y -= 6 * mm
