@@ -257,12 +257,51 @@ def _normalize_extension_count():
         db.close()
 
 
+def _fix_help_shifts_without_cast():
+    """cast_id=None のヘルプシフトに Cast レコードを紐付ける"""
+    db = SessionLocal()
+    try:
+        orphans = db.query(models.ConfirmedShift).filter(
+            models.ConfirmedShift.cast_id.is_(None),
+            models.ConfirmedShift.help_cast_name.isnot(None),
+        ).all()
+        for s in orphans:
+            help_name = f"[ヘルプ]{s.help_cast_name}"
+            cast = db.query(models.Cast).filter(
+                models.Cast.store_id == s.store_id,
+                models.Cast.stage_name == help_name,
+            ).first()
+            if not cast:
+                cast = models.Cast(
+                    store_id=s.store_id,
+                    stage_name=help_name,
+                    real_name=s.help_cast_name,
+                    rank="C",
+                    hourly_rate=1400,
+                    help_hourly_rate=1500,
+                    is_active=True,
+                    notes=f"ヘルプ体入 from store {s.help_from_store_id}",
+                )
+                db.add(cast)
+                db.flush()
+            s.cast_id = cast.id
+        if orphans:
+            db.commit()
+            print(f"[INIT] Fixed {len(orphans)} help shifts → cast records created/linked")
+    except Exception as e:
+        db.rollback()
+        print(f"[INIT] _fix_help_shifts_without_cast error: {e}")
+    finally:
+        db.close()
+
+
 def init_db():
     models.Base.metadata.create_all(bind=engine)
     _run_migrations(engine)
     _cleanup_broken_snapshots()
     _merge_split_extensions()
     _normalize_extension_count()
+    _fix_help_shifts_without_cast()
 
     db = SessionLocal()
     try:

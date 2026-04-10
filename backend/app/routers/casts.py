@@ -560,7 +560,7 @@ class HelpClockInRequest(BaseModel):
 
 @router.post("/attendance/help-clock-in")
 def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """ヘルプ出勤打刻: cast_id なしで ConfirmedShift を作成"""
+    """ヘルプ出勤打刻: Castレコードを作成(または再利用)して紐付け"""
     from datetime import timedelta
     today = date.today()
 
@@ -571,8 +571,28 @@ def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), curre
     else:
         now = datetime.utcnow()
 
+    # ヘルプキャスト用のCastレコードを検索or作成
+    help_name = f"[ヘルプ]{data.help_cast_name}"
+    cast = db.query(models.Cast).filter(
+        models.Cast.store_id == data.store_id,
+        models.Cast.stage_name == help_name,
+    ).first()
+    if not cast:
+        cast = models.Cast(
+            store_id=data.store_id,
+            stage_name=help_name,
+            real_name=data.help_cast_name,
+            rank="C",
+            hourly_rate=1400,
+            help_hourly_rate=1500,
+            is_active=True,
+            notes=f"ヘルプ体入 from store {data.help_from_store_id}",
+        )
+        db.add(cast)
+        db.flush()
+
     shift = models.ConfirmedShift(
-        cast_id=None,
+        cast_id=cast.id,
         store_id=data.store_id,
         date=today,
         help_from_store_id=data.help_from_store_id,
@@ -582,7 +602,7 @@ def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), curre
     db.add(shift)
     db.commit()
     db.refresh(shift)
-    return {"shift_id": shift.id, "message": "ヘルプ出勤しました"}
+    return {"shift_id": shift.id, "cast_id": cast.id, "message": "ヘルプ出勤しました"}
 
 
 @router.post("/attendance/clock-in")
