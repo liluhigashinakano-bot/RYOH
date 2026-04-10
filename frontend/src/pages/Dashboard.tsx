@@ -15,36 +15,60 @@ const WMO_CODES: Record<number, { icon: string; label: string }> = {
   95: { icon: '⛈️', label: '雷雨' }, 96: { icon: '⛈️', label: '雹を伴う雷雨' }, 99: { icon: '⛈️', label: '激しい雷雨' },
 }
 
-function WeatherWidget() {
-  const { data: weather, isLoading } = useQuery({
-    queryKey: ['weather-forecast'],
+// 店舗ごとの座標 + 鉄道情報
+const STORE_META: Record<string, {
+  lat: number; lon: number
+  lines: { name: string; lastTrains: { dir: string; time: string }[]; infoUrl: string }[]
+}> = {
+  higashinakano: {
+    lat: 35.7075, lon: 139.6782,
+    lines: [
+      { name: 'JR中央線', lastTrains: [{ dir: '新宿↑', time: '0:36' }, { dir: '三鷹↓', time: '0:22' }], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
+      { name: '大江戸線', lastTrains: [{ dir: '新宿↑', time: '0:07' }, { dir: '都庁前↓', time: '0:07' }], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
+    ],
+  },
+  shinnakano: {
+    lat: 35.6975, lon: 139.6615,
+    lines: [
+      { name: '丸ノ内線', lastTrains: [{ dir: '池袋↑', time: '0:12' }, { dir: '荻窪↓', time: '0:19' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+    ],
+  },
+  honancho: {
+    lat: 35.6835, lon: 139.6480,
+    lines: [
+      { name: '丸ノ内線支線', lastTrains: [{ dir: '中野坂上↑', time: '0:03' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+    ],
+  },
+}
+
+function useWeather(lat: number, lon: number) {
+  return useQuery({
+    queryKey: ['weather', lat, lon],
     queryFn: async () => {
       const r = await axios.get('https://api.open-meteo.com/v1/forecast', {
         params: {
-          latitude: 35.7075,
-          longitude: 139.6782,
-          hourly: 'temperature_2m,weathercode,precipitation_probability,windspeed_10m,precipitation',
+          latitude: lat, longitude: lon,
+          hourly: 'temperature_2m,weathercode,precipitation_probability,windspeed_10m',
           timezone: 'Asia/Tokyo',
           forecast_days: 1,
         },
       })
       return r.data
     },
-    staleTime: 1000 * 60 * 15, // 15分キャッシュ
+    staleTime: 1000 * 60 * 15,
     refetchInterval: 1000 * 60 * 15,
   })
+}
 
-  if (isLoading || !weather) return null
-
+function parseWeatherHours(weather: any) {
+  if (!weather?.hourly) return []
   const hourly = weather.hourly
   const nowHour = new Date().getHours()
-  // 現在時刻から先の時間帯のみ表示（最大12時間）
-  const startIdx = hourly.time.findIndex((t: string) => {
-    const h = new Date(t).getHours()
-    return h >= nowHour
-  })
-  const hours = hourly.time.slice(startIdx, startIdx + 12).map((_: any, i: number) => {
+  const startIdx = hourly.time.findIndex((t: string) => new Date(t).getHours() >= nowHour)
+  if (startIdx < 0) return []
+  return hourly.time.slice(startIdx, startIdx + 8).map((_: any, i: number) => {
     const idx = startIdx + i
+    if (idx >= hourly.time.length) return null
     const code = hourly.weathercode[idx] ?? 0
     const wmo = WMO_CODES[code] || { icon: '❓', label: '不明' }
     return {
@@ -53,134 +77,82 @@ function WeatherWidget() {
       icon: wmo.icon,
       label: wmo.label,
       rain: hourly.precipitation_probability[idx] ?? 0,
-      precip: hourly.precipitation[idx] ?? 0,
       wind: Math.round(hourly.windspeed_10m[idx]),
     }
-  })
+  }).filter(Boolean)
+}
 
-  // 現在の天気
+function getTimeRemaining(timeStr: string) {
+  const now = new Date()
+  const h = now.getHours()
+  const m = now.getMinutes()
+  const nowMin = (h < 5 ? h + 24 : h) * 60 + m
+  const [th, tm] = timeStr.split(':').map(Number)
+  const targetMin = (th < 5 ? th + 24 : th) * 60 + tm
+  return targetMin - nowMin
+}
+
+function StoreWeatherTrain({ storeCode }: { storeCode: string }) {
+  const meta = STORE_META[storeCode]
+  if (!meta) return null
+
+  const { data: weather } = useWeather(meta.lat, meta.lon)
+  const hours = parseWeatherHours(weather)
   const current = hours[0]
-  // 今後の降水あり時間
   const rainyHours = hours.filter((h: any) => h.rain >= 40)
 
   return (
-    <div className="rounded-xl border border-gray-800 overflow-hidden" style={{ backgroundColor: '#0f172a' }}>
-      <div className="px-3 py-2 border-b border-gray-800/60 flex items-center gap-2" style={{ backgroundColor: '#1e293b' }}>
-        <span className="text-sm font-bold text-white">天気予報</span>
-        <span className="text-gray-500 text-xs">中野区</span>
-      </div>
-      <div className="px-3 py-2 space-y-1.5">
-        {/* 現在 */}
-        {current && (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-2xl">{current.icon}</span>
-            <span className="text-white font-bold text-sm">{current.temp}°C</span>
-            <span className="text-gray-400">{current.label}</span>
-            <span className="text-gray-500">風速{current.wind}km/h</span>
-            {current.rain > 0 && <span className="text-blue-400">降水{current.rain}%</span>}
-          </div>
-        )}
-        {/* 降雨アラート */}
-        {rainyHours.length > 0 && (
-          <div className="text-xs text-blue-400 bg-blue-900/20 border border-blue-800/40 rounded px-2 py-1">
-            🌧️ {rainyHours.map((h: any) => `${h.hour}時(${h.rain}%)`).join('、')} に雨の可能性
-          </div>
-        )}
-        {/* 1時間ごと */}
-        <div className="flex gap-1 overflow-x-auto pb-1">
+    <div className="space-y-1 pt-1 border-t border-gray-800/60">
+      {/* 天気 */}
+      {current && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-lg">{current.icon}</span>
+          <span className="text-white font-bold">{current.temp}°C</span>
+          <span className="text-gray-400">{current.label}</span>
+          <span className="text-gray-500">風{current.wind}km/h</span>
+          {current.rain > 0 && <span className="text-blue-400">{current.rain}%</span>}
+        </div>
+      )}
+      {rainyHours.length > 0 && (
+        <div className="text-[10px] text-blue-400 bg-blue-900/20 border border-blue-800/40 rounded px-2 py-0.5">
+          🌧️ {rainyHours.map((h: any) => `${h.hour}時(${h.rain}%)`).join(' ')}
+        </div>
+      )}
+      {hours.length > 0 && (
+        <div className="flex gap-0.5 overflow-x-auto pb-0.5">
           {hours.map((h: any, i: number) => (
-            <div key={i} className="flex flex-col items-center min-w-[40px] text-[10px]">
+            <div key={i} className="flex flex-col items-center min-w-[36px] text-[9px]">
               <span className="text-gray-500">{h.hour}時</span>
-              <span className="text-base">{h.icon}</span>
+              <span className="text-sm">{h.icon}</span>
               <span className="text-white">{h.temp}°</span>
               {h.rain > 0 && <span className="text-blue-400">{h.rain}%</span>}
               <span className="text-gray-600">{h.wind}</span>
             </div>
           ))}
         </div>
-      </div>
-    </div>
-  )
-}
+      )}
 
-// 鉄道情報（終電テーブル + 運行情報リンク）
-const TRAIN_LINES = [
-  {
-    store: '東中野',
-    lines: [
-      { name: 'JR中央線', station: '東中野', lastTrains: [
-        { direction: '新宿方面', time: '0:36' },
-        { direction: '三鷹方面', time: '0:22' },
-      ], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
-      { name: '都営大江戸線', station: '東中野', lastTrains: [
-        { direction: '新宿方面', time: '0:07' },
-        { direction: '都庁前方面', time: '0:07' },
-      ], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
-    ],
-  },
-  {
-    store: '新中野',
-    lines: [
-      { name: '丸ノ内線', station: '新中野', lastTrains: [
-        { direction: '新宿・池袋方面', time: '0:12' },
-        { direction: '荻窪方面', time: '0:19' },
-      ], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
-    ],
-  },
-  {
-    store: '方南町',
-    lines: [
-      { name: '丸ノ内線（支線）', station: '方南町', lastTrains: [
-        { direction: '中野坂上方面', time: '0:03' },
-      ], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
-    ],
-  },
-]
-
-function TrainWidget() {
-  const now = new Date()
-  const h = now.getHours()
-  const m = now.getMinutes()
-  const nowMin = (h < 5 ? h + 24 : h) * 60 + m // 深夜は24時超え
-
-  const getRemaining = (timeStr: string) => {
-    const [th, tm] = timeStr.split(':').map(Number)
-    const targetMin = (th < 5 ? th + 24 : th) * 60 + tm
-    return targetMin - nowMin
-  }
-
-  return (
-    <div className="rounded-xl border border-gray-800 overflow-hidden" style={{ backgroundColor: '#0f172a' }}>
-      <div className="px-3 py-2 border-b border-gray-800/60" style={{ backgroundColor: '#1e293b' }}>
-        <span className="text-sm font-bold text-white">🚃 鉄道情報</span>
-      </div>
-      <div className="px-3 py-2 space-y-2">
-        {TRAIN_LINES.map(area => (
-          <div key={area.store}>
-            <div className="text-[10px] text-gray-500 mb-0.5">{area.store}</div>
-            {area.lines.map(line => (
-              <div key={line.name} className="flex items-start gap-2 text-xs mb-1">
-                <a href={line.infoUrl} target="_blank" rel="noopener noreferrer"
-                  className="text-blue-400 hover:underline shrink-0 min-w-[90px]">{line.name}</a>
-                <div className="flex gap-2 flex-wrap">
-                  {line.lastTrains.map(lt => {
-                    const remaining = getRemaining(lt.time)
-                    const isUrgent = remaining >= 0 && remaining <= 30
-                    const isPast = remaining < 0
-                    return (
-                      <span key={lt.direction} className="text-gray-400">
-                        {lt.direction}
-                        <span className={`ml-1 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                          {lt.time}
-                        </span>
-                        {isUrgent && <span className="text-red-400 text-[10px] ml-0.5">あと{remaining}分</span>}
-                        {isPast && <span className="text-gray-600 text-[10px] ml-0.5">終了</span>}
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
+      {/* 鉄道 */}
+      <div className="flex items-center gap-3 flex-wrap text-xs">
+        {meta.lines.map(line => (
+          <div key={line.name} className="flex items-center gap-1.5">
+            <a href={line.infoUrl} target="_blank" rel="noopener noreferrer"
+              className="text-blue-400 hover:underline text-[10px]">🚃{line.name}</a>
+            {line.lastTrains.map(lt => {
+              const remaining = getTimeRemaining(lt.time)
+              const isUrgent = remaining >= 0 && remaining <= 30
+              const isPast = remaining < 0
+              return (
+                <span key={lt.dir} className="text-[10px]">
+                  <span className="text-gray-500">{lt.dir}</span>
+                  <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                    {lt.time}
+                  </span>
+                  {isUrgent && <span className="text-red-400 ml-0.5">({remaining}分)</span>}
+                  {isPast && <span className="text-gray-600 ml-0.5">終</span>}
+                </span>
+              )
+            })}
           </div>
         ))}
       </div>
@@ -234,12 +206,6 @@ export default function Dashboard() {
           ))}
         </div>
       )}
-
-      {/* 天気予報 + 鉄道情報 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        <WeatherWidget />
-        <TrainWidget />
-      </div>
 
       {/* 店舗一覧 */}
       <div className="space-y-2">
@@ -315,6 +281,9 @@ export default function Dashboard() {
                       <span className="text-yellow-400 font-bold ml-1">¥{(dash.champagne_amount ?? 0).toLocaleString()}</span>
                     </div>
                   </div>
+
+                  {/* 天気 + 鉄道（店舗ごと） */}
+                  <StoreWeatherTrain storeCode={(store as any).code} />
                 </div>
               )}
             </div>
