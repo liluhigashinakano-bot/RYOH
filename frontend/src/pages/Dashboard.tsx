@@ -15,29 +15,22 @@ const WMO_CODES: Record<number, { icon: string; label: string }> = {
   95: { icon: '⛈️', label: '雷雨' }, 96: { icon: '⛈️', label: '雹を伴う雷雨' }, 99: { icon: '⛈️', label: '激しい雷雨' },
 }
 
-// 店舗ごとの座標 + 鉄道情報
+// 店舗ごとの座標 + 関連路線
 const STORE_META: Record<string, {
   lat: number; lon: number
-  lines: { name: string; lastTrains: { dir: string; time: string }[]; infoUrl: string }[]
+  relatedLines: string[]  // train-info APIから取得した路線名でマッチ
 }> = {
   higashinakano: {
     lat: 35.7075, lon: 139.6782,
-    lines: [
-      { name: 'JR総武線', lastTrains: [{ dir: '中野行(終)', time: '0:57' }], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
-      { name: '大江戸線', lastTrains: [{ dir: '六本木・大門方面', time: '0:33' }, { dir: '練馬・光が丘方面', time: '0:43' }], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
-    ],
+    relatedLines: ['JR中央・総武線', 'JR中央線(快速)', 'JR総武線(快速)', '都営大江戸線'],
   },
   shinnakano: {
     lat: 35.6975, lon: 139.6615,
-    lines: [
-      { name: '丸ノ内線', lastTrains: [{ dir: '池袋方面', time: '0:12' }, { dir: '荻窪方面', time: '0:19' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
-    ],
+    relatedLines: ['東京メトロ丸ノ内線'],
   },
   honancho: {
     lat: 35.6835, lon: 139.6480,
-    lines: [
-      { name: '丸ノ内線支線', lastTrains: [{ dir: '中野坂上方面', time: '0:03' }], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
-    ],
+    relatedLines: ['東京メトロ丸ノ内線'],
   },
 }
 
@@ -85,17 +78,7 @@ function parseWeatherHours(weather: any) {
   }).filter(Boolean)
 }
 
-function getTimeRemaining(timeStr: string) {
-  const now = new Date()
-  const h = now.getHours()
-  const m = now.getMinutes()
-  const nowMin = (h < 5 ? h + 24 : h) * 60 + m
-  const [th, tm] = timeStr.split(':').map(Number)
-  const targetMin = (th < 5 ? th + 24 : th) * 60 + tm
-  return targetMin - nowMin
-}
-
-function StoreWeatherTrain({ storeCode }: { storeCode: string }) {
+function StoreWeatherTrain({ storeCode, trainData }: { storeCode: string; trainData: any[] }) {
   const meta = STORE_META[storeCode]
   if (!meta) return null
 
@@ -103,6 +86,9 @@ function StoreWeatherTrain({ storeCode }: { storeCode: string }) {
   const hours = parseWeatherHours(weather)
   const current = hours[0]
   const rainyHours = hours.filter((h: any) => h.rain >= 40)
+
+  // この店舗に関連する路線の運行情報
+  const storeTrains = trainData.filter(t => meta.relatedLines.includes(t.line))
 
   return (
     <div className="space-y-1 pt-1 border-t border-gray-800/60">
@@ -135,30 +121,26 @@ function StoreWeatherTrain({ storeCode }: { storeCode: string }) {
         </div>
       )}
 
-      {/* 鉄道 */}
-      <div className="flex items-center gap-3 flex-wrap text-xs">
-        {meta.lines.map(line => (
-          <div key={line.name} className="flex items-center gap-1.5">
-            <a href={line.infoUrl} target="_blank" rel="noopener noreferrer"
-              className="text-blue-400 hover:underline text-[10px]">🚃{line.name}</a>
-            {line.lastTrains.map(lt => {
-              const remaining = getTimeRemaining(lt.time)
-              const isUrgent = remaining >= 0 && remaining <= 30
-              const isPast = remaining < 0
-              return (
-                <span key={lt.dir} className="text-[10px]">
-                  <span className="text-gray-500">{lt.dir}</span>
-                  <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
-                    {lt.time}
-                  </span>
-                  {isUrgent && <span className="text-red-400 ml-0.5">({remaining}分)</span>}
-                  {isPast && <span className="text-gray-600 ml-0.5">終</span>}
-                </span>
-              )
-            })}
-          </div>
-        ))}
-      </div>
+      {/* 鉄道運行情報（リアルタイム） */}
+      {storeTrains.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap text-[10px]">
+          {storeTrains.map(t => (
+            <span key={t.line} className="flex items-center gap-1">
+              <span className="text-gray-400">🚃{t.line.replace('JR', '').replace('東京メトロ', '').replace('都営', '')}</span>
+              {t.status === 'normal' ? (
+                <span className="text-green-400">平常運転</span>
+              ) : t.status === 'delay' ? (
+                <span className="text-yellow-400" title={t.detail}>⚠️遅延</span>
+              ) : (
+                <span className="text-red-400" title={t.detail}>🚫運休</span>
+              )}
+              {t.detail && t.status !== 'normal' && (
+                <span className="text-gray-500 max-w-[200px] truncate">{t.detail}</span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -175,6 +157,15 @@ export default function Dashboard() {
     }],
   })[0]
   const birthdays: any[] = (birthdayQuery.data as any[]) ?? []
+
+  // 鉄道運行情報（全店舗共通、5分キャッシュ）
+  const { data: trainInfo } = useQuery({
+    queryKey: ['train-info'],
+    queryFn: () => apiClient.get('/api/train-info').then(r => r.data),
+    staleTime: 1000 * 60 * 5,
+    refetchInterval: 1000 * 60 * 5,
+  })
+  const trainData: any[] = (trainInfo as any)?.lines ?? []
 
   const dashQueries = useQueries({
     queries: stores.map(s => ({
@@ -286,7 +277,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* 天気 + 鉄道（店舗ごと） */}
-                  <StoreWeatherTrain storeCode={(store as any).code} />
+                  <StoreWeatherTrain storeCode={(store as any).code} trainData={trainData} />
                 </div>
               )}
             </div>
