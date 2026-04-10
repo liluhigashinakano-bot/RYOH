@@ -2690,6 +2690,11 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
 
   const casts = (castsAll as any[]).filter((c: any) => c.is_active && workingCastIds.has(c.id))
   const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
+  // ヘルプキャスト(cast_id=null) - 表示のみ
+  const helpCasts = (workingAttendance as any[])
+    .filter((a: any) => a.cast_id === null && !a.actual_end && !a.is_absent && a.cast_name)
+    .map((a: any) => ({ shift_id: a.shift_id, cast_name: a.cast_name }))
+  const filteredHelp = helpCasts.filter((h: any) => !q || h.cast_name?.includes(q))
 
   const toggle = (cid: number) => {
     if (selected.includes(cid)) {
@@ -2732,7 +2737,14 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
               </button>
             )
           })}
-          {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">出勤中キャストがいません</p>}
+          {filteredHelp.map((h: any) => (
+            <div key={`help_${h.shift_id}`}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm bg-gray-800 text-gray-400 opacity-60">
+              <span className="font-medium">{h.cast_name}</span>
+              <span className="text-[10px]">ヘルプ</span>
+            </div>
+          ))}
+          {filtered.length === 0 && filteredHelp.length === 0 && <p className="text-center text-gray-500 text-sm py-4">出勤中キャストがいません</p>}
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={e => { e.stopPropagation(); setSelected([]) }}
@@ -5333,16 +5345,23 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
             <div className="text-[10px] text-gray-500 mb-1">待機中（{idleCasts.length}名）</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {idleCasts.map((s: any) => (
-                <button key={s.shift_id}
-                  onClick={(e) => {
-                    const rect = (e.target as HTMLElement).getBoundingClientRect()
-                    setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
-                  }}
-                  className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
-                >
-                  <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">待機中</div>
-                </button>
+                s.cast_id !== null ? (
+                  <button key={s.shift_id}
+                    onClick={(e) => {
+                      const rect = (e.target as HTMLElement).getBoundingClientRect()
+                      setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
+                    }}
+                    className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
+                  >
+                    <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">待機中</div>
+                  </button>
+                ) : (
+                  <div key={s.shift_id} className="bg-night-700 rounded-lg p-2 opacity-70">
+                    <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">待機中（ヘルプ）</div>
+                  </div>
+                )
               ))}
               {idleCasts.length === 0 && (
                 <div className="col-span-full text-[10px] text-gray-600 text-center py-2">待機中のキャストはいません</div>
