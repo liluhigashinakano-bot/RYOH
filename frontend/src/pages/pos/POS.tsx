@@ -5188,6 +5188,55 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
   )
 }
 
+function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPending }: {
+  taikenName: string
+  setTaikenName: (v: string) => void
+  onSubmit: (name: string, time: string) => void
+  onCancel: () => void
+  isPending: boolean
+}) {
+  const timeOptions = (() => {
+    const opts: string[] = []
+    for (let h = 12; h < 36; h++) {
+      opts.push(`${String(h).padStart(2, '0')}:00`)
+      opts.push(`${String(h).padStart(2, '0')}:30`)
+    }
+    return opts
+  })()
+  const [time, setTime] = useState(() => {
+    const n = new Date()
+    const h = n.getHours() < 12 ? n.getHours() + 24 : n.getHours()
+    const m = n.getMinutes() < 30 ? '00' : '30'
+    return `${String(h).padStart(2, '0')}:${m}`
+  })
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">キャスト名</label>
+        <input type="text" value={taikenName} onChange={e => setTaikenName(e.target.value)}
+          placeholder="体験入店キャスト名" className="input-field w-full text-sm" autoFocus />
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">出勤時間</label>
+        <select value={time} onChange={e => setTime(e.target.value)} className="input-field w-full text-sm">
+          {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={onCancel} className="btn-secondary flex-1 text-sm py-2">キャンセル</button>
+        <button
+          onClick={() => taikenName.trim() && onSubmit(taikenName.trim(), time)}
+          disabled={!taikenName.trim() || isPending}
+          className="flex-1 text-sm py-2 rounded-lg bg-pink-700 hover:bg-pink-600 text-white font-medium disabled:opacity-40 transition-colors"
+        >
+          体験入店
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsModal }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void; onOpenActiveCastsModal: (ticket: any) => void }) {
   const qc = useQueryClient()
   // 出勤中キャスト一覧
@@ -5418,7 +5467,8 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
 function CastAttendanceView({ storeId }: { storeId: number }) {
   const qc = useQueryClient()
   const [showClockIn, setShowClockIn] = useState(false)
-  const [clockInTab, setClockInTab] = useState<'normal' | 'help'>('normal')
+  const [clockInTab, setClockInTab] = useState<'normal' | 'help' | 'taiken'>('normal')
+  const [taikenName, setTaikenName] = useState('')
   const [q, setQ] = useState('')
   const [helpStoreId, setHelpStoreId] = useState<number | ''>('')
   const [helpCastName, setHelpCastName] = useState('')
@@ -5549,6 +5599,22 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     },
   })
 
+  const taikenClockInMutation = useMutation({
+    mutationFn: ({ name, time }: { name: string; time: string }) =>
+      apiClient.post('/api/casts/attendance/taiken-clock-in', {
+        store_id: storeId,
+        cast_name: name,
+        actual_start: time || undefined,
+      }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      qc.invalidateQueries({ queryKey: ['casts', storeId] })
+      setShowClockIn(false)
+      setTaikenName('')
+      setClockInTab('normal')
+    },
+  })
+
   const clockOutMutation = useMutation({
     mutationFn: ({ shiftId, time }: { shiftId: number; time: string }) =>
       apiClient.post(`/api/casts/attendance/${shiftId}/clock-out`, { actual_end: time }).then(r => r.data),
@@ -5617,6 +5683,28 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
             }
             {w.is_late && !w.is_absent && (
               <span className="text-xs px-1.5 py-0.5 bg-yellow-900/60 text-yellow-400 rounded">遅刻</span>
+            )}
+            {w.taiken_status === 'taiken' && (
+              <select
+                value=""
+                onChange={async (e) => {
+                  const val = e.target.value
+                  if (!val) return
+                  const labels: Record<string, string> = { honnyuu: '本入店', fusaiyou: '不採用', sai_taiken: '再体入' }
+                  if (!confirm(`${w.cast_name} を「${labels[val]}」に変更しますか？`)) return
+                  try {
+                    await apiClient.post(`/api/casts/${w.cast_id}/taiken-status`, { status: val })
+                    qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+                    qc.invalidateQueries({ queryKey: ['casts', storeId] })
+                  } catch (err: any) { alert(err?.response?.data?.detail || 'エラー') }
+                }}
+                className="text-[10px] px-1 py-0.5 bg-pink-900/60 text-pink-300 rounded border border-pink-700 cursor-pointer"
+              >
+                <option value="">体入中</option>
+                <option value="honnyuu">本入店</option>
+                <option value="fusaiyou">不採用</option>
+                <option value="sai_taiken">再体入</option>
+              </select>
             )}
           </div>
           <div className="text-xs text-gray-500 mt-0.5">
@@ -5782,21 +5870,25 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
 
       {/* 出勤: キャスト検索モーダル */}
       {showClockIn && !clockInCast && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}>
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId(''); setTaikenName('') }}>
           <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-white">出勤キャストを選択</h3>
-              <button onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}><X className="w-5 h-5 text-gray-400" /></button>
+              <button onClick={() => { setShowClockIn(false); setQ(''); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId(''); setTaikenName('') }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
             {/* タブ */}
             <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
               <button onClick={() => setClockInTab('normal')}
-                className={`flex-1 text-sm py-1 rounded-md transition-colors ${clockInTab === 'normal' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                className={`flex-1 text-xs py-1 rounded-md transition-colors ${clockInTab === 'normal' ? 'bg-emerald-700 text-white' : 'text-gray-400 hover:text-white'}`}>
                 通常出勤
               </button>
               <button onClick={() => setClockInTab('help')}
-                className={`flex-1 text-sm py-1 rounded-md transition-colors ${clockInTab === 'help' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                className={`flex-1 text-xs py-1 rounded-md transition-colors ${clockInTab === 'help' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
                 ヘルプ出勤
+              </button>
+              <button onClick={() => setClockInTab('taiken')}
+                className={`flex-1 text-xs py-1 rounded-md transition-colors ${clockInTab === 'taiken' ? 'bg-pink-700 text-white' : 'text-gray-400 hover:text-white'}`}>
+                体験入店
               </button>
             </div>
 
@@ -5816,7 +5908,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                   )}
                 </div>
               </>
-            ) : (
+            ) : clockInTab === 'help' ? (
               <HelpClockInForm
                 storeId={storeId}
                 helpStoreId={helpStoreId}
@@ -5826,6 +5918,14 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                 onSubmit={(name, fromStoreId, time) => helpClockInMutation.mutate({ name, fromStoreId, time })}
                 onCancel={() => { setShowClockIn(false); setClockInTab('normal'); setHelpCastName(''); setHelpStoreId('') }}
                 isPending={helpClockInMutation.isPending}
+              />
+            ) : (
+              <TaikenClockInForm
+                taikenName={taikenName}
+                setTaikenName={setTaikenName}
+                onSubmit={(name, time) => taikenClockInMutation.mutate({ name, time })}
+                onCancel={() => { setShowClockIn(false); setClockInTab('normal'); setTaikenName('') }}
+                isPending={taikenClockInMutation.isPending}
               />
             )}
           </div>

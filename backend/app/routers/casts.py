@@ -93,6 +93,7 @@ class CastResponse(BaseModel):
     is_active: bool
     is_retired: bool = False
     retired_at: Optional[date] = None
+    taiken_status: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -547,6 +548,8 @@ def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: m
             "actual_end": s.actual_end.isoformat() if s.actual_end else None,
             "is_late": bool(s.is_late),
             "is_absent": bool(s.is_absent),
+            "taiken_status": s.cast.taiken_status if s.cast else None,
+            "help_cast_name": s.help_cast_name,
         })
     return result
 
@@ -603,6 +606,92 @@ def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), curre
     db.commit()
     db.refresh(shift)
     return {"shift_id": shift.id, "cast_id": cast.id, "message": "ヘルプ出勤しました"}
+
+
+class TaikenClockInRequest(BaseModel):
+    store_id: int
+    cast_name: str
+    actual_start: Optional[str] = None  # "HH:MM" JST
+
+
+@router.post("/attendance/taiken-clock-in")
+def taiken_clock_in(data: TaikenClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """体験入店打刻: Castレコード「[体入]名前」を作成 or 再利用して紐付け"""
+    from datetime import timedelta
+    today = date.today()
+
+    if data.actual_start:
+        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
+        d = today if h >= 12 else today + timedelta(days=1)
+        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+    else:
+        now = datetime.utcnow()
+
+    taiken_name = f"[体入]{data.cast_name}"
+    cast = db.query(models.Cast).filter(
+        models.Cast.store_id == data.store_id,
+        models.Cast.stage_name == taiken_name,
+    ).first()
+    if not cast:
+        cast = models.Cast(
+            store_id=data.store_id,
+            stage_name=taiken_name,
+            real_name=data.cast_name,
+            rank="C",
+            hourly_rate=1400,
+            help_hourly_rate=1500,
+            is_active=True,
+            taiken_status="taiken",
+            notes="体験入店",
+        )
+        db.add(cast)
+        db.flush()
+
+    shift = models.ConfirmedShift(
+        cast_id=cast.id,
+        store_id=data.store_id,
+        date=today,
+        help_cast_name=data.cast_name,
+        actual_start=now,
+    )
+    db.add(shift)
+    db.commit()
+    db.refresh(shift)
+    return {"shift_id": shift.id, "cast_id": cast.id, "message": "体験入店しました"}
+
+
+class TaikenStatusRequest(BaseModel):
+    status: str  # honnyuu / fusaiyou / sai_taiken
+
+
+@router.post("/{cast_id}/taiken-status")
+def update_taiken_status(
+    cast_id: int,
+    data: TaikenStatusRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """体入キャストのステータスを更新"""
+    cast = db.query(models.Cast).filter(models.Cast.id == cast_id).first()
+    if not cast:
+        raise HTTPException(status_code=404, detail="キャストが見つかりません")
+
+    if data.status == "honnyuu":
+        # 本入: [体入] プレフィックスを外して正規キャストに
+        if cast.stage_name.startswith("[体入]"):
+            cast.stage_name = cast.stage_name.replace("[体入]", "")
+        cast.taiken_status = "honnyuu"
+        cast.is_active = True
+        cast.notes = (cast.notes or "") + f"\n本入店 {date.today()}"
+    elif data.status == "fusaiyou":
+        cast.taiken_status = "fusaiyou"
+        cast.is_active = False
+    elif data.status == "sai_taiken":
+        cast.taiken_status = "sai_taiken"
+        cast.is_active = True
+
+    db.commit()
+    return {"message": f"ステータスを{data.status}に更新しました", "cast_id": cast.id, "stage_name": cast.stage_name}
 
 
 @router.post("/attendance/clock-in")

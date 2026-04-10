@@ -142,6 +142,7 @@ class Cast(Base):
     is_active = Column(Boolean, default=True)
     is_retired = Column(Boolean, default=False)
     retired_at = Column(Date, nullable=True)
+    taiken_status = Column(String(20), nullable=True)  # null=通常 / taiken=体入中 / honnyuu=本入 / fusaiyou=不採用 / sai_taiken=再体入
     created_at = Column(DateTime, default=datetime.utcnow)
 
     store = relationship("Store", back_populates="casts")
