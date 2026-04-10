@@ -5598,6 +5598,11 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                     key={t.id}
                     onClick={async () => {
                       try {
+                        // ティッシュ配り中ならフロントからも明示的に終了
+                        const activeTd = (activeTissue as any[]).find((td: any) => td.cast_id === castActionTarget.cast_id)
+                        if (activeTd) {
+                          await apiClient.delete(`/api/tissue/${activeTd.id}`)
+                        }
                         const currentIds = (t.current_casts || []).map((c: any) => c.cast_id).filter((id: number) => id !== castActionTarget.cast_id)
                         currentIds.push(castActionTarget.cast_id)
                         await apiClient.post(`/api/tickets/${t.id}/assignments/set`, { cast_ids: currentIds, assignment_type: 'jounai' })
