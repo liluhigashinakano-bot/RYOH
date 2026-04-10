@@ -419,7 +419,7 @@ export default function POS() {
               ティッシュ配り
             </button>
           )}
-          {currentSession && !currentSession.is_closed && (
+          {currentSession && !currentSession.is_closed && (storeInfo as any)?.ai_advisor_enabled !== false && (
             <button
               onClick={async () => {
                 setShowAIAdvisor(true)

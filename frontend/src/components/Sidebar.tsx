@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, BarChart3, LogOut } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal, BarChart3, LogOut, Settings } from 'lucide-react'
 import { useAuthStore, type PermPage } from '../store/authStore'
 
 const navItems: { to: string; icon: any; label: string; exact?: boolean; page: PermPage }[] = [
@@ -10,6 +10,7 @@ const navItems: { to: string; icon: any; label: string; exact?: boolean; page: P
   { to: '/reports/monthly', icon: BarChart3, label: '月次レポート', page: 'accounts' },
   { to: '/admin', icon: UserCog, label: 'アカウント管理', page: 'accounts' },
   { to: '/settings', icon: SlidersHorizontal, label: 'メニュー管理', page: 'menus' },
+  { to: '/app-settings', icon: Settings, label: '設定', page: 'accounts' },
 ]
 
 const ROLE_LABELS: Record<string, string> = {

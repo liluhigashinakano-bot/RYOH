@@ -12,6 +12,7 @@ import CastList from './pages/casts/CastList'
 import CastDetail from './pages/casts/CastDetail'
 import AdminPanel from './pages/admin/AdminPanel'
 import AdminSettings from './pages/admin/AdminSettings'
+import AppSettingsPage from './pages/admin/AppSettingsPage'
 import MonthlyReport from './pages/reports/MonthlyReport'
 
 const queryClient = new QueryClient({
@@ -86,6 +87,7 @@ function AppRoutes() {
         <Route path="casts/:id" element={<PermRoute page="employees"><CastDetail /></PermRoute>} />
         <Route path="admin" element={<PermRoute page="accounts"><AdminPanel /></PermRoute>} />
         <Route path="settings" element={<PermRoute page="menus"><AdminSettings /></PermRoute>} />
+        <Route path="app-settings" element={<PermRoute page="accounts"><AppSettingsPage /></PermRoute>} />
         <Route path="reports/monthly" element={<PermRoute page="accounts"><MonthlyReport /></PermRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
