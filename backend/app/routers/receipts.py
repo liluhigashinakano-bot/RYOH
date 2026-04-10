@@ -79,97 +79,104 @@ def _draw_centered(c: canvas.Canvas, x_center: float, y: float, text: str, font:
 def _generate_receipt_80mm(ticket: models.Ticket, store: models.Store, amounts: dict,
                             receipt_no: str, recipient: str, note: str, issued_at: datetime) -> bytes:
     width = 80 * mm
-    # 高さは内容に応じて伸縮
-    height = 200 * mm
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(width, height))
+    # 先に仮キャンバスで描画して高さを測定、次に正しい高さで再描画
+    def _draw_content(c: canvas.Canvas, height: float) -> float:
+        margin = 4 * mm
+        cx = width / 2
+        y = height - 8 * mm
 
-    margin = 4 * mm
-    cx = width / 2
-    y = height - 8 * mm
+        # タイトル
+        _draw_centered(c, cx, y, "領 収 書", size=18)
+        y -= 8 * mm
+        c.setLineWidth(0.5)
+        c.line(margin, y, width - margin, y)
+        y -= 5 * mm
 
-    # タイトル
-    _draw_centered(c, cx, y, "領 収 書", size=18)
-    y -= 8 * mm
-    c.setLineWidth(0.5)
-    c.line(margin, y, width - margin, y)
-    y -= 5 * mm
-
-    # No / 日付
-    c.setFont(JP_FONT, 8)
-    c.drawString(margin, y, f"No. {receipt_no}")
-    date_str = issued_at.strftime("%Y年%m月%d日")
-    c.drawRightString(width - margin, y, date_str)
-    y -= 8 * mm
-
-    # 宛名
-    c.setFont(JP_FONT, 11)
-    name_text = (recipient or "").strip()
-    name_line = f"{name_text}    様" if name_text else "                  様"
-    c.drawString(margin + 2 * mm, y, name_line)
-    c.line(margin + 2 * mm, y - 1 * mm, width - margin - 2 * mm, y - 1 * mm)
-    y -= 10 * mm
-
-    # 金額（大きめ）
-    amount_str = f"¥ {amounts['grand']:,} -"
-    _draw_centered(c, cx, y, amount_str, size=22)
-    y -= 4 * mm
-    c.line(margin + 5 * mm, y, width - margin - 5 * mm, y)
-    y -= 6 * mm
-
-    # 内訳
-    c.setFont(JP_FONT, 8)
-    c.drawString(margin + 2 * mm, y, f"（サービス料等 10%）  ¥{amounts['service']:,}")
-    y -= 4 * mm
-    c.drawString(margin + 2 * mm, y, f"（消費税     10%）  ¥{amounts['tax']:,}")
-    y -= 7 * mm
-
-    # 但し書き + [印]
-    c.setFont(JP_FONT, 9)
-    c.drawString(margin + 2 * mm, y, f"但し {note}")
-    # [印] 簡易マーク
-    seal_x = width - margin - 8 * mm
-    c.circle(seal_x, y + 1 * mm, 3 * mm, stroke=1, fill=0)
-    _draw_centered(c, seal_x, y, "印", size=6)
-    y -= 8 * mm
-
-    # 領収文 + 収入印紙(5万円以上)
-    c.setFont(JP_FONT, 8)
-    c.drawString(margin + 2 * mm, y, "上記金額正に領収いたしました")
-    if amounts['grand'] >= 50000:
-        # 縦長長方形 25mm x 35mm
-        stamp_w = 18 * mm
-        stamp_h = 25 * mm
-        stamp_x = width - margin - stamp_w - 1 * mm
-        stamp_y = y - stamp_h + 4 * mm
-        c.rect(stamp_x, stamp_y, stamp_w, stamp_h, stroke=1, fill=0)
-        c.setFont(JP_FONT, 7)
-        _draw_centered(c, stamp_x + stamp_w / 2, stamp_y + stamp_h / 2 + 2 * mm, "収入")
-        _draw_centered(c, stamp_x + stamp_w / 2, stamp_y + stamp_h / 2 - 4 * mm, "印紙")
-        y -= stamp_h + 2 * mm
-    else:
+        # No / 日付
+        c.setFont(JP_FONT, 8)
+        c.drawString(margin, y, f"No. {receipt_no}")
+        date_str = issued_at.strftime("%Y年%m月%d日")
+        c.drawRightString(width - margin, y, date_str)
         y -= 8 * mm
 
-    c.line(margin, y, width - margin, y)
-    y -= 5 * mm
+        # 宛名
+        c.setFont(JP_FONT, 11)
+        name_text = (recipient or "").strip()
+        name_line = f"{name_text}    様" if name_text else "                  様"
+        c.drawString(margin + 2 * mm, y, name_line)
+        c.line(margin + 2 * mm, y - 1 * mm, width - margin - 2 * mm, y - 1 * mm)
+        y -= 10 * mm
 
-    # 店舗情報（左寄せ）
-    c.setFont(JP_FONT, 8)
-    c.drawString(margin + 2 * mm, y, store.name or "")
-    y -= 4 * mm
-    if store.postal_code:
-        c.drawString(margin + 2 * mm, y, f"〒{store.postal_code}")
+        # 金額（大きめ）
+        amount_str = f"¥ {amounts['grand']:,} -"
+        _draw_centered(c, cx, y, amount_str, size=22)
         y -= 4 * mm
-    if store.address:
-        c.drawString(margin + 2 * mm, y, store.address)
-        y -= 4 * mm
-    if store.phone:
-        c.drawString(margin + 2 * mm, y, f"TEL: {store.phone}")
-        y -= 4 * mm
-    if store.invoice_number:
-        c.drawString(margin + 2 * mm, y, f"登録番号: {store.invoice_number}")
-        y -= 4 * mm
+        c.line(margin + 5 * mm, y, width - margin - 5 * mm, y)
+        y -= 6 * mm
 
+        # 内訳
+        c.setFont(JP_FONT, 8)
+        c.drawString(margin + 2 * mm, y, f"（サービス料等 10%）  ¥{amounts['service']:,}")
+        y -= 4 * mm
+        c.drawString(margin + 2 * mm, y, f"（消費税     10%）  ¥{amounts['tax']:,}")
+        y -= 7 * mm
+
+        # 但し書き + [印]
+        c.setFont(JP_FONT, 9)
+        c.drawString(margin + 2 * mm, y, f"但し {note}")
+        seal_x = width - margin - 8 * mm
+        c.circle(seal_x, y + 1 * mm, 3 * mm, stroke=1, fill=0)
+        _draw_centered(c, seal_x, y, "印", size=6)
+        y -= 8 * mm
+
+        # 領収文 + 収入印紙(5万円以上)
+        c.setFont(JP_FONT, 8)
+        c.drawString(margin + 2 * mm, y, "上記金額正に領収いたしました")
+        if amounts['grand'] >= 50000:
+            stamp_w = 18 * mm
+            stamp_h = 25 * mm
+            stamp_x = width - margin - stamp_w - 1 * mm
+            stamp_y = y - stamp_h + 4 * mm
+            c.rect(stamp_x, stamp_y, stamp_w, stamp_h, stroke=1, fill=0)
+            c.setFont(JP_FONT, 7)
+            _draw_centered(c, stamp_x + stamp_w / 2, stamp_y + stamp_h / 2 + 2 * mm, "収入")
+            _draw_centered(c, stamp_x + stamp_w / 2, stamp_y + stamp_h / 2 - 4 * mm, "印紙")
+            y -= stamp_h + 2 * mm
+        else:
+            y -= 8 * mm
+
+        c.line(margin, y, width - margin, y)
+        y -= 5 * mm
+
+        # 店舗情報（左寄せ）
+        c.setFont(JP_FONT, 8)
+        c.drawString(margin + 2 * mm, y, store.name or "")
+        y -= 4 * mm
+        if store.postal_code:
+            c.drawString(margin + 2 * mm, y, f"〒{store.postal_code}")
+            y -= 4 * mm
+        if store.address:
+            c.drawString(margin + 2 * mm, y, store.address)
+            y -= 4 * mm
+        if store.phone:
+            c.drawString(margin + 2 * mm, y, f"TEL: {store.phone}")
+            y -= 4 * mm
+        if store.invoice_number:
+            c.drawString(margin + 2 * mm, y, f"登録番号: {store.invoice_number}")
+            y -= 4 * mm
+
+        return y  # 最終Y座標を返す
+
+    # 1パス目: 高さ測定
+    tmp_buf = io.BytesIO()
+    tmp_c = canvas.Canvas(tmp_buf, pagesize=(width, 500 * mm))
+    final_y = _draw_content(tmp_c, 500 * mm)
+    content_height = (500 * mm - final_y) + 8 * mm  # 下マージン追加
+
+    # 2パス目: 正しい高さで描画
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(width, content_height))
+    _draw_content(c, content_height)
     c.showPage()
     c.save()
     return buf.getvalue()
