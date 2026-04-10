@@ -82,7 +82,7 @@ function calcTicketGrandTotal(ticket: any): number {
     .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
     .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
   const sub = ticket.total_amount + sk
-  return Math.round(sub * 1.21)
+  return Math.max(0, Math.round(sub * 1.21) - sk - (ticket.discount_amount || 0))
 }
 
 // 0〜5時 → 24〜29時に変換（バー営業時間表記）
