@@ -419,9 +419,10 @@ export default function POS() {
               ティッシュ配り
             </button>
           )}
-          {currentSession && !currentSession.is_closed && (storeInfo as any)?.ai_advisor_enabled !== false && (
+          {currentSession && !currentSession.is_closed && (
             <button
               onClick={async () => {
+                if ((storeInfo as any)?.ai_advisor_enabled === false) return
                 setShowAIAdvisor(true)
                 setAIAdvisorLoading(true)
                 setAIAdvisorError('')
@@ -435,7 +436,8 @@ export default function POS() {
                   setAIAdvisorLoading(false)
                 }
               }}
-              className="bg-pink-800 hover:bg-pink-700 text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0 border border-pink-500/50"
+              disabled={(storeInfo as any)?.ai_advisor_enabled === false}
+              className={`text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0 border ${(storeInfo as any)?.ai_advisor_enabled === false ? 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed' : 'bg-pink-800 hover:bg-pink-700 text-white border-pink-500/50'}`}
             >
               🤖 付け回しAIアドバイス
             </button>
