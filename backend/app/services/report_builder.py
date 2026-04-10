@@ -152,6 +152,28 @@ def _to_ticket_input(
     if ticket.customer_id and ticket.customer:
         customer_name = ticket.customer.name
     payment = ticket.payment_method.value if ticket.payment_method else None
+    # 延長回数は order_items から計算 (extension_count はレガシー)
+    guest = max(1, ticket.guest_count or 1)
+    ext_qty = sum(
+        (o.quantity or 0) for o in (ticket.order_items or [])
+        if o.item_type == 'extension' and not o.canceled_at
+        and not (o.item_name or '').startswith('合流')
+    )
+    calc_ext_count = ext_qty // guest
+
+    # 税サ込み合計
+    senkaikei = sum(
+        abs(o.amount or 0) for o in (ticket.order_items or [])
+        if not o.canceled_at and (
+            (o.item_name or '').startswith('先会計')
+            or (o.item_name or '').startswith('分割清算')
+            or (o.item_name or '').startswith('値引き')
+        )
+    )
+    subtotal = (ticket.total_amount or 0) + senkaikei
+    grand = round(subtotal * 1.21) - senkaikei - (ticket.discount_amount or 0)
+    grand = max(0, grand)
+
     return rc.TicketInput(
         id=ticket.id,
         table_no=ticket.table_no,
@@ -160,12 +182,12 @@ def _to_ticket_input(
         guest_count=ticket.guest_count or 0,
         n_count=ticket.n_count or 0,
         r_count=ticket.r_count or 0,
-        extension_count=ticket.extension_count or 0,
+        extension_count=calc_ext_count,
         plan_type=ticket.plan_type,
         visit_motivation=ticket.visit_motivation,
         motivation_cast_id=ticket.motivation_cast_id,
         customer_name=customer_name,
-        total_amount=ticket.total_amount or 0,
+        total_amount=grand,
         cash_amount=ticket.cash_amount or 0,
         card_amount=ticket.card_amount or 0,
         code_amount=ticket.code_amount or 0,
