@@ -27,6 +27,16 @@ except Exception:
 
 router = APIRouter(prefix="/api/receipts", tags=["receipts"])
 
+ITEM_TYPE_LABELS = {
+    "extension": "延長", "drink_s": "Sドリンク", "drink_l": "Lドリンク",
+    "drink_mg": "MGドリンク", "shot_cast": "キャストショット", "shot_guest": "ゲストショット",
+    "champagne": "シャンパン", "set": "セット料金", "other": "その他",
+}
+
+def _item_display_name(item) -> str:
+    raw = item.item_name or item.item_type or ""
+    return ITEM_TYPE_LABELS.get(raw, raw)
+
 
 # ─────────────────────────────────────────
 # 共通ヘルパー
@@ -330,7 +340,7 @@ def _generate_estimate_80mm(ticket: models.Ticket, store: models.Store, amounts:
         for item in (ticket.order_items or []):
             if item.canceled_at:
                 continue
-            name = (item.item_name or item.item_type or '')[:18]
+            name = _item_display_name(item)[:18]
             qty = item.quantity or 1
             amt = item.amount or 0
             c.drawString(margin, y, name)
@@ -426,7 +436,7 @@ def _generate_estimate_a4(ticket: models.Ticket, store: models.Store, amounts: d
     for item in (ticket.order_items or []):
         if item.canceled_at:
             continue
-        name = (item.item_name or item.item_type or '')[:30]
+        name = _item_display_name(item)[:30]
         qty = item.quantity or 1
         amt = item.amount or 0
         unit = item.unit_price or 0

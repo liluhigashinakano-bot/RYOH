@@ -15,6 +15,17 @@ from ..services.incentive import (
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 
+_ITEM_TYPE_LABELS = {
+    "extension": "延長", "drink_s": "Sドリンク", "drink_l": "Lドリンク",
+    "drink_mg": "MGドリンク", "shot_cast": "キャストショット", "shot_guest": "ゲストショット",
+    "champagne": "シャンパン", "set": "セット料金", "other": "その他",
+}
+
+def _item_label(item_name: Optional[str], item_type: Optional[str]) -> str:
+    raw = item_name or item_type or ""
+    return _ITEM_TYPE_LABELS.get(raw, raw)
+
+
 def _resolve_motivation_cast_names(ticket: models.Ticket) -> list[str]:
     """motivation_cast_ids からキャスト名リストを取得"""
     ids = ticket.motivation_cast_ids or []
@@ -324,7 +335,7 @@ def get_order_logs(
             "action": log.action,
             "ticket_id": log.ticket_id,
             "table_no": ticket.table_no if ticket else None,
-            "item_name": log.item_name or log.item_type,
+            "item_name": _item_label(log.item_name, log.item_type),
             "old_quantity": log.old_quantity,
             "new_quantity": log.new_quantity,
             "old_amount": log.old_amount,
@@ -382,7 +393,7 @@ def get_tickets(
     for t in tickets:
         data = _to_response(t)
         data["order_items"] = [
-            {"id": i.id, "item_type": i.item_type, "item_name": i.item_name or i.item_type, "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount,
+            {"id": i.id, "item_type": i.item_type, "item_name": _item_label(i.item_name, i.item_type), "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount,
              "created_at": i.created_at.isoformat() if i.created_at else None}
             for i in t.order_items if i.canceled_at is None
         ]
