@@ -283,6 +283,45 @@ export default function POS() {
     enabled: !!selectedStoreId,
   })
 
+  // 天気 + 鉄道（POS用）
+  const POS_STORE_COORDS: Record<string, { lat: number; lon: number; lines: string[] }> = {
+    higashinakano: { lat: 35.7075, lon: 139.6782, lines: ['中央総武線', '中央線(快速)', '総武線(快速)', '都営大江戸線'] },
+    shinnakano: { lat: 35.6975, lon: 139.6615, lines: ['東京メトロ丸ノ内線'] },
+    honancho: { lat: 35.6835, lon: 139.6480, lines: ['東京メトロ丸ノ内線'] },
+  }
+  const posStoreCode = (storeInfo as any)?.code || ''
+  const posCoords = POS_STORE_COORDS[posStoreCode]
+  const WMO: Record<number, string> = { 0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️' }
+
+  const { data: posWeather } = useQuery({
+    queryKey: ['pos-weather', posCoords?.lat, posCoords?.lon],
+    queryFn: async () => {
+      if (!posCoords) return null
+      const r = await import('axios').then(m => m.default.get('https://api.open-meteo.com/v1/forecast', {
+        params: { latitude: posCoords.lat, longitude: posCoords.lon, hourly: 'temperature_2m,weathercode,windspeed_10m', timezone: 'Asia/Tokyo', forecast_days: 2 },
+      }))
+      return r.data
+    },
+    enabled: !!posCoords,
+    staleTime: 1000 * 60 * 15,
+    refetchInterval: 1000 * 60 * 15,
+  })
+  const { data: posTrainRaw } = useQuery({
+    queryKey: ['pos-train'],
+    queryFn: () => apiClient.get('/api/train-info').then(r => r.data),
+    staleTime: 1000 * 60 * 5,
+    refetchInterval: 1000 * 60 * 5,
+  })
+  const posTrainLines: any[] = ((posTrainRaw as any)?.lines ?? []).filter((t: any) => posCoords?.lines.some((rl: string) => t.line.includes(rl) || rl.includes(t.line)))
+  const posCurrentWeather = (() => {
+    if (!posWeather?.hourly) return null
+    const h = posWeather.hourly
+    const now = new Date()
+    const idx = h.time.findIndex((t: string) => new Date(t) >= now)
+    if (idx < 0) return null
+    return { temp: Math.round(h.temperature_2m[idx]), icon: WMO[h.weathercode[idx]] || '❓', wind: Math.round(h.windspeed_10m[idx]) }
+  })()
+
   const { data: currentSession } = useQuery({
     queryKey: ['session', selectedStoreId],
     queryFn: () => apiClient.get('/api/sessions/current', { params: { store_id: selectedStoreId } }).then(r => r.data),
@@ -444,6 +483,18 @@ export default function POS() {
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'reports' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               日報一覧
             </button>
+            {/* 天気+運行情報 */}
+            <div className="ml-auto flex items-center gap-2 text-[10px] shrink-0 pl-3">
+              {posCurrentWeather && (
+                <span className="text-gray-300">{posCurrentWeather.icon}{posCurrentWeather.temp}° 風{posCurrentWeather.wind}</span>
+              )}
+              {posTrainLines.map((t: any) => (
+                <span key={t.line} className={t.status === 'normal' ? 'text-green-500' : t.status === 'delay' ? 'text-yellow-400' : 'text-red-400'}>
+                  {t.line.replace(/\[.*\]/, '').replace('東京メトロ', '').replace('都営', '')}
+                  {t.status === 'normal' ? '✓' : t.status === 'delay' ? '⚠遅延' : '🚫運休'}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </div>

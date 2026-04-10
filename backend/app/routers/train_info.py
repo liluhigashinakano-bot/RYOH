@@ -25,9 +25,9 @@ def _scrape_yahoo_train_info() -> list[dict]:
     try:
         resp = httpx.get(url, timeout=10, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        }, follow_redirects=True)
         resp.raise_for_status()
-        html = resp.text
+        html = resp.content.decode("utf-8", errors="replace")
     except Exception as e:
         print(f"[TRAIN] Yahoo fetch error: {e}")
         return []
@@ -73,6 +73,14 @@ def _scrape_yahoo_train_info() -> list[dict]:
             "status_text": status_text,
             "detail": detail if status != "normal" else "",
         })
+
+    # 重複除去（同じ路線が複数行にある場合、遅延を優先）
+    seen: dict[str, dict] = {}
+    for r in results:
+        key = r["line"]
+        if key not in seen or r["status"] != "normal":
+            seen[key] = r
+    results = list(seen.values())
 
     # 対象路線がページに見つからなかった場合は平常運転として追加
     found_names = {r["line"] for r in results}
