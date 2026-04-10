@@ -492,12 +492,12 @@ def add_order(
         and not (data.item_name or '').startswith('合流')
     )
     if is_normal_ext and data.period_no is not None:
-        # 同じ ticket × period_no が既にあれば no-op
+        # 同じ ticket × period_no が存在すれば no-op（削除済みも含む。
+        # 手動で削除した延長をAutoExtenderが再追加しないようにするため）
         existing = db.query(models.OrderItem).filter(
             models.OrderItem.ticket_id == ticket_id,
             models.OrderItem.item_type == "extension",
             models.OrderItem.cast_id.is_(None),
-            models.OrderItem.canceled_at.is_(None),
             models.OrderItem.period_no == data.period_no,
         ).first()
         if existing is not None:
