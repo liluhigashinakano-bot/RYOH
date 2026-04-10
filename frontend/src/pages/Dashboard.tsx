@@ -78,7 +78,7 @@ function parseWeatherHours(weather: any) {
   }).filter(Boolean)
 }
 
-function StoreWeatherTrain({ storeCode, trainData }: { storeCode: string; trainData: any[] }) {
+function StoreWeatherTrain({ storeCode, trainData, lastTrains }: { storeCode: string; trainData: any[]; lastTrains: any[] }) {
   const meta = STORE_META[storeCode]
   if (!meta) return null
 
@@ -89,6 +89,7 @@ function StoreWeatherTrain({ storeCode, trainData }: { storeCode: string; trainD
 
   // この店舗に関連する路線の運行情報（部分一致）
   const storeTrains = trainData.filter(t => meta.relatedLines.some(rl => t.line.includes(rl) || rl.includes(t.line)))
+  const storeLastTrains = lastTrains.filter((t: any) => t.store === storeCode && t.arrive)
 
   return (
     <div className="space-y-1 pt-1 border-t border-gray-800/60">
@@ -121,24 +122,34 @@ function StoreWeatherTrain({ storeCode, trainData }: { storeCode: string; trainD
         </div>
       )}
 
-      {/* 鉄道運行情報（リアルタイム） */}
-      {storeTrains.length > 0 && (
+      {/* 鉄道運行情報 + 終電到着 */}
+      {(storeTrains.length > 0 || storeLastTrains.length > 0) && (
         <div className="flex items-center gap-2 flex-wrap text-[10px]">
-          {storeTrains.map(t => (
+          {storeTrains.filter(t => t.status !== 'normal').map(t => (
             <span key={t.line} className="flex items-center gap-1">
               <span className="text-gray-400">🚃{t.line.replace('JR', '').replace('東京メトロ', '').replace('都営', '')}</span>
-              {t.status === 'normal' ? (
-                <span className="text-green-400">平常運転</span>
-              ) : t.status === 'delay' ? (
-                <span className="text-yellow-400" title={t.detail}>⚠️遅延</span>
-              ) : (
-                <span className="text-red-400" title={t.detail}>🚫運休</span>
-              )}
-              {t.detail && t.status !== 'normal' && (
-                <span className="text-gray-500 max-w-[200px] truncate">{t.detail}</span>
-              )}
+              <span className={t.status === 'delay' ? 'text-yellow-400' : 'text-red-400'}>
+                {t.status === 'delay' ? '⚠️遅延' : '🚫運休'}
+              </span>
+              {t.detail && <span className="text-gray-500 max-w-[200px] truncate">{t.detail}</span>}
             </span>
           ))}
+          {storeLastTrains.map((lt: any) => {
+            const now = new Date(); const h = now.getHours(); const m = now.getMinutes()
+            const nowMin = (h < 5 ? h + 24 : h) * 60 + m
+            const [th, tm] = lt.arrive.split(':').map(Number)
+            const remaining = (th < 5 ? th + 24 : th) * 60 + tm - nowMin
+            const isPast = remaining < 0
+            const isUrgent = remaining >= 0 && remaining <= 30
+            return (
+              <span key={`${lt.from}-${lt.to}`} className="text-gray-400">
+                🚃{lt.from}→{lt.to}
+                <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>{lt.arrive}着</span>
+                {isUrgent && <span className="text-red-400 ml-0.5">({remaining}分)</span>}
+                {isPast && <span className="text-gray-600 ml-0.5">終</span>}
+              </span>
+            )
+          })}
         </div>
       )}
     </div>
@@ -166,6 +177,7 @@ export default function Dashboard() {
     refetchInterval: 1000 * 60 * 5,
   })
   const trainData: any[] = (trainInfo as any)?.lines ?? []
+  const lastTrainsData: any[] = (trainInfo as any)?.last_trains ?? []
 
   const dashQueries = useQueries({
     queries: stores.map(s => ({
@@ -277,7 +289,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* 天気 + 鉄道（店舗ごと） */}
-                  <StoreWeatherTrain storeCode={(store as any).code} trainData={trainData} />
+                  <StoreWeatherTrain storeCode={(store as any).code} trainData={trainData} lastTrains={lastTrainsData} />
                 </div>
               )}
             </div>

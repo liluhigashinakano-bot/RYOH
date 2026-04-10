@@ -289,23 +289,8 @@ export default function POS() {
     shinnakano: { lat: 35.6975, lon: 139.6615, lines: ['東京メトロ丸ノ内線'] },
     honancho: { lat: 35.6835, lon: 139.6480, lines: ['東京メトロ丸ノ内線'] },
   }
-  const POS_LAST_TRAINS: Record<string, { label: string; time: string }[]> = {
-    higashinakano: [
-      { label: '総武線(中野行)', time: '0:57' },
-      { label: '大江戸(大門)', time: '0:33' },
-      { label: '大江戸(光が丘)', time: '0:43' },
-    ],
-    shinnakano: [
-      { label: '丸ノ内(池袋)', time: '0:12' },
-      { label: '丸ノ内(荻窪)', time: '0:19' },
-    ],
-    honancho: [
-      { label: '丸ノ内(中野坂上)', time: '0:03' },
-    ],
-  }
   const posStoreCode = (storeInfo as any)?.code || ''
   const posCoords = POS_STORE_COORDS[posStoreCode]
-  const posLastTrains = POS_LAST_TRAINS[posStoreCode] || []
   const WMO: Record<number, string> = { 0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️' }
 
   const { data: posWeather } = useQuery({
@@ -328,6 +313,7 @@ export default function POS() {
     refetchInterval: 1000 * 60 * 5,
   })
   const posTrainLines: any[] = ((posTrainRaw as any)?.lines ?? []).filter((t: any) => posCoords?.lines.some((rl: string) => t.line.includes(rl) || rl.includes(t.line)))
+  const posLastTrains: any[] = ((posTrainRaw as any)?.last_trains ?? []).filter((t: any) => t.store === posStoreCode && t.arrive)
   const posCurrentWeather = (() => {
     if (!posWeather?.hourly) return null
     const h = posWeather.hourly
@@ -510,13 +496,13 @@ export default function POS() {
                 </span>
               ))}
               {posLastTrains.map((lt: any) => {
-                const remaining = (() => { const now = new Date(); const h = now.getHours(); const m = now.getMinutes(); const nowMin = (h < 5 ? h + 24 : h) * 60 + m; const [th, tm] = lt.time.split(':').map(Number); return (th < 5 ? th + 24 : th) * 60 + tm - nowMin })()
+                const remaining = (() => { const now = new Date(); const h = now.getHours(); const m = now.getMinutes(); const nowMin = (h < 5 ? h + 24 : h) * 60 + m; const [th, tm] = lt.arrive.split(':').map(Number); return (th < 5 ? th + 24 : th) * 60 + tm - nowMin })()
                 const isPast = remaining < 0
                 const isUrgent = remaining >= 0 && remaining <= 30
                 return (
-                  <span key={lt.label} className="text-gray-400">
-                    {lt.label}
-                    <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>{lt.time}</span>
+                  <span key={`${lt.from}-${lt.to}`} className="text-gray-400">
+                    {lt.from}→{lt.to}
+                    <span className={`ml-0.5 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>{lt.arrive}着</span>
                     {isUrgent && <span className="text-red-400 ml-0.5">({remaining}分)</span>}
                     {isPast && <span className="text-gray-600 ml-0.5">終</span>}
                   </span>

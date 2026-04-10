@@ -96,13 +96,70 @@ def _scrape_yahoo_train_info() -> list[dict]:
     return results
 
 
+# 終電検索ルート
+LAST_TRAIN_ROUTES = [
+    {"from": "東中野", "to": "新宿", "store": "higashinakano"},
+    {"from": "東中野", "to": "中野", "store": "higashinakano"},
+    {"from": "中野坂上", "to": "新中野", "store": "shinnakano"},
+    {"from": "荻窪", "to": "新中野", "store": "shinnakano"},
+    {"from": "中野坂上", "to": "方南町", "store": "honancho"},
+]
+
+_last_train_cache: dict = {"data": None, "fetched_at": 0}
+LAST_TRAIN_TTL = 900  # 15分
+
+
+def _scrape_last_trains() -> list[dict]:
+    results = []
+    for route in LAST_TRAIN_ROUTES:
+        try:
+            resp = httpx.get(
+                "https://transit.yahoo.co.jp/search/result",
+                params={"from": route["from"], "to": route["to"], "type": "4", "ticket": "ic"},
+                timeout=10,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                follow_redirects=True,
+            )
+            html = resp.content.decode("utf-8", errors="replace")
+            clean = re.sub(r"<!--.*?-->", "", html)
+            matches = re.findall(r"(\d{1,2}:\d{2})\s*→\s*(?:<[^>]*>)*(\d{1,2}:\d{2})", clean)
+            if matches:
+                results.append({
+                    "from": route["from"],
+                    "to": route["to"],
+                    "store": route["store"],
+                    "depart": matches[0][0],
+                    "arrive": matches[0][1],
+                })
+            else:
+                results.append({
+                    "from": route["from"],
+                    "to": route["to"],
+                    "store": route["store"],
+                    "depart": None,
+                    "arrive": None,
+                })
+        except Exception as e:
+            print(f"[TRAIN] Last train error {route['from']}→{route['to']}: {e}")
+            results.append({"from": route["from"], "to": route["to"], "store": route["store"], "depart": None, "arrive": None})
+    return results
+
+
 @router.get("")
 def get_train_info():
     now = time.time()
     if _cache["data"] is not None and (now - _cache["fetched_at"]) < CACHE_TTL:
-        return {"lines": _cache["data"], "cached": True, "fetched_at": _cache["fetched_at"]}
+        lines = _cache["data"]
+    else:
+        lines = _scrape_yahoo_train_info()
+        _cache["data"] = lines
+        _cache["fetched_at"] = now
 
-    data = _scrape_yahoo_train_info()
-    _cache["data"] = data
-    _cache["fetched_at"] = now
-    return {"lines": data, "cached": False, "fetched_at": now}
+    if _last_train_cache["data"] is not None and (now - _last_train_cache["fetched_at"]) < LAST_TRAIN_TTL:
+        last_trains = _last_train_cache["data"]
+    else:
+        last_trains = _scrape_last_trains()
+        _last_train_cache["data"] = last_trains
+        _last_train_cache["fetched_at"] = now
+
+    return {"lines": lines, "last_trains": last_trains, "fetched_at": now}
