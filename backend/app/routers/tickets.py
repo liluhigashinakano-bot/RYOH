@@ -15,6 +15,25 @@ from ..services.incentive import (
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 
+def _resolve_motivation_cast_names(ticket: models.Ticket) -> list[str]:
+    """motivation_cast_ids からキャスト名リストを取得"""
+    ids = ticket.motivation_cast_ids or []
+    if not ids:
+        # 後方互換: motivation_cast_id が単一で設定されてる場合
+        if ticket.motivation_cast_id and getattr(ticket, 'motivation_cast', None):
+            return [ticket.motivation_cast.stage_name]
+        return []
+    from sqlalchemy.orm import Session as _S
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        casts = db.query(models.Cast).filter(models.Cast.id.in_(ids)).all()
+        name_map = {c.id: c.stage_name for c in casts}
+        return [name_map.get(cid, f"ID{cid}") for cid in ids]
+    finally:
+        db.close()
+
+
 def _to_bar_time(utc_dt: Optional[datetime]) -> str:
     """UTC datetime をバー時間表記(JST, 深夜は24:xx)に変換"""
     if not utc_dt:
@@ -150,6 +169,7 @@ class TicketCreate(BaseModel):
     visit_type: Optional[str] = None
     visit_motivation: Optional[str] = None
     motivation_cast_id: Optional[int] = None
+    motivation_cast_ids: Optional[List[int]] = None
     motivation_note: Optional[str] = None
 
 
@@ -270,6 +290,8 @@ def _to_response(ticket: models.Ticket) -> dict:
         "last_drink_times": extra["last_drink_times"],
         "customer_name": extra["customer_name"],
         "motivation_cast_name": ticket.motivation_cast.stage_name if getattr(ticket, 'motivation_cast', None) else None,
+        "motivation_cast_ids": ticket.motivation_cast_ids or [],
+        "motivation_cast_names": _resolve_motivation_cast_names(ticket),
         "payment_method": ticket.payment_method.value if ticket.payment_method else None,
         "cash_amount": ticket.cash_amount or 0,
         "card_amount": ticket.card_amount or 0,
@@ -407,7 +429,8 @@ def create_ticket(
         plan_type=data.plan_type,
         visit_type=data.visit_type,
         visit_motivation=data.visit_motivation,
-        motivation_cast_id=data.motivation_cast_id,
+        motivation_cast_id=data.motivation_cast_ids[0] if data.motivation_cast_ids else data.motivation_cast_id,
+        motivation_cast_ids=data.motivation_cast_ids,
         motivation_note=data.motivation_note,
         total_amount=total_set,
     )
@@ -1166,6 +1189,7 @@ class TicketPatch(BaseModel):
     plan_type: Optional[str] = None
     visit_motivation: Optional[str] = None
     motivation_cast_id: Optional[int] = None
+    motivation_cast_ids: Optional[List[int]] = None
     update_header: bool = False   # True のとき table_no/visit_type/plan_type を null でも更新する
     operator_name: Optional[str] = None
     reason: Optional[str] = None
@@ -1254,6 +1278,11 @@ def patch_ticket(
         if new_motivation != ticket.visit_motivation:
             ticket.visit_motivation = new_motivation
             ticket.motivation_cast_id = data.motivation_cast_id if new_motivation else None
+            ticket.motivation_cast_ids = data.motivation_cast_ids if new_motivation else None
+    if data.motivation_cast_ids is not None:
+        ticket.motivation_cast_ids = data.motivation_cast_ids
+        # 後方互換: 先頭のIDをmotivation_cast_idにも設定
+        ticket.motivation_cast_id = data.motivation_cast_ids[0] if data.motivation_cast_ids else None
 
     if data.table_no is not None or data.update_header:
         new_table_no = data.table_no or ticket.table_no

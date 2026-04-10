@@ -266,7 +266,8 @@ class Ticket(Base):
     set_paused_seconds = Column(Integer, default=0)
     drink_clears = Column(JSON, default=dict)  # {"castId_drinkType": cleared_at_iso}
     visit_motivation = Column(String(50), nullable=True)   # ティッシュ/SNS/LINE/紹介/Google/看板/電話
-    motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト
+    motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト（後方互換）
+    motivation_cast_ids = Column(JSON, nullable=True)  # 複数キャスト [cast_id, ...]
     motivation_note = Column(String(200), nullable=True)   # 紹介用テキスト
     featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）
     deleted_at = Column(DateTime, nullable=True)  # 論理削除タイムスタンプ

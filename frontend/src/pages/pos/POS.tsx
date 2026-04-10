@@ -739,7 +739,7 @@ export default function POS() {
       {showNewTicket && (
         <NewTicketModal
           storeId={selectedStoreId}
-          onSubmit={({ tableNo, guestCount, planType, visitType, visitMotivation, motivationCastId, motivationNote }) =>
+          onSubmit={({ tableNo, guestCount, planType, visitType, visitMotivation, motivationCastId, motivationCastIds, motivationNote }) =>
             createMutation.mutate({
               store_id: selectedStoreId,
               table_no: tableNo,
@@ -748,6 +748,7 @@ export default function POS() {
               visit_type: visitType,
               visit_motivation: visitMotivation,
               motivation_cast_id: motivationCastId,
+              motivation_cast_ids: motivationCastIds,
               motivation_note: motivationNote,
             })
           }
@@ -2130,7 +2131,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
             className="badge text-xs bg-teal-900/40 text-teal-400 hover:opacity-80"
           >
             {ticket.visit_motivation}
-            {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
+            {(ticket.motivation_cast_names?.length > 0 ? `／${ticket.motivation_cast_names.join('・')}` : ticket.motivation_cast_name ? `／${ticket.motivation_cast_name}` : '')}
             {ticket.motivation_note && `／${ticket.motivation_note}`}
           </button>
         )}
@@ -2393,7 +2394,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
   storeId: number
   onSubmit: (data: {
     tableNo: string; guestCount: number; planType: string; visitType: string
-    visitMotivation?: string; motivationCastId?: number | null; motivationNote?: string
+    visitMotivation?: string; motivationCastId?: number | null; motivationCastIds?: number[]; motivationNote?: string
   }) => void
   onClose: () => void
 }) {
@@ -2402,7 +2403,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
   const [planType, setPlanType] = useState('premium')
   const [visitType, setVisitType] = useState('N')
   const [motivation, setMotivation] = useState('')
-  const [motivationCastId, setMotivationCastId] = useState<number | null>(null)
+  const [motivationCastIds, setMotivationCastIds] = useState<number[]>([])
   const [motivationNote, setMotivationNote] = useState('')
 
   const { data: castsAll = [] } = useQuery({
@@ -2412,6 +2413,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
   const casts = (castsAll as any[]).filter((c: any) => c.is_active)
 
   const needsCast = MOTIVATION_CAST_REQUIRED.has(motivation)
+  const toggleCast = (id: number) => setMotivationCastIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const needsNote = motivation === '紹介'
 
   const row = "flex items-center gap-2"
@@ -2465,7 +2467,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
 
         <div className={row}>
           <span className={label}>来店動機</span>
-          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastId(null); setMotivationNote('') }}
+          <select value={motivation} onChange={e => { setMotivation(e.target.value); setMotivationCastIds([]); setMotivationNote('') }}
             className="input-field flex-1 text-sm py-1.5">
             <option value="">未選択</option>
             {MOTIVATION_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
@@ -2473,13 +2475,19 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
         </div>
 
         {needsCast && (
-          <div className={row}>
-            <span className={label}>キャスト</span>
-            <select value={motivationCastId ?? ''} onChange={e => setMotivationCastId(e.target.value ? Number(e.target.value) : null)}
-              className="input-field flex-1 text-sm py-1.5">
-              <option value="">選択してください</option>
-              {casts.map((c: any) => <option key={c.id} value={c.id}>{c.stage_name}</option>)}
-            </select>
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={label}>キャスト</span>
+              <span className="text-[10px] text-gray-500">複数選択可</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+              {casts.map((c: any) => (
+                <button key={c.id} onClick={() => toggleCast(c.id)}
+                  className={`text-xs px-2 py-1 rounded-lg transition-colors ${motivationCastIds.includes(c.id) ? 'bg-pink-700 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+                  {c.stage_name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -2497,7 +2505,8 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
           <button onClick={() => onSubmit({
             tableNo, guestCount, planType, visitType,
             visitMotivation: motivation || undefined,
-            motivationCastId: needsCast ? motivationCastId : null,
+            motivationCastId: needsCast ? (motivationCastIds[0] ?? null) : null,
+            motivationCastIds: needsCast && motivationCastIds.length > 0 ? motivationCastIds : undefined,
             motivationNote: needsNote ? motivationNote : undefined,
           })} className="btn-primary flex-1">開始</button>
         </div>
@@ -3456,7 +3465,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                         className={`badge text-xs bg-teal-900/40 text-teal-400 ${clickable ? 'hover:opacity-80' : ''}`}
                       >
                         {ticket.visit_motivation}
-                        {ticket.motivation_cast_name && `／${ticket.motivation_cast_name}`}
+                        {(ticket.motivation_cast_names?.length > 0 ? `／${ticket.motivation_cast_names.join('・')}` : ticket.motivation_cast_name ? `／${ticket.motivation_cast_name}` : '')}
                         {ticket.motivation_note && `／${ticket.motivation_note}`}
                       </button>
                     )}
