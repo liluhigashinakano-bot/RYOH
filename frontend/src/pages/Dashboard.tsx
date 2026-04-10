@@ -103,6 +103,91 @@ function WeatherWidget() {
   )
 }
 
+// 鉄道情報（終電テーブル + 運行情報リンク）
+const TRAIN_LINES = [
+  {
+    store: '東中野',
+    lines: [
+      { name: 'JR中央線', station: '東中野', lastTrains: [
+        { direction: '新宿方面', time: '0:36' },
+        { direction: '三鷹方面', time: '0:22' },
+      ], infoUrl: 'https://traininfo.jreast.co.jp/train_info/kanto.aspx' },
+      { name: '都営大江戸線', station: '東中野', lastTrains: [
+        { direction: '新宿方面', time: '0:07' },
+        { direction: '都庁前方面', time: '0:07' },
+      ], infoUrl: 'https://www.kotsu.metro.tokyo.jp/subway/schedule/' },
+    ],
+  },
+  {
+    store: '新中野',
+    lines: [
+      { name: '丸ノ内線', station: '新中野', lastTrains: [
+        { direction: '新宿・池袋方面', time: '0:12' },
+        { direction: '荻窪方面', time: '0:19' },
+      ], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+    ],
+  },
+  {
+    store: '方南町',
+    lines: [
+      { name: '丸ノ内線（支線）', station: '方南町', lastTrains: [
+        { direction: '中野坂上方面', time: '0:03' },
+      ], infoUrl: 'https://www.tokyometro.jp/unkou/index.html' },
+    ],
+  },
+]
+
+function TrainWidget() {
+  const now = new Date()
+  const h = now.getHours()
+  const m = now.getMinutes()
+  const nowMin = (h < 5 ? h + 24 : h) * 60 + m // 深夜は24時超え
+
+  const getRemaining = (timeStr: string) => {
+    const [th, tm] = timeStr.split(':').map(Number)
+    const targetMin = (th < 5 ? th + 24 : th) * 60 + tm
+    return targetMin - nowMin
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-800 overflow-hidden" style={{ backgroundColor: '#0f172a' }}>
+      <div className="px-3 py-2 border-b border-gray-800/60" style={{ backgroundColor: '#1e293b' }}>
+        <span className="text-sm font-bold text-white">🚃 鉄道情報</span>
+      </div>
+      <div className="px-3 py-2 space-y-2">
+        {TRAIN_LINES.map(area => (
+          <div key={area.store}>
+            <div className="text-[10px] text-gray-500 mb-0.5">{area.store}</div>
+            {area.lines.map(line => (
+              <div key={line.name} className="flex items-start gap-2 text-xs mb-1">
+                <a href={line.infoUrl} target="_blank" rel="noopener noreferrer"
+                  className="text-blue-400 hover:underline shrink-0 min-w-[90px]">{line.name}</a>
+                <div className="flex gap-2 flex-wrap">
+                  {line.lastTrains.map(lt => {
+                    const remaining = getRemaining(lt.time)
+                    const isUrgent = remaining >= 0 && remaining <= 30
+                    const isPast = remaining < 0
+                    return (
+                      <span key={lt.direction} className="text-gray-400">
+                        {lt.direction}
+                        <span className={`ml-1 font-mono ${isPast ? 'text-gray-600' : isUrgent ? 'text-red-400 font-bold' : 'text-gray-300'}`}>
+                          {lt.time}
+                        </span>
+                        {isUrgent && <span className="text-red-400 text-[10px] ml-0.5">あと{remaining}分</span>}
+                        {isPast && <span className="text-gray-600 text-[10px] ml-0.5">終了</span>}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { stores } = useAuthStore()
   const navigate = useNavigate()
@@ -150,8 +235,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* 天気予報 */}
-      <WeatherWidget />
+      {/* 天気予報 + 鉄道情報 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <WeatherWidget />
+        <TrainWidget />
+      </div>
 
       {/* 店舗一覧 */}
       <div className="space-y-2">
