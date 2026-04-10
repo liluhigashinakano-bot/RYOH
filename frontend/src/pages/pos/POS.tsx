@@ -1723,14 +1723,17 @@ function CrossTicketTimerContext({ tickets, children }: {
 }
 
 
-function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, currentCastIds }: {
+function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, currentCastIds, onCastRemove }: {
   lastDrinkTimes: any; now: number; ticketId?: number; onCleared?: () => void
   castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
   currentCastIds?: number[]
+  onCastRemove?: (castId: number) => void
 }) {
   const [confirming, setConfirming] = useState<string | null>(null) // key
   // key -> clearedAt (ms)。last_at がクリア時刻より新しければ再表示する
   const [clearedKeys, setClearedKeys] = useState<Map<string, number>>(new Map())
+  // 「✖」押して複数接客として残すキャスト
+  const [dismissedExpired, setDismissedExpired] = useState<Set<string>>(new Set())
 
   if (!lastDrinkTimes) return null
 
@@ -1752,11 +1755,16 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, 
 
   const handleClear = (e: { castId: number; drinkType: string; key: string }) => {
     if (!ticketId) return
-    // 即座にローカルで非表示（クリア時刻を記録）
     setClearedKeys(prev => new Map([...prev, [e.key, Date.now()]]))
     setConfirming(null)
     apiClient.post(`/api/tickets/${ticketId}/drink-clear`, { cast_id: e.castId, drink_type: e.drinkType })
       .then(() => onCleared?.())
+  }
+
+  // 「完了」= タイマー消す + 対応中から外す（交代）
+  const handleExpiredComplete = (e: { castId: number; drinkType: string; key: string }) => {
+    setClearedKeys(prev => new Map([...prev, [e.key, Date.now()]]))
+    if (onCastRemove && e.castId != null) onCastRemove(e.castId)
   }
 
   const isHidden = (e: { key: string; lastAt: string; castId: number }) => {
@@ -1777,16 +1785,34 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, 
     return false
   }
 
+  const visibleEntries = entries.filter(e => !isHidden(e))
+  // 複数キャストがいて、30分超えのキャストがいるか判定
+  const uniqueCastIds = new Set(visibleEntries.map(e => e.castId).filter(id => id != null))
+  const hasMultipleCasts = uniqueCastIds.size > 1
+
   return (
     <div className="flex gap-2 flex-wrap">
-      {entries.filter(e => !isHidden(e)).map(e => {
+      {visibleEntries.map(e => {
         const elapsed = calcElapsed(e.lastAt, now)
+        const elapsedMin = elapsed / 1000 / 60
+        const isExpired = hasMultipleCasts && elapsedMin >= 30 && !dismissedExpired.has(e.key)
+
         if (confirming === e.key) {
           return (
             <span key={e.key} className="flex items-center gap-1 text-xs">
               <span className={`${e.bg} ${e.color} px-1 rounded text-xs`}>{e.label}</span>
               <button onClick={() => handleClear(e)} className="text-green-400 font-bold px-1 hover:text-green-300">完了</button>
               <button onClick={() => setConfirming(null)} className="text-gray-500 px-1 hover:text-gray-300">×</button>
+            </span>
+          )
+        }
+        if (isExpired) {
+          return (
+            <span key={e.key} className="flex items-center gap-1 text-xs">
+              <span className={`${e.bg} ${e.color} px-1 rounded text-xs opacity-60`}>{e.label}</span>
+              <span className="text-gray-500 font-mono">{fmtTime(elapsed)}</span>
+              <button onClick={() => handleExpiredComplete(e)} className="text-green-400 font-bold px-0.5 hover:text-green-300 text-[10px]">完了</button>
+              <button onClick={() => setDismissedExpired(prev => new Set([...prev, e.key]))} className="text-gray-500 px-0.5 hover:text-gray-300 text-[10px]">✖</button>
             </span>
           )
         }
@@ -2149,7 +2175,13 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticket.id}
           castLatestMap={castLatestMap}
           currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
-          onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
+          onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }}
+          onCastRemove={(castId) => {
+            const remaining = (ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null && id !== castId)
+            apiClient.post(`/api/tickets/${ticket.id}/assignments/set`, { cast_ids: remaining }).then(() => {
+              qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+            })
+          }} />
       </div>
 
       {/* 注文明細 */}
@@ -3581,7 +3613,14 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticketId}
               castLatestMap={detailCastLatestMap}
               currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
-              onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }} />
+              onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }}
+              onCastRemove={(castId) => {
+                const remaining = (ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null && id !== castId)
+                apiClient.post(`/api/tickets/${ticketId}/assignments/set`, { cast_ids: remaining }).then(() => {
+                  qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+                  qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+                })
+              }} />
           )}
         </div>
 
