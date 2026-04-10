@@ -3918,11 +3918,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               </div>
 
               <div className="border-t border-night-700 pt-1.5">
-                <button onClick={fetchAI} disabled={loadingAI}
-                  className="flex items-center gap-1.5 text-primary-400 text-xs font-medium disabled:opacity-50">
-                  <Bot className="w-3.5 h-3.5" />
-                  {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
-                </button>
+                {(() => {
+                  const storeData = qc.getQueryData<any>(['store', storeId])
+                  const aiOff = storeData?.ai_advisor_enabled === false
+                  return (
+                    <button onClick={aiOff ? undefined : fetchAI} disabled={loadingAI || aiOff}
+                      className={`flex items-center gap-1.5 text-xs font-medium disabled:opacity-50 ${aiOff ? 'text-gray-600 cursor-not-allowed' : 'text-primary-400'}`}>
+                      <Bot className="w-3.5 h-3.5" />
+                      {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
+                    </button>
+                  )
+                })()}
                 {aiAdvice && (
                   <div className="mt-2 p-3 bg-primary-900/20 border border-primary-800/40 rounded-xl text-xs text-gray-300 whitespace-pre-wrap">{aiAdvice}</div>
                 )}
