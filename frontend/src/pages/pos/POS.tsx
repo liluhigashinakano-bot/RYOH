@@ -1728,7 +1728,8 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, 
     const lastAtMs = new Date(e.lastAt.endsWith('Z') ? e.lastAt : e.lastAt + 'Z').getTime()
     if (clearedAt !== undefined && lastAtMs <= clearedAt) return true
     // キャストがこの卓の対応中でなければ非表示（ティッシュ配り等で外れた場合）
-    if (currentCastIds && e.castId != null && !currentCastIds.includes(e.castId)) return true
+    // ただし対応中キャストが0人（未設定）の場合はフィルタしない
+    if (currentCastIds && currentCastIds.length > 0 && e.castId != null && !currentCastIds.includes(e.castId)) return true
     // 他の卓で同じキャストにより新しい注文があれば、こちらは隠す
     if (castLatestMap && e.castId != null) {
       const latest = castLatestMap[e.castId]
