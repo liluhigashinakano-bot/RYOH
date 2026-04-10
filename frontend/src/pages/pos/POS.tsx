@@ -5206,6 +5206,8 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
   })
   // 入力中の枚数
   const [tissueCounts, setTissueCounts] = useState<Record<number, string>>({})
+  // キャストアクションポップアップ
+  const [castActionTarget, setCastActionTarget] = useState<{ cast_id: number; cast_name: string; x: number; y: number } | null>(null)
 
   const completeTissue = (tdId: number) => {
     const v = parseInt(tissueCounts[tdId] || '0', 10)
@@ -5310,7 +5312,10 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                 const t = castToTicket[s.cast_id!]
                 return (
                   <button key={s.shift_id}
-                    onClick={() => onTicketClick(t.id)}
+                    onClick={(e) => {
+                      const rect = (e.target as HTMLElement).getBoundingClientRect()
+                      setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
+                    }}
                     className="text-left bg-pink-900/30 hover:bg-pink-900/50 border border-pink-800/50 rounded-lg p-2 transition-colors"
                   >
                     <div className="text-white text-sm font-medium">{s.cast_name}</div>
@@ -5325,12 +5330,16 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
             <div className="text-[10px] text-gray-500 mb-1">待機中（{idleCasts.length}名）</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {idleCasts.map((s: any) => (
-                <div key={s.shift_id}
-                  className="bg-night-700 rounded-lg p-2"
+                <button key={s.shift_id}
+                  onClick={(e) => {
+                    const rect = (e.target as HTMLElement).getBoundingClientRect()
+                    setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
+                  }}
+                  className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
                 >
                   <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
                   <div className="text-[10px] text-gray-500 mt-0.5">待機中</div>
-                </div>
+                </button>
               ))}
               {idleCasts.length === 0 && (
                 <div className="col-span-full text-[10px] text-gray-600 text-center py-2">待機中のキャストはいません</div>
@@ -5339,6 +5348,68 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
           </>
         )}
       </div>
+
+      {/* キャストアクションポップアップ */}
+      {castActionTarget && (
+        <div className="fixed inset-0 z-50" onClick={() => setCastActionTarget(null)}>
+          <div
+            className="absolute bg-night-800 border border-gray-700 rounded-xl shadow-2xl py-2 min-w-[180px] max-h-[60vh] overflow-y-auto"
+            style={{ left: Math.min(castActionTarget.x, window.innerWidth - 200), top: Math.min(castActionTarget.y, window.innerHeight - 300) }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-3 py-1 text-xs text-gray-400 border-b border-gray-700 mb-1">
+              {castActionTarget.cast_name} の割り当て
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await apiClient.post('/api/tissue/start', { store_id: storeId, cast_ids: [castActionTarget.cast_id] })
+                  qc.invalidateQueries({ queryKey: ['tissue-active', storeId] })
+                  qc.invalidateQueries({ queryKey: ['casts-working', storeId] })
+                  qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+                } catch (e: any) {
+                  alert(e?.response?.data?.detail || 'エラー')
+                }
+                setCastActionTarget(null)
+              }}
+              className="w-full text-left px-3 py-1.5 text-sm text-amber-400 hover:bg-amber-900/30 transition-colors"
+            >
+              🧻 ティッシュ配り
+            </button>
+            {tickets.length > 0 && (
+              <div className="border-t border-gray-700 mt-1 pt-1">
+                <div className="px-3 py-0.5 text-[10px] text-gray-500">卓に付ける</div>
+                {tickets.map((t: any) => (
+                  <button
+                    key={t.id}
+                    onClick={async () => {
+                      try {
+                        const currentIds = (t.current_casts || []).map((c: any) => c.cast_id).filter((id: number) => id !== castActionTarget.cast_id)
+                        currentIds.push(castActionTarget.cast_id)
+                        await apiClient.post(`/api/tickets/${t.id}/assignments/set`, { cast_ids: currentIds, assignment_type: 'jounai' })
+                        qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+                        qc.invalidateQueries({ queryKey: ['casts-working', storeId] })
+                        qc.invalidateQueries({ queryKey: ['tissue-active', storeId] })
+                      } catch (e: any) {
+                        alert(e?.response?.data?.detail || 'エラー')
+                      }
+                      setCastActionTarget(null)
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-white hover:bg-night-600 transition-colors flex items-center gap-2"
+                  >
+                    <span className="text-primary-400 font-bold w-8">{t.table_no}</span>
+                    <span className="text-gray-400 text-xs">
+                      {(t.current_casts || []).length > 0
+                        ? (t.current_casts || []).map((c: any) => c.cast_name).join('・')
+                        : '—'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
