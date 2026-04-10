@@ -292,19 +292,17 @@ def _build_advisor_context(db: Session, store_id: int) -> dict:
         models.Ticket.deleted_at.is_(None),
     ).all()
 
-    # 本日対応中(本日伝票に紐付くキャスト assignment 全員)を「出勤中」とみなす
-    today_ticket_ids = [t.id for t in db.query(models.Ticket.id).filter(
-        models.Ticket.store_id == store_id,
-        models.Ticket.started_at >= today_start,
-        models.Ticket.deleted_at.is_(None),
-    ).all()]
-
-    working_cast_ids = set()
-    if today_ticket_ids:
-        rows = db.query(models.CastAssignment.cast_id).filter(
-            models.CastAssignment.ticket_id.in_(today_ticket_ids)
-        ).distinct().all()
-        working_cast_ids = {r[0] for r in rows}
+    # 出勤中キャスト = ConfirmedShift ベースで取得（actual_start あり・actual_end なし）
+    working_shifts = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.date == today,
+        models.ConfirmedShift.actual_start.isnot(None),
+        models.ConfirmedShift.actual_end.is_(None),
+        models.ConfirmedShift.is_absent == False,
+    ).all()
+    working_cast_ids = {s.cast_id for s in working_shifts if s.cast_id is not None}
+    # ヘルプキャスト名(cast_id=None)も情報として保持
+    help_cast_names = [s.help_cast_name for s in working_shifts if s.cast_id is None and s.help_cast_name]
 
     # 出勤中キャストが現在対応中の卓数(未会計のみ)
     busy_count: dict[int, int] = {}
@@ -336,6 +334,18 @@ def _build_advisor_context(db: Session, store_id: int) -> dict:
                 "lifetime_mg_count": stats.get("drink_mg", 0),
                 "lifetime_champagne_count": stats.get("champagne", 0),
                 "lifetime_shot_cast_count": stats.get("shot_cast", 0),
+            })
+        # ヘルプキャスト(cast_id なし)も追加
+        for hname in help_cast_names:
+            casts_info.append({
+                "cast_id": None,
+                "stage_name": f"[ヘルプ]{hname}",
+                "rank": "ヘルプ",
+                "alcohol": "不明",
+                "busy_tables_now": 0,
+                "lifetime_mg_count": 0,
+                "lifetime_champagne_count": 0,
+                "lifetime_shot_cast_count": 0,
             })
 
     # 各営業中卓の情報

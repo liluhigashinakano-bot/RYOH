@@ -5237,7 +5237,10 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
 
   // 出勤中・接客なしのキャスト
   const workingCasts = (shifts as any[]).filter((s: any) => !s.is_absent && s.actual_start && !s.actual_end)
-  const idleCasts = workingCasts.filter((s: any) => s.cast_id !== null && !castToTicket[s.cast_id!] && !tissueCastIds.has(s.cast_id))
+  const idleCasts = workingCasts.filter((s: any) => {
+    if (s.cast_id === null) return !tissueCastIds.has(s.cast_id) // ヘルプキャスト(cast_id=null)は待機中に表示
+    return !castToTicket[s.cast_id] && !tissueCastIds.has(s.cast_id)
+  })
   const busyCasts = workingCasts.filter((s: any) => s.cast_id !== null && castToTicket[s.cast_id!])
 
   return (
