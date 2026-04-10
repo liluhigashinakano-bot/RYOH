@@ -146,7 +146,7 @@ def _generate_receipt_80mm(ticket: models.Ticket, store: models.Store, amounts: 
             y -= 8 * mm
 
         c.line(margin, y, width - margin, y)
-        y -= 5 * mm
+        y -= 8 * mm
 
         # 店舗情報
         c.setFont(JP_FONT, 22)
@@ -256,7 +256,7 @@ def _generate_receipt_a4(ticket: models.Ticket, store: models.Store, amounts: di
         y -= 14 * mm
 
     c.line(margin, y, width - margin, y)
-    y -= 8 * mm
+    y -= 14 * mm
 
     # 店舗情報
     c.setFont(JP_FONT, 28)
@@ -292,84 +292,88 @@ def _generate_receipt_a4(ticket: models.Ticket, store: models.Store, amounts: di
 # ─────────────────────────────────────────
 def _generate_estimate_80mm(ticket: models.Ticket, store: models.Store, amounts: dict, issued_at: datetime) -> bytes:
     width = 80 * mm
-    height = 250 * mm
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(width, height))
 
-    margin = 4 * mm
-    cx = width / 2
-    y = height - 8 * mm
+    def _draw_est(c: canvas.Canvas, height: float) -> float:
+        margin = 4 * mm
+        cx = width / 2
+        y = height - 8 * mm
 
-    _draw_centered(c, cx, y, store.receipt_name or store.name or "", size=12)
-    y -= 6 * mm
-    if store.address:
-        c.setFont(JP_FONT, 7)
-        _draw_centered(c, cx, y, store.address, size=7)
+        _draw_centered(c, cx, y, store.receipt_name or store.name or "", size=12)
+        y -= 6 * mm
+        if store.address:
+            c.setFont(JP_FONT, 7)
+            _draw_centered(c, cx, y, store.address, size=7)
+            y -= 4 * mm
+        if store.phone:
+            _draw_centered(c, cx, y, f"TEL: {store.phone}", size=7)
+            y -= 6 * mm
+
+        c.line(margin, y, width - margin, y)
+        y -= 5 * mm
+        _draw_centered(c, cx, y, "【概算伝票】", size=12)
+        y -= 7 * mm
+
+        c.setFont(JP_FONT, 8)
+        c.drawString(margin, y, f"卓番: {ticket.table_no or '-'}")
         y -= 4 * mm
-    if store.phone:
-        _draw_centered(c, cx, y, f"TEL: {store.phone}", size=7)
+        if ticket.started_at:
+            in_jst = ticket.started_at + timedelta(hours=9)
+            c.drawString(margin, y, f"入店: {in_jst.strftime('%H:%M')}")
+            y -= 4 * mm
+        c.drawString(margin, y, f"発行: {(issued_at + timedelta(hours=9)).strftime('%H:%M')}")
         y -= 6 * mm
 
-    c.line(margin, y, width - margin, y)
-    y -= 5 * mm
-    _draw_centered(c, cx, y, "【概算伝票】", size=12)
-    y -= 7 * mm
+        c.line(margin, y, width - margin, y)
+        y -= 5 * mm
 
-    c.setFont(JP_FONT, 8)
-    c.drawString(margin, y, f"卓番: {ticket.table_no or '-'}")
-    y -= 4 * mm
-    if ticket.started_at:
-        in_jst = ticket.started_at + timedelta(hours=9)
-        c.drawString(margin, y, f"入店: {in_jst.strftime('%H:%M')}")
+        c.setFont(JP_FONT, 8)
+        for item in (ticket.order_items or []):
+            if item.canceled_at:
+                continue
+            name = (item.item_name or item.item_type or '')[:18]
+            qty = item.quantity or 1
+            amt = item.amount or 0
+            c.drawString(margin, y, name)
+            c.drawRightString(width - margin, y, f"{qty}  ¥{amt:,}")
+            y -= 4 * mm
+
+        y -= 2 * mm
+        c.line(margin, y, width - margin, y)
+        y -= 5 * mm
+
+        c.setFont(JP_FONT, 9)
+        c.drawString(margin, y, "小計")
+        c.drawRightString(width - margin, y, f"¥{amounts['subtotal']:,}")
+        y -= 5 * mm
+        c.drawString(margin, y, "サービス料 10%")
+        c.drawRightString(width - margin, y, f"¥{amounts['service']:,}")
+        y -= 5 * mm
+        c.drawString(margin, y, "消費税 10%")
+        c.drawRightString(width - margin, y, f"¥{amounts['tax']:,}")
+        y -= 6 * mm
+        c.line(margin, y, width - margin, y)
+        y -= 6 * mm
+        c.setFont(JP_FONT, 14)
+        c.drawString(margin, y, "合計")
+        c.drawRightString(width - margin, y, f"¥{amounts['grand']:,}")
+        y -= 10 * mm
+
+        c.setFont(JP_FONT, 7)
+        _draw_centered(c, cx, y, "※これは概算伝票です", size=7)
         y -= 4 * mm
-    c.drawString(margin, y, f"発行: {(issued_at + timedelta(hours=9)).strftime('%H:%M')}")
-    y -= 6 * mm
+        _draw_centered(c, cx, y, "正式な領収書ではありません", size=7)
+        return y
 
-    c.line(margin, y, width - margin, y)
-    y -= 5 * mm
+    # 1パス: 高さ測定
+    tmp_buf = io.BytesIO()
+    tmp_c = canvas.Canvas(tmp_buf, pagesize=(width, 500 * mm))
+    final_y = _draw_est(tmp_c, 500 * mm)
+    content_height = (500 * mm - final_y) + 8 * mm
 
-    # 注文一覧
-    c.setFont(JP_FONT, 8)
-    for item in (ticket.order_items or []):
-        if item.canceled_at:
-            continue
-        name = (item.item_name or item.item_type or '')[:18]
-        qty = item.quantity or 1
-        amt = item.amount or 0
-        line = f"{name}"
-        c.drawString(margin, y, line)
-        c.drawRightString(width - margin, y, f"{qty}  ¥{amt:,}")
-        y -= 4 * mm
-        if y < 50 * mm:
-            break
-
-    y -= 2 * mm
-    c.line(margin, y, width - margin, y)
-    y -= 5 * mm
-
-    # 集計
-    c.setFont(JP_FONT, 9)
-    c.drawString(margin, y, "小計")
-    c.drawRightString(width - margin, y, f"¥{amounts['subtotal']:,}")
-    y -= 5 * mm
-    c.drawString(margin, y, "サービス料 10%")
-    c.drawRightString(width - margin, y, f"¥{amounts['service']:,}")
-    y -= 5 * mm
-    c.drawString(margin, y, "消費税 10%")
-    c.drawRightString(width - margin, y, f"¥{amounts['tax']:,}")
-    y -= 6 * mm
-    c.line(margin, y, width - margin, y)
-    y -= 6 * mm
-    c.setFont(JP_FONT, 14)
-    c.drawString(margin, y, "合計")
-    c.drawRightString(width - margin, y, f"¥{amounts['grand']:,}")
-    y -= 10 * mm
-
-    c.setFont(JP_FONT, 7)
-    _draw_centered(c, cx, y, "※これは概算伝票です", size=7)
-    y -= 4 * mm
-    _draw_centered(c, cx, y, "正式な領収書ではありません", size=7)
-
+    # 2パス: 正しい高さで描画
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(width, content_height))
+    _draw_est(c, content_height)
     c.showPage()
     c.save()
     return buf.getvalue()
