@@ -552,10 +552,30 @@ def add_order(
             {"cast_id": e.cast_id, "ratio": e.ratio} for e in data.cast_distribution
         ]
 
-    # キャスト指定ドリンク注文時はそのキャストの配り中を終了
+    # キャスト指定ドリンク注文時はそのキャストの配り中を終了 + 対応中に自動追加
     if data.cast_id is not None:
         from .tissue import end_active_tissue_for_cast
         end_active_tissue_for_cast(db, data.cast_id)
+        # この卓で対応中(ended_at=None)でなければ自動追加
+        already_assigned = db.query(models.CastAssignment).filter(
+            models.CastAssignment.ticket_id == ticket_id,
+            models.CastAssignment.cast_id == data.cast_id,
+            models.CastAssignment.ended_at.is_(None),
+        ).first()
+        if not already_assigned:
+            # 他の卓で対応中なら終了させる
+            other_active = db.query(models.CastAssignment).filter(
+                models.CastAssignment.cast_id == data.cast_id,
+                models.CastAssignment.ended_at.is_(None),
+                models.CastAssignment.ticket_id != ticket_id,
+            ).all()
+            for oa in other_active:
+                oa.ended_at = datetime.utcnow()
+            db.add(models.CastAssignment(
+                ticket_id=ticket_id,
+                cast_id=data.cast_id,
+                assignment_type=models.AssignmentType.jounai,
+            ))
 
     # 常に新規レコードを作成（個別タイムスタンプ保持のため）
     item = models.OrderItem(
