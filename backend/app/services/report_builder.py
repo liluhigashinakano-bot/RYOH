@@ -491,6 +491,74 @@ def _extract_expenses(session: models.BusinessSession) -> dict:
 
 VERSION = 1
 
+# 店舗座標
+_STORE_COORDS: Dict[str, tuple] = {
+    "higashinakano": (35.7075, 139.6782),
+    "shinnakano": (35.6975, 139.6615),
+    "honancho": (35.6835, 139.6480),
+}
+
+WMO_LABELS = {
+    0: "快晴", 1: "晴れ", 2: "曇時々晴", 3: "曇り",
+    45: "霧", 48: "霧氷", 51: "弱霧雨", 53: "霧雨", 55: "強霧雨",
+    61: "弱雨", 63: "雨", 65: "強雨", 71: "弱雪", 73: "雪", 75: "強雪",
+    80: "にわか雨", 81: "にわか雨", 82: "激雨", 95: "雷雨", 96: "雷雨", 99: "激雷雨",
+}
+
+
+def _fetch_weather_snapshot(store: Optional[models.Store], business_date: date) -> list:
+    """Open-Meteo APIから19時〜29時(翌5時)の1時間ごとの天気を取得"""
+    if not store:
+        return []
+    coords = _STORE_COORDS.get(store.code)
+    if not coords:
+        return []
+    try:
+        import httpx
+        r = httpx.get("https://api.open-meteo.com/v1/forecast", params={
+            "latitude": coords[0], "longitude": coords[1],
+            "hourly": "temperature_2m,weathercode,windspeed_10m,precipitation_probability",
+            "timezone": "Asia/Tokyo",
+            "start_date": business_date.isoformat(),
+            "end_date": (business_date + timedelta(days=1)).isoformat(),
+        }, timeout=10)
+        data = r.json()
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        result = []
+        for i, t in enumerate(times):
+            h = int(t[11:13])
+            d = t[:10]
+            # 当日19-23時 or 翌日0-5時
+            is_biz_day = d == business_date.isoformat() and h >= 19
+            is_next_day = d == (business_date + timedelta(days=1)).isoformat() and h <= 5
+            if not (is_biz_day or is_next_day):
+                continue
+            disp_hour = h if is_biz_day else h + 24
+            code = hourly.get("weathercode", [])[i] if i < len(hourly.get("weathercode", [])) else 0
+            result.append({
+                "hour": disp_hour,
+                "temp": round(hourly.get("temperature_2m", [])[i]) if i < len(hourly.get("temperature_2m", [])) else None,
+                "weather": WMO_LABELS.get(code, "不明"),
+                "weather_code": code,
+                "wind": round(hourly.get("windspeed_10m", [])[i]) if i < len(hourly.get("windspeed_10m", [])) else None,
+                "rain_prob": hourly.get("precipitation_probability", [])[i] if i < len(hourly.get("precipitation_probability", [])) else None,
+            })
+        return result
+    except Exception as e:
+        print(f"[REPORT] Weather fetch error: {e}")
+        return []
+
+
+def _fetch_train_snapshot() -> list:
+    """Yahoo路線情報から運行状況を取得（train_info ルーターと同じロジック）"""
+    try:
+        from ..routers.train_info import _scrape_yahoo_train_info
+        return _scrape_yahoo_train_info()
+    except Exception as e:
+        print(f"[REPORT] Train fetch error: {e}")
+        return []
+
 
 def build_daily_report_payload(
     db: Session,
@@ -825,6 +893,10 @@ def build_daily_report_payload(
             "daily_pay": pay,
         })
 
+    # 天気 + 鉄道運行情報スナップショット
+    weather_hourly = _fetch_weather_snapshot(store, business_date)
+    train_status = _fetch_train_snapshot()
+
     return {
         "version": VERSION,
         "store_id": session.store_id,
@@ -839,6 +911,8 @@ def build_daily_report_payload(
         "cast_attendance": cast_blocks,
         "staff_attendance": staff_blocks,
         "custom_drink_columns": custom_drink_columns,
+        "weather_hourly": weather_hourly,
+        "train_status": train_status,
     }
 
 

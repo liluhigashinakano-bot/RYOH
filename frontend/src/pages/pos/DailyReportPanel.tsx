@@ -385,6 +385,66 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
           </div>
         </div>
       )}
+
+      {/* 天気・鉄道運行情報 */}
+      {((p.weather_hourly && p.weather_hourly.length > 0) || (p.train_status && p.train_status.length > 0)) && (
+        <div className="card">
+          <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">天気・鉄道運行情報</div>
+          {p.weather_hourly && p.weather_hourly.length > 0 && (
+            <div className="overflow-x-auto mb-2">
+              <table className="text-[10px] w-full">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="py-0.5 px-1">時間</th>
+                    {p.weather_hourly.map((w: any) => (
+                      <th key={w.hour} className="py-0.5 px-1 text-center">{w.hour}時</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="text-gray-500 py-0.5 px-1">天気</td>
+                    {p.weather_hourly.map((w: any) => (
+                      <td key={w.hour} className="text-center py-0.5 px-1 text-gray-300">{w.weather}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="text-gray-500 py-0.5 px-1">気温</td>
+                    {p.weather_hourly.map((w: any) => (
+                      <td key={w.hour} className="text-center py-0.5 px-1 text-white">{w.temp}°</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="text-gray-500 py-0.5 px-1">風速</td>
+                    {p.weather_hourly.map((w: any) => (
+                      <td key={w.hour} className="text-center py-0.5 px-1 text-gray-400">{w.wind}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="text-gray-500 py-0.5 px-1">降水%</td>
+                    {p.weather_hourly.map((w: any) => (
+                      <td key={w.hour} className={`text-center py-0.5 px-1 ${(w.rain_prob ?? 0) >= 40 ? 'text-blue-400' : 'text-gray-600'}`}>{w.rain_prob ?? '-'}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          {p.train_status && p.train_status.length > 0 && (
+            <div className="flex items-center gap-3 flex-wrap text-[10px]">
+              {p.train_status.map((t: any, i: number) => (
+                <span key={i} className="flex items-center gap-1">
+                  <span className="text-gray-400">🚃{t.line}</span>
+                  <span className={t.status === 'normal' ? 'text-green-400' : t.status === 'delay' ? 'text-yellow-400' : 'text-red-400'}>
+                    {t.status_text}
+                  </span>
+                  {t.detail && t.status !== 'normal' && <span className="text-gray-500">{t.detail}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
