@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
@@ -13,6 +13,17 @@ from ..services.incentive import (
 )
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
+
+
+def _to_bar_time(utc_dt: Optional[datetime]) -> str:
+    """UTC datetime をバー時間表記(JST, 深夜は24:xx)に変換"""
+    if not utc_dt:
+        return "?"
+    jst = utc_dt + timedelta(hours=9)
+    h = jst.hour
+    if h < 6:
+        h += 24
+    return f"{h}:{jst.strftime('%M')}"
 
 CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne", "custom_menu"}
 
@@ -1162,7 +1173,7 @@ def patch_ticket(
             ticket_id=ticket_id,
             order_item_id=None,
             action='change_start_time',
-            item_name=f"入店時間変更: {old_started_at.strftime('%H:%M') if old_started_at else '?'} → {new_started_at.strftime('%H:%M')}",
+            item_name=f"入店時間変更: {_to_bar_time(old_started_at)} → {_to_bar_time(new_started_at)}",
             changed_by=current_user.id,
             operator_name=data.operator_name,
             reason=data.reason,
