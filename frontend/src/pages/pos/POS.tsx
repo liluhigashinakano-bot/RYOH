@@ -3536,6 +3536,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 </>
               )}
               <p className="text-xl font-bold text-primary-400 ml-2">¥{grandTotal.toLocaleString()}</p>
+              {ticket.customer_id && (
+                <button onClick={() => setShowNextVisitModal(true)}
+                  className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 bg-teal-900/40 hover:bg-teal-800/50 border border-teal-700/50 rounded-lg px-2 py-1 transition-colors">
+                  📅 来店予定
+                </button>
+              )}
               <button
                 onClick={() => setShowLog(true)}
                 className="flex items-center gap-1 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-500 rounded-lg px-2 py-1 transition-colors"
@@ -3609,17 +3615,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               ) : null
             })()}
 
-            {/* 次回来店予定ボタン */}
-            {ticket.customer_id && (
-              <button onClick={() => setShowNextVisitModal(true)}
-                className="text-xs px-2 py-1 bg-teal-800/50 hover:bg-teal-700/60 text-teal-300 rounded-lg transition-colors ml-auto shrink-0">
-                📅 次回来店予定
-              </button>
-            )}
-
             {/* セットタイマー（オープン中のみ） */}
             {!isClosed && (
-              <div className={`flex items-center gap-2 ${!ticket.customer_id ? 'ml-auto' : ''}`}>
+              <div className="flex items-center gap-2 ml-auto">
                 {!ticket.set_started_at ? (
                   (detailStoreInfo as any)?.manual_set_start !== false ? (
                     <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
