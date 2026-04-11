@@ -670,6 +670,18 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
     _type_order = {"staff": 0, "part_time": 1}
     staff_summary.sort(key=lambda x: (_type_order.get(x.get("employee_type") or "", 9), -x["work_hours_total"]))
 
+    # 月次利益率
+    monthly_total_cost = 0
+    daily_profit_rates = []
+    for p in payloads:
+        cb = p.get("cost_breakdown")
+        if cb:
+            monthly_total_cost += int(cb.get("total_cost") or 0)
+        pr = p.get("profit_rate")
+        if pr is not None:
+            daily_profit_rates.append(pr)
+    monthly_profit_rate = round(monthly_total_cost / sums["total_amount"] * 100, 1) if sums["total_amount"] > 0 else None
+
     return {
         **sums,
         "motivation": dict(motivation),
@@ -687,6 +699,8 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         "staff_summary": staff_summary,
         "custom_drinks_total": dict(custom_drinks_total),
         "custom_drink_columns": custom_drink_columns_latest,
+        "profit_rate": monthly_profit_rate,
+        "total_cost": monthly_total_cost,
     }
 
 

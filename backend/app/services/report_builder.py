@@ -893,6 +893,21 @@ def build_daily_report_payload(
             "daily_pay": pay,
         })
 
+    # ─── 利益率計算 ───
+    alcohol_exp = int(expenses.get("alcohol") or 0)
+    other_exp = int(expenses.get("other") or 0)
+    cast_labor = cast_payroll_block.get("total_base_pay", 0)
+    # 社員人件費: 出勤社員数 × 14,000円
+    staff_count = sum(1 for a in staff_atts if a.employee_type == "社員" and a.actual_start_jst and not a.is_absent)
+    staff_labor = staff_count * 14000
+    # アルバイト人件費
+    part_time_labor = sum(
+        rc.staff_daily_pay(a, has_payment_record=a.name in expenses["daily_pay_names"])
+        for a in staff_atts if a.employee_type == "アルバイト" and a.actual_start_jst and not a.is_absent
+    )
+    total_cost = alcohol_exp + other_exp + cast_labor + staff_labor + part_time_labor
+    profit_rate = round((total_cost / daily_sales * 100), 1) if daily_sales > 0 else None
+
     # 天気 + 鉄道運行情報スナップショット
     weather_hourly = _fetch_weather_snapshot(store, business_date)
     train_status = _fetch_train_snapshot()
@@ -913,6 +928,16 @@ def build_daily_report_payload(
         "custom_drink_columns": custom_drink_columns,
         "weather_hourly": weather_hourly,
         "train_status": train_status,
+        "profit_rate": profit_rate,
+        "cost_breakdown": {
+            "alcohol_expense": alcohol_exp,
+            "other_expense": other_exp,
+            "cast_labor": cast_labor,
+            "staff_labor": staff_labor,
+            "staff_count": staff_count,
+            "part_time_labor": part_time_labor,
+            "total_cost": total_cost,
+        },
     }
 
 

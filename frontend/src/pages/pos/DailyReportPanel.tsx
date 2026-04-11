@@ -124,6 +124,25 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
         </div>
       </div>
 
+      {/* 利益率 */}
+      {p.profit_rate != null && (
+        <div className="card">
+          <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">コスト・利益率</div>
+          <div className="grid grid-cols-3 gap-2">
+            <StatBox label="利益率" value={`${p.profit_rate}%`} accent={p.profit_rate <= 50 ? 'green' : p.profit_rate <= 70 ? 'yellow' : 'pink'} />
+            <StatBox label="総コスト" value={fmtYen(p.cost_breakdown?.total_cost)} />
+            <StatBox label="売上" value={fmtYen(sales.total_amount)} accent="green" />
+          </div>
+          <div className="flex flex-wrap gap-3 text-[10px] text-gray-500 mt-2">
+            <span>酒類経費 {fmtYen(p.cost_breakdown?.alcohol_expense)}</span>
+            <span>その他経費 {fmtYen(p.cost_breakdown?.other_expense)}</span>
+            <span>キャスト人件費 {fmtYen(p.cost_breakdown?.cast_labor)}</span>
+            <span>社員人件費 {fmtYen(p.cost_breakdown?.staff_labor)} ({p.cost_breakdown?.staff_count}名×¥14,000)</span>
+            <span>アルバイト人件費 {fmtYen(p.cost_breakdown?.part_time_labor)}</span>
+          </div>
+        </div>
+      )}
+
       {/* ドリンク・シャンパン */}
       <div className="card">
         <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">ドリンク・シャンパン</div>
