@@ -33,6 +33,7 @@ class StoreUpdate(BaseModel):
     receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
     ai_advisor_enabled: Optional[bool] = None
+    manual_set_start: Optional[bool] = None
     is_active: Optional[bool] = None
     open_time: Optional[str] = None   # "19:00"
     close_time: Optional[str] = None  # "29:00"
@@ -51,6 +52,7 @@ class StoreResponse(BaseModel):
     receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
     ai_advisor_enabled: Optional[bool] = True
+    manual_set_start: Optional[bool] = True
     is_active: bool
     open_time: Optional[str] = None
     close_time: Optional[str] = None

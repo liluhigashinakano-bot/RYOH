@@ -78,6 +78,7 @@ class Store(Base):
     receipt_name = Column(String(100), nullable=True)    # 領収書用店舗名（空ならnameを使用）
     receipt_footer = Column(Text, nullable=True)         # 領収書フッター
     ai_advisor_enabled = Column(Boolean, default=True)   # 付け回しAIアドバイス ON/OFF
+    manual_set_start = Column(Boolean, default=True)     # 伝票開始ボタン ON=手動 / OFF=自動開始
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

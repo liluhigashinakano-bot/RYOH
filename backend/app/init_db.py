@@ -50,6 +50,7 @@ def _run_migrations(engine):
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS period_no INTEGER",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_name VARCHAR(100)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS ai_advisor_enabled BOOLEAN DEFAULT true",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS manual_set_start BOOLEAN DEFAULT true",
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS motivation_cast_ids JSON",
         # Cast: 体入ステータス
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS taiken_status VARCHAR(20)",

@@ -447,6 +447,10 @@ def create_ticket(
     )
 
     db.add(ticket)
+    # manual_set_start=False の場合、作成と同時にセット開始
+    if store.manual_set_start is False:
+        ticket.set_started_at = ticket.started_at
+
     db.commit()
     db.refresh(ticket)
 
