@@ -12,7 +12,7 @@ export default function CustomerDetail() {
   const [aiLoading, setAiLoading] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [activeTab, setActiveTab] = useState<'info' | 'notes' | 'history'>('info')
+  const [activeTab, setActiveTab] = useState<'info' | 'notes' | 'history' | 'cast_stats'>('info')
   const photoRef = useRef<HTMLInputElement>(null)
   const [showMergeSearch, setShowMergeSearch] = useState(false)
   const [mergeQuery, setMergeQuery] = useState('')
@@ -264,7 +264,7 @@ export default function CustomerDetail() {
 
       {/* タブ */}
       <div className="flex gap-2 border-b border-gray-700 pb-0">
-        {(['info', 'notes', 'history'] as const).map(tab => (
+        {(['info', 'notes', 'history', 'cast_stats'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -272,7 +272,7 @@ export default function CustomerDetail() {
               activeTab === tab ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {tab === 'info' ? '詳細情報' : tab === 'notes' ? `メモ(${notes.length})` : '来店履歴'}
+            {tab === 'info' ? '詳細情報' : tab === 'notes' ? `メモ(${notes.length})` : tab === 'visits' ? '来店履歴' : 'キャスト実績'}
           </button>
         ))}
       </div>
@@ -428,6 +428,10 @@ export default function CustomerDetail() {
 
       {activeTab === 'history' && (
         <VisitHistoryTab customerId={Number(id)} formatInTime={formatInTime} />
+      )}
+
+      {activeTab === 'cast_stats' && (
+        <CastStatsTab customerId={Number(id)} />
       )}
 
       {/* 編集モーダル */}
@@ -608,7 +612,6 @@ function VisitHistoryTab({ customerId, formatInTime }: { customerId: number; for
         const rawEntries = Object.entries(v.raw_data || {}).filter(([, val]) => val !== null && val !== '' && val !== 'None')
         return (
           <div key={v.id} className="card space-y-2">
-            {/* 行ヘッダー */}
             <button
               onClick={() => setExpanded(isOpen ? null : v.id)}
               className="w-full text-left flex items-center justify-between gap-2"
@@ -640,6 +643,53 @@ function VisitHistoryTab({ customerId, formatInTime }: { customerId: number; for
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function CastStatsTab({ customerId }: { customerId: number }) {
+  const { data: stats = [], isLoading } = useQuery({
+    queryKey: ['customer-cast-stats', customerId],
+    queryFn: () => apiClient.get(`/api/customers/${customerId}/cast-stats`).then(r => r.data),
+  })
+
+  if (isLoading) return <div className="text-gray-500 text-sm text-center py-8">読み込み中...</div>
+  if ((stats as any[]).length === 0) return (
+    <div className="card text-gray-500 text-sm text-center py-8">キャスト実績データがありません</div>
+  )
+
+  return (
+    <div className="card overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-gray-500 border-b border-gray-700">
+            <th className="text-left py-1.5 px-2">キャスト</th>
+            <th className="text-center py-1.5 px-1">対応回数</th>
+            <th className="text-center py-1.5 px-1">S</th>
+            <th className="text-center py-1.5 px-1">L</th>
+            <th className="text-center py-1.5 px-1">MG</th>
+            <th className="text-center py-1.5 px-1">ショット</th>
+            <th className="text-center py-1.5 px-1">シャンパン</th>
+            <th className="text-right py-1.5 px-2">シャンパン額</th>
+            <th className="text-right py-1.5 px-2">合計額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(stats as any[]).map((s: any) => (
+            <tr key={s.cast_id} className="border-t border-gray-800 hover:bg-gray-800/50">
+              <td className="py-1.5 px-2 text-white font-medium">{s.cast_name}</td>
+              <td className="text-center py-1.5 px-1 text-gray-400">{s.assign_count}</td>
+              <td className="text-center py-1.5 px-1 text-gray-300">{s.drink_s || '—'}</td>
+              <td className="text-center py-1.5 px-1 text-gray-300">{s.drink_l || '—'}</td>
+              <td className="text-center py-1.5 px-1 text-gray-300">{s.drink_mg || '—'}</td>
+              <td className="text-center py-1.5 px-1 text-gray-300">{s.shot_cast || '—'}</td>
+              <td className="text-center py-1.5 px-1 text-yellow-400">{s.champagne_count || '—'}</td>
+              <td className="text-right py-1.5 px-2 text-yellow-400">{s.champagne_amount > 0 ? `¥${s.champagne_amount.toLocaleString()}` : '—'}</td>
+              <td className="text-right py-1.5 px-2 text-green-400">¥{s.total_amount.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

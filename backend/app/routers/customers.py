@@ -565,3 +565,83 @@ def get_upcoming_birthdays(
 
     result.sort(key=lambda x: x["days_until"])
     return result
+
+
+@router.get("/{customer_id}/cast-stats")
+def get_customer_cast_stats(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """顧客×キャスト別の注文集計（S/L/MG/ショット/シャンパン等）"""
+    from sqlalchemy import func
+    from collections import defaultdict
+
+    # この顧客の全伝票ID
+    ticket_ids = [r[0] for r in db.query(models.Ticket.id).filter(
+        models.Ticket.customer_id == customer_id,
+        models.Ticket.deleted_at.is_(None),
+    ).all()]
+    if not ticket_ids:
+        return []
+
+    # キャスト別×アイテムタイプ別の集計
+    rows = db.query(
+        models.OrderItem.cast_id,
+        models.OrderItem.item_type,
+        func.sum(models.OrderItem.quantity),
+        func.sum(models.OrderItem.amount),
+    ).filter(
+        models.OrderItem.ticket_id.in_(ticket_ids),
+        models.OrderItem.cast_id.isnot(None),
+        models.OrderItem.canceled_at.is_(None),
+    ).group_by(
+        models.OrderItem.cast_id,
+        models.OrderItem.item_type,
+    ).all()
+
+    # cast_id → { item_type: { qty, amount } }
+    cast_data: dict = defaultdict(lambda: defaultdict(lambda: {"qty": 0, "amount": 0}))
+    cast_ids_set = set()
+    for cast_id, item_type, qty, amount in rows:
+        cast_data[cast_id][item_type]["qty"] += int(qty or 0)
+        cast_data[cast_id][item_type]["amount"] += int(amount or 0)
+        cast_ids_set.add(cast_id)
+
+    # 来店回数(このキャストがassignmentで付いた回数)
+    assign_counts = {}
+    if cast_ids_set:
+        assign_rows = db.query(
+            models.CastAssignment.cast_id,
+            func.count(func.distinct(models.CastAssignment.ticket_id)),
+        ).filter(
+            models.CastAssignment.ticket_id.in_(ticket_ids),
+            models.CastAssignment.cast_id.in_(cast_ids_set),
+        ).group_by(models.CastAssignment.cast_id).all()
+        assign_counts = {r[0]: int(r[1]) for r in assign_rows}
+
+    # キャスト名取得
+    cast_names = {}
+    if cast_ids_set:
+        for c in db.query(models.Cast).filter(models.Cast.id.in_(cast_ids_set)).all():
+            cast_names[c.id] = c.stage_name
+
+    result = []
+    for cid in sorted(cast_ids_set):
+        d = cast_data[cid]
+        result.append({
+            "cast_id": cid,
+            "cast_name": cast_names.get(cid, f"ID{cid}"),
+            "assign_count": assign_counts.get(cid, 0),
+            "drink_s": d.get("drink_s", {}).get("qty", 0),
+            "drink_l": d.get("drink_l", {}).get("qty", 0),
+            "drink_mg": d.get("drink_mg", {}).get("qty", 0),
+            "shot_cast": d.get("shot_cast", {}).get("qty", 0),
+            "champagne_count": d.get("champagne", {}).get("qty", 0),
+            "champagne_amount": d.get("champagne", {}).get("amount", 0),
+            "total_amount": sum(v["amount"] for v in d.values()),
+        })
+
+    # 合計金額順に並べ替え
+    result.sort(key=lambda x: -x["total_amount"])
+    return result
