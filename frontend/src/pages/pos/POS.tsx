@@ -3431,8 +3431,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const grandTotal = Math.round(subtotal * 1.21) - senkaikeiTotal
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4">
-      <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-4xl h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-2 sm:p-4" onClick={onClose}>
+      <div className="bg-night-800 border border-night-600 rounded-2xl w-full max-w-4xl h-[92vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
         {/* ヘッダー */}
         <div className="px-4 py-3 border-b border-night-600 shrink-0 space-y-2">

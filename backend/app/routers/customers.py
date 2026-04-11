@@ -10,6 +10,7 @@ from datetime import date
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
+from ..utils.kana import to_halfwidth_katakana
 
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "uploads", "customers")
 
@@ -268,10 +269,12 @@ def get_customers(
     if store_id:
         query = query.filter(models.Customer.store_id == store_id)
     if q:
+        q_half = to_halfwidth_katakana(q)
         query = query.filter(
             or_(
-                models.Customer.name.contains(q),
+                models.Customer.name.contains(q_half),
                 models.Customer.alias.contains(q),
+                models.Customer.alias.contains(q_half),
             )
         )
     customers = query.order_by(models.Customer.last_visit_date.desc()).all()
@@ -285,7 +288,9 @@ def create_customer(
     current_user: models.User = Depends(get_current_user),
 ):
     store_id = current_user.store_id or 1
-    customer = models.Customer(**data.model_dump(), store_id=store_id)
+    cdata = data.model_dump()
+    cdata["name"] = to_halfwidth_katakana(cdata["name"])
+    customer = models.Customer(**cdata, store_id=store_id)
     db.add(customer)
     db.flush()
     customer.customer_code = generate_customer_code(db, store_id)
@@ -317,6 +322,8 @@ def update_customer(
     if not customer:
         raise HTTPException(status_code=404, detail="顧客が見つかりません")
     for field, value in data.model_dump(exclude_none=True).items():
+        if field == "name":
+            value = to_halfwidth_katakana(value)
         setattr(customer, field, value)
     db.commit()
     db.refresh(customer)
@@ -645,3 +652,20 @@ def get_customer_cast_stats(
     # 合計金額順に並べ替え
     result.sort(key=lambda x: -x["total_amount"])
     return result
+
+
+@router.post("/normalize-names")
+def normalize_customer_names(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """既存顧客名をすべて半角カタカナに正規化する（1回実行用）"""
+    customers = db.query(models.Customer).all()
+    count = 0
+    for c in customers:
+        new_name = to_halfwidth_katakana(c.name)
+        if new_name != c.name:
+            c.name = new_name
+            count += 1
+    db.commit()
+    return {"message": f"{count}件の顧客名を正規化しました"}
