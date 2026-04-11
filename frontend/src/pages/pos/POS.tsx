@@ -3535,7 +3535,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   </button>
                 </>
               )}
-              <p className="text-xl font-bold text-primary-400 ml-2">¥{grandTotal.toLocaleString()}</p>
               {ticket.customer_id && (
                 <button onClick={() => setShowNextVisitModal(true)}
                   className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 bg-teal-900/40 hover:bg-teal-800/50 border border-teal-700/50 rounded-lg px-2 py-1 transition-colors">
