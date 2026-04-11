@@ -29,11 +29,12 @@ function fmtTime(iso: string | null | undefined): string {
   return `${display.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`
 }
 
-function StatBox({ label, value, accent }: { label: string; value: string; accent?: 'green' | 'pink' | 'blue' }) {
+function StatBox({ label, value, accent }: { label: string; value: string; accent?: 'green' | 'pink' | 'blue' | 'yellow' }) {
   const color =
     accent === 'green' ? 'text-green-400' :
     accent === 'pink' ? 'text-pink-400' :
     accent === 'blue' ? 'text-blue-400' :
+    accent === 'yellow' ? 'text-yellow-400' :
     'text-white'
   return (
     <div className="bg-gray-800 rounded-lg px-3 py-2">

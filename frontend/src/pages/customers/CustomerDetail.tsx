@@ -272,7 +272,7 @@ export default function CustomerDetail() {
               activeTab === tab ? 'bg-gray-800 text-white' : 'text-gray-500 hover:text-gray-300'
             }`}
           >
-            {tab === 'info' ? '詳細情報' : tab === 'notes' ? `メモ(${notes.length})` : tab === 'visits' ? '来店履歴' : 'キャスト実績'}
+            {tab === 'info' ? '詳細情報' : tab === 'notes' ? `メモ(${notes.length})` : tab === 'history' ? '来店履歴' : 'キャスト実績'}
           </button>
         ))}
       </div>
