@@ -379,7 +379,7 @@ export default function POS() {
   const extensionPrice: number = storeInfo?.extension_price || 2700
 
   const createMutation = useMutation({
-    mutationFn: (data: { store_id: number; table_no: string; guest_count: number; plan_type: string; visit_type: string; visit_motivation?: string; motivation_cast_id?: number | null; motivation_note?: string }) =>
+    mutationFn: (data: { store_id: number; table_no?: string; guest_count: number; plan_type: string; visit_type: string; visit_motivation?: string; motivation_cast_id?: number | null; motivation_cast_ids?: number[]; motivation_note?: string }) =>
       apiClient.post('/api/tickets', data).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId] })
@@ -739,17 +739,17 @@ export default function POS() {
       {showNewTicket && (
         <NewTicketModal
           storeId={selectedStoreId}
-          onSubmit={({ tableNo, guestCount, planType, visitType, visitMotivation, motivationCastId, motivationCastIds, motivationNote }) =>
+          onSubmit={(d) =>
             createMutation.mutate({
               store_id: selectedStoreId,
-              table_no: tableNo,
-              guest_count: guestCount,
-              plan_type: planType,
-              visit_type: visitType,
-              visit_motivation: visitMotivation,
-              motivation_cast_id: motivationCastId,
-              motivation_cast_ids: motivationCastIds,
-              motivation_note: motivationNote,
+              table_no: d.tableNo,
+              guest_count: d.guestCount,
+              plan_type: d.planType,
+              visit_type: d.visitType,
+              visit_motivation: d.visitMotivation,
+              motivation_cast_id: d.motivationCastId,
+              motivation_cast_ids: d.motivationCastIds,
+              motivation_note: d.motivationNote,
             })
           }
           onClose={() => setShowNewTicket(false)}
@@ -3108,6 +3108,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [headerEditError, setHeaderEditError] = useState('')
 
   const confirmCheckout = (fn: () => void) => setPendingAction(() => fn)
+
+  const { data: detailAttendance = [] } = useQuery({
+    queryKey: ['attendance', storeId],
+    queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
+    staleTime: 30000,
+  })
+  const workingCastsForHeader = (detailAttendance as any[]).filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketId],
