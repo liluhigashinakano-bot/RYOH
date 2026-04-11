@@ -632,3 +632,25 @@ class ReceiptIssuance(Base):
 
     ticket = relationship("Ticket")
     store = relationship("Store")
+
+
+# ─────────────────────────────────────────
+# 来店予定
+# ─────────────────────────────────────────
+class NextVisit(Base):
+    __tablename__ = "next_visits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+    visit_date = Column(Date, nullable=False, index=True)
+    visit_time = Column(String(10), nullable=True)  # "20:00" or null(未定)
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)
+    note = Column(Text, nullable=True)
+    is_done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    customer = relationship("Customer")
+    cast = relationship("Cast")
+    store = relationship("Store")

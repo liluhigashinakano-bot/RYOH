@@ -378,6 +378,14 @@ export default function POS() {
   })
   const extensionPrice: number = storeInfo?.extension_price || 2700
 
+  // 本日の来店予定（JST日付）
+  const todayJst = (() => { const d = new Date(Date.now() + 9 * 3600 * 1000); return d.toISOString().slice(0, 10) })()
+  const { data: todayNextVisits = [] } = useQuery({
+    queryKey: ['next-visits', selectedStoreId, todayJst],
+    queryFn: () => apiClient.get('/api/next-visits', { params: { store_id: selectedStoreId, visit_date: todayJst } }).then(r => r.data),
+    staleTime: 60000,
+  })
+
   const createMutation = useMutation({
     mutationFn: (data: { store_id: number; table_no?: string; guest_count: number; plan_type: string; visit_type: string; visit_motivation?: string; motivation_cast_id?: number | null; motivation_cast_ids?: number[]; motivation_note?: string }) =>
       apiClient.post('/api/tickets', data).then(r => r.data),
@@ -488,6 +496,17 @@ export default function POS() {
               className={`text-xs px-2.5 py-1 rounded-md transition-colors whitespace-nowrap ${view === 'reports' ? 'bg-blue-700 text-white' : 'text-gray-400 hover:text-white'}`}>
               日報一覧
             </button>
+            {/* 本日の来店予定 */}
+            {(todayNextVisits as any[]).length > 0 && (
+              <div className="flex items-center gap-1.5 text-[10px] ml-2 pl-2 border-l border-gray-700">
+                <span className="text-teal-400 font-bold shrink-0">来店予定</span>
+                {(todayNextVisits as any[]).map((nv: any) => (
+                  <span key={nv.id} className="bg-teal-900/40 text-teal-300 px-1.5 py-0.5 rounded">
+                    {nv.customer_name}{nv.visit_time ? ` ${nv.visit_time}` : ''}{nv.cast_name ? ` (${nv.cast_name})` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
             {/* 天気+運行情報(遅延/運休のみ)+終電 */}
             <div className="ml-auto flex items-center gap-2 text-[10px] shrink-0 pl-3">
               {posCurrentWeather && (
@@ -3101,6 +3120,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showDiscountModal, setShowDiscountModal] = useState(false)
   const [showLog, setShowLog] = useState(false)
+  const [showNextVisitModal, setShowNextVisitModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
   const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null; motivation_cast_ids: number[] }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null, motivation_cast_ids: [] })
@@ -3589,9 +3609,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               ) : null
             })()}
 
+            {/* 次回来店予定ボタン */}
+            {ticket.customer_id && (
+              <button onClick={() => setShowNextVisitModal(true)}
+                className="text-xs px-2 py-1 bg-teal-800/50 hover:bg-teal-700/60 text-teal-300 rounded-lg transition-colors ml-auto shrink-0">
+                📅 次回来店予定
+              </button>
+            )}
+
             {/* セットタイマー（オープン中のみ） */}
             {!isClosed && (
-              <div className="flex items-center gap-2 ml-auto">
+              <div className={`flex items-center gap-2 ${!ticket.customer_id ? 'ml-auto' : ''}`}>
                 {!ticket.set_started_at ? (
                   (detailStoreInfo as any)?.manual_set_start !== false ? (
                     <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
@@ -4435,6 +4463,17 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           onSubmit={targetId => mergeMutation.mutate(targetId)}
           onClose={() => setShowMergeModal(false)}
           isPending={mergeMutation.isPending}
+        />
+      )}
+
+      {/* 次回来店予定モーダル */}
+      {showNextVisitModal && ticket?.customer_id && (
+        <NextVisitModal
+          storeId={storeId}
+          customerId={ticket.customer_id}
+          customerName={ticket.customer_name || ''}
+          ticketId={ticketId}
+          onClose={() => setShowNextVisitModal(false)}
         />
       )}
 
@@ -6445,4 +6484,168 @@ function fmtIsoToJstTime(isoStr: string): string {
   const d = new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z')
   const jst = new Date(d.getTime() + 9 * 3600 * 1000)
   return `${jst.getUTCHours().toString().padStart(2,'0')}:${jst.getUTCMinutes().toString().padStart(2,'0')}`
+}
+
+
+// ─── 次回来店予定モーダル ───
+function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }: {
+  storeId: number; customerId: number; customerName: string; ticketId: number; onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [visitTime, setVisitTime] = useState('未定')
+  const [castId, setCastId] = useState<number | null>(null)
+  const [viewMonth, setViewMonth] = useState(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() }
+  })
+
+  // 在籍キャスト取得
+  const { data: casts = [] } = useQuery({
+    queryKey: ['casts', storeId],
+    queryFn: () => apiClient.get('/api/casts', { params: { store_id: storeId } }).then(r => r.data),
+  })
+  const activeCasts = (casts as any[]).filter((c: any) => !c.is_retired && c.is_active)
+
+  // 既存予定取得
+  const { data: existing = [] } = useQuery({
+    queryKey: ['next-visits', 'customer', customerId],
+    queryFn: () => apiClient.get(`/api/next-visits/customer/${customerId}`).then(r => r.data),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: (data: any) => apiClient.post('/api/next-visits', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['next-visits'] })
+      setSelectedDate(null)
+      onClose()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiClient.delete(`/api/next-visits/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['next-visits'] }),
+  })
+
+  // カレンダーデータ
+  const { year, month } = viewMonth
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+  const prevMonth = () => setViewMonth(v => v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 })
+  const nextMonth = () => setViewMonth(v => v.month === 11 ? { year: v.year + 1, month: 0 } : { ...v, month: v.month + 1 })
+
+  const TIME_OPTIONS = ['未定', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '24:00', '24:30', '25:00']
+
+  // 日付選択モーダル
+  if (selectedDate) {
+    return (
+      <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] p-4" onClick={onClose}>
+        <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-4" onClick={e => e.stopPropagation()}>
+          <h3 className="text-white font-bold">来店予定を登録</h3>
+          <div className="text-sm text-gray-300">{customerName} - {selectedDate}</div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-gray-400">担当キャスト</label>
+            <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)}
+              className="input-field w-full text-sm py-1.5">
+              <option value="">未定</option>
+              {activeCasts.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.stage_name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-gray-400">来店時間</label>
+            <select value={visitTime} onChange={e => setVisitTime(e.target.value)}
+              className="input-field w-full text-sm py-1.5">
+              {TIME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => setSelectedDate(null)}
+              className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm">戻る</button>
+            <button
+              onClick={() => saveMutation.mutate({
+                store_id: storeId,
+                customer_id: customerId,
+                ticket_id: ticketId,
+                visit_date: selectedDate,
+                visit_time: visitTime === '未定' ? null : visitTime,
+                cast_id: castId,
+              })}
+              disabled={saveMutation.isPending}
+              className="flex-1 px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
+              登録
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[90] p-4" onClick={onClose}>
+      <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="text-white font-bold">次回来店予定</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* 既存予定 */}
+        {(existing as any[]).length > 0 && (
+          <div className="space-y-1">
+            <div className="text-xs text-gray-400">登録済み予定</div>
+            {(existing as any[]).map((nv: any) => (
+              <div key={nv.id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                <div className="text-sm text-white">
+                  {nv.visit_date} {nv.visit_time || '未定'}
+                  {nv.cast_name && <span className="text-primary-400 ml-2">{nv.cast_name}</span>}
+                </div>
+                <button onClick={() => deleteMutation.mutate(nv.id)} className="text-red-400 hover:text-red-300 text-xs">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* カレンダー */}
+        <div className="flex justify-between items-center">
+          <button onClick={prevMonth} className="text-gray-400 hover:text-white px-2">◀</button>
+          <span className="text-white text-sm font-bold">{year}年{month + 1}月</span>
+          <button onClick={nextMonth} className="text-gray-400 hover:text-white px-2">▶</button>
+        </div>
+        <div className="grid grid-cols-7 gap-0.5 text-center text-[10px]">
+          {['日','月','火','水','木','金','土'].map(d => (
+            <div key={d} className={`text-gray-500 py-1 ${d === '日' ? 'text-red-400' : d === '土' ? 'text-blue-400' : ''}`}>{d}</div>
+          ))}
+          {Array.from({ length: firstDay }, (_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: daysInMonth }, (_, i) => {
+            const day = i + 1
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+            const isToday = dateStr === todayStr
+            const isPast = new Date(dateStr) < new Date(todayStr)
+            const hasVisit = (existing as any[]).some((nv: any) => nv.visit_date === dateStr)
+            const dayOfWeek = new Date(year, month, day).getDay()
+            return (
+              <button key={day}
+                disabled={isPast}
+                onClick={() => { setSelectedDate(dateStr); setVisitTime('未定'); setCastId(null) }}
+                className={`py-1.5 rounded text-xs transition-colors
+                  ${isPast ? 'text-gray-600 cursor-not-allowed' : 'hover:bg-teal-800/50 cursor-pointer'}
+                  ${isToday ? 'bg-teal-900/50 text-teal-300 font-bold' : ''}
+                  ${hasVisit ? 'bg-pink-900/50 text-pink-300' : ''}
+                  ${!isPast && !isToday && !hasVisit ? (dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-blue-400' : 'text-gray-300') : ''}
+                `}>
+                {day}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
