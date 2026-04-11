@@ -6291,7 +6291,7 @@ function SessionReportList({ storeId }: { storeId: number }) {
               </div>
               <div className="text-xs text-gray-400 mt-0.5 flex gap-2">
                 {s.operator_name && <span>{s.operator_name}</span>}
-                <span className="text-green-400">売上 ¥{(s.sales_snapshot || 0).toLocaleString()}</span>
+                <span className="text-green-400 text-base font-bold">売上 ¥{(s.sales_snapshot || 0).toLocaleString()}</span>
               </div>
             </button>
           )
