@@ -446,10 +446,10 @@ def create_ticket(
         total_amount=total_set,
     )
 
-    db.add(ticket)
     # manual_set_start=False の場合、作成と同時にセット開始
     if store.manual_set_start is False:
-        ticket.set_started_at = ticket.started_at
+        ticket.set_started_at = datetime.utcnow()
+    db.add(ticket)
 
     db.commit()
     db.refresh(ticket)

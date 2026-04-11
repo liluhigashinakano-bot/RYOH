@@ -3116,6 +3116,11 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
   const workingCastsForHeader = (detailAttendance as any[]).filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
 
+  const { data: detailStoreInfo } = useQuery({
+    queryKey: ['store', storeId],
+    queryFn: () => apiClient.get(`/api/stores/${storeId}`).then(r => r.data),
+  })
+
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketId],
     queryFn: () => apiClient.get(`/api/tickets/${ticketId}`).then(r => r.data),
@@ -3545,9 +3550,15 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 </>
               ) : (
                 <>
-                  <span className="text-gray-400">{ticket.customer_name || '顧客未設定'}</span>
+                  <button onClick={() => setShowCustomerSearch(true)}
+                    className="text-gray-400 hover:text-white underline decoration-dotted transition-colors">
+                    {ticket.customer_name || '顧客未設定'}
+                  </button>
                   <span className="text-gray-600">/</span>
-                  <span className="text-primary-400">{ticket.featured_cast_name || '担当未設定'}</span>
+                  <button onClick={() => setShowCastSearch(true)}
+                    className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
+                    {ticket.featured_cast_name || '担当未設定'}
+                  </button>
                   <span className="text-gray-600">/</span>
                   <span className="text-purple-300">
                     {(ticket.current_casts && ticket.current_casts.length > 0)
@@ -3582,10 +3593,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             {!isClosed && (
               <div className="flex items-center gap-2 ml-auto">
                 {!ticket.set_started_at ? (
-                  <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
-                    className="flex items-center gap-2 px-5 py-2 bg-green-700 hover:bg-green-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50">
-                    <Play className="w-4 h-4" />伝票開始
-                  </button>
+                  (detailStoreInfo as any)?.manual_set_start !== false ? (
+                    <button onClick={() => setStartMutation.mutate()} disabled={setStartMutation.isPending}
+                      className="flex items-center gap-2 px-5 py-2 bg-green-700 hover:bg-green-600 text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50">
+                      <Play className="w-4 h-4" />伝票開始
+                    </button>
+                  ) : null
                 ) : (
                   <>
                     {(() => {
