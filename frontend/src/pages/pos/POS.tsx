@@ -2389,8 +2389,8 @@ function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void 
   )
 }
 
-const MOTIVATION_OPTIONS = ['ティッシュ', 'SNS', 'LINE', '紹介', 'Google', '看板', '電話']
-const MOTIVATION_CAST_REQUIRED = new Set(['ティッシュ', 'LINE'])
+const MOTIVATION_OPTIONS = ['ティッシュ', 'SNS', 'LINE', '紹介', 'Google', '看板', '電話', '来店予定']
+const MOTIVATION_CAST_REQUIRED = new Set(['ティッシュ', 'LINE', '来店予定'])
 
 function NewTicketModal({ storeId, onSubmit, onClose }: {
   storeId: number
