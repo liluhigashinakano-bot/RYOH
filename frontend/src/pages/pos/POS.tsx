@@ -6535,7 +6535,7 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
   const prevMonth = () => setViewMonth(v => v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 })
   const nextMonth = () => setViewMonth(v => v.month === 11 ? { year: v.year + 1, month: 0 } : { ...v, month: v.month + 1 })
 
-  const TIME_OPTIONS = ['未定', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '24:00', '24:30', '25:00']
+  const TIME_OPTIONS = ['未定', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30', '24:00', '24:30', '25:00', '25:30', '26:00', '26:30', '27:00', '27:30', '28:00', '28:30', '29:00']
 
   // 日付選択モーダル
   if (selectedDate) {
