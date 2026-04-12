@@ -3029,8 +3029,8 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
-      <div className="card w-full max-w-xs space-y-4">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={e => e.stopPropagation()}>
+      <div className="card w-full max-w-xs space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-white">{itemLabel} — キャスト選択{isChampagne && <span className="text-xs text-gray-400 font-normal ml-1">（複数可）</span>}</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
@@ -4014,7 +4014,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
       {/* 領収書発行モーダル */}
       {showReceiptModal && (
-        <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-4" onClick={() => setShowReceiptModal(false)}>
+        <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-4" onClick={e => { e.stopPropagation(); setShowReceiptModal(false) }}>
           <div className="bg-night-900 border border-emerald-700/40 rounded-xl max-w-md w-full max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
               <h3 className="text-white font-bold text-sm">📄 領収書発行</h3>
@@ -4113,8 +4113,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
       {/* 会計確認ダイアログ */}
       {pendingAction && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]">
-          <div className="bg-night-800 border border-night-600 rounded-2xl p-6 w-72 space-y-4 shadow-xl">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]" onClick={e => e.stopPropagation()}>
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-6 w-72 space-y-4 shadow-xl" onClick={e => e.stopPropagation()}>
             <p className="text-white text-center text-lg font-bold">会計済みですか？</p>
             <div className="flex gap-3">
               <button onClick={() => setPendingAction(null)} className="btn-secondary flex-1">いいえ</button>
