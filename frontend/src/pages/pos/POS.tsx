@@ -3029,7 +3029,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
       <div className="card w-full max-w-xs space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-white">{itemLabel} — キャスト選択{isChampagne && <span className="text-xs text-gray-400 font-normal ml-1">（複数可）</span>}</h3>
