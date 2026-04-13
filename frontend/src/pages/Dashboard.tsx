@@ -157,8 +157,16 @@ function StoreWeatherTrain({ storeCode, trainData, lastTrains }: { storeCode: st
 }
 
 export default function Dashboard() {
-  const { stores } = useAuthStore()
+  const { stores: authStores } = useAuthStore()
   const navigate = useNavigate()
+
+  // ダッシュボードでは全店舗を表示
+  const { data: allStoresData } = useQuery({
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
+    staleTime: 1000 * 60 * 10,
+  })
+  const stores = (allStoresData as any[]) ?? authStores
 
   const birthdayQuery = useQueries({
     queries: [{

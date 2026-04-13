@@ -63,10 +63,11 @@ class StoreResponse(BaseModel):
 
 @router.get("", response_model=list[StoreResponse])
 def get_stores(
+    all: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if is_admin(current_user) or not current_user.store_id:
+    if all or is_admin(current_user) or not current_user.store_id:
         return db.query(models.Store).filter(models.Store.is_active == True).all()
     return db.query(models.Store).filter(
         models.Store.id == current_user.store_id,
