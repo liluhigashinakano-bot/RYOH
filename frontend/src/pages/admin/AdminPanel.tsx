@@ -79,8 +79,8 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
     queryFn: () => apiClient.get('/api/users').then(r => r.data),
   })
   const { data: stores = [] } = useQuery({
-    queryKey: ['stores'],
-    queryFn: () => apiClient.get('/api/stores').then(r => r.data),
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
   })
 
   const deleteMutation = useMutation({
@@ -434,8 +434,8 @@ function StoresTab() {
   const canEdit = isAdministrator()
 
   const { data: stores = [] } = useQuery({
-    queryKey: ['stores-admin'],
-    queryFn: () => apiClient.get('/api/stores').then(r => r.data),
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
   })
 
   const deleteMutation = useMutation({
