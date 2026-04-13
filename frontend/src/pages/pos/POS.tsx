@@ -2336,7 +2336,7 @@ function TicketLogModal({ ticket, onClose }: { ticket: any; onClose: () => void 
   for (const item of ticket.order_items || []) {
     if (!item.created_at) continue
     const canceled = !!item.canceled_at
-    const name = item.item_name || item.item_type || '—'
+    const name = item.item_name || ITEM_TYPE_LABELS[item.item_type] || item.item_type || '—'
     addEvent(
       item.created_at,
       canceled ? `[取消] ${name}` : name,
