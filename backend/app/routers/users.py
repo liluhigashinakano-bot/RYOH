@@ -106,7 +106,7 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_administrator),
+    current_user: models.User = Depends(require_permission("accounts", "edit")),
 ):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
