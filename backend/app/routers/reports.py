@@ -1096,4 +1096,89 @@ def get_monthly_rankings(
                     tops.append({"store_id": s["store_id"], "store_name": s["store_name"], "value": v})
         rankings[key] = {"label": label, "format": fmt, "tops": tops}
 
-    return {"year": year, "month": month, "rankings": rankings}
+    # ─── キャスト部門: インセンティブTOP3（全店舗） ───
+    cast_totals: dict = {}
+    for s in per_store:
+        for c in s["summary"].get("cast_summary", []):
+            cid = c.get("cast_id")
+            key_c = f"id:{cid}" if cid is not None else f"help:{c.get('cast_name') or '?'}"
+            if key_c not in cast_totals:
+                cast_totals[key_c] = {
+                    "cast_id": cid,
+                    "cast_name": c.get("cast_name") or "?",
+                    "is_help": bool(c.get("is_help")),
+                    "store_name": s["store_name"],
+                    "incentive_total": 0,
+                }
+            cast_totals[key_c]["incentive_total"] += int(c.get("incentive_total") or 0)
+
+    # 当月なら当日ライブ分を加算
+    if is_current_month:
+        for store in stores:
+            session = db.query(models.BusinessSession).filter(
+                models.BusinessSession.store_id == store.id,
+                models.BusinessSession.is_closed == False,
+            ).order_by(models.BusinessSession.opened_at.desc()).first()
+            if session:
+                since = session.opened_at
+            else:
+                now_jst = datetime.utcnow() + timedelta(hours=9)
+                bd = now_jst.date() - timedelta(days=1) if now_jst.hour < 12 else now_jst.date()
+                since = datetime(bd.year, bd.month, bd.day, 3, 0, 0)
+            tickets = db.query(models.Ticket).filter(
+                models.Ticket.store_id == store.id,
+                models.Ticket.deleted_at.is_(None),
+                ((models.Ticket.is_closed == True) & (models.Ticket.ended_at >= since))
+                | ((models.Ticket.is_closed == False) & (models.Ticket.started_at >= since)),
+            ).all()
+            for t in tickets:
+                for o in (t.order_items or []):
+                    if o.canceled_at is not None:
+                        continue
+                    snap = o.incentive_snapshot or {}
+                    amt = int(snap.get("calculated_amount") or 0)
+                    if amt <= 0:
+                        continue
+                    if o.item_type == "champagne" and o.cast_distribution:
+                        for entry in o.cast_distribution:
+                            ecid = entry.get("cast_id")
+                            ratio = int(entry.get("ratio") or 0)
+                            if ecid is None or ratio <= 0:
+                                continue
+                            share = int(amt * ratio / 100)
+                            key_c = f"id:{ecid}"
+                            if key_c not in cast_totals:
+                                cast = db.query(models.Cast).filter(models.Cast.id == ecid).first()
+                                cast_totals[key_c] = {
+                                    "cast_id": ecid,
+                                    "cast_name": cast.stage_name if cast else "?",
+                                    "is_help": False,
+                                    "store_name": store.name,
+                                    "incentive_total": 0,
+                                }
+                            cast_totals[key_c]["incentive_total"] += share
+                    elif o.cast_id is not None:
+                        key_c = f"id:{o.cast_id}"
+                        if key_c not in cast_totals:
+                            cast = db.query(models.Cast).filter(models.Cast.id == o.cast_id).first()
+                            cast_totals[key_c] = {
+                                "cast_id": o.cast_id,
+                                "cast_name": cast.stage_name if cast else "?",
+                                "is_help": False,
+                                "store_name": store.name,
+                                "incentive_total": 0,
+                            }
+                        cast_totals[key_c]["incentive_total"] += amt
+
+    cast_ranking = sorted(
+        [v for v in cast_totals.values() if v["incentive_total"] > 0],
+        key=lambda x: x["incentive_total"],
+        reverse=True,
+    )[:3]
+
+    return {
+        "year": year,
+        "month": month,
+        "rankings": rankings,
+        "cast_incentive_top3": cast_ranking,
+    }

@@ -285,6 +285,23 @@ export default function Dashboard() {
                 </div>
               </>
             )}
+            {(rankings.cast_incentive_top3 as any[])?.length > 0 && (
+              <>
+                <div className="text-yellow-400/70 text-[10px] font-medium pt-1 border-t border-yellow-900/40">キャスト部門 — インセンティブTOP3（全店）</div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5">
+                  {(rankings.cast_incentive_top3 as any[]).map((c: any, i: number) => (
+                    <div key={`${c.cast_id ?? c.cast_name}-${i}`} className="bg-gray-900/60 rounded px-2 py-1 text-[11px] flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-yellow-400 font-bold">{['🥇','🥈','🥉'][i]}</span>
+                        <span className="text-white font-medium">{c.cast_name}{c.is_help && <span className="text-blue-300 text-[10px] ml-0.5">[ヘルプ]</span>}</span>
+                        <span className="text-gray-500 text-[10px]">{c.store_name}</span>
+                      </span>
+                      <span className="text-pink-300 font-bold">¥{Number(c.incentive_total).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )
       })()}
