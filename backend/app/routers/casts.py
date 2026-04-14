@@ -328,10 +328,22 @@ def get_cast_stats(
     if not cast:
         raise HTTPException(status_code=404, detail="キャストが見つかりません")
 
-    shifts = db.query(models.ConfirmedShift).filter(
+    # 自店のシフト
+    own_shifts = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.cast_id == cast_id,
         models.ConfirmedShift.store_id == store_id,
     ).all()
+
+    # ヘルプ先（他店）のシフトも集約: このキャストの名前で他店にヘルプ出勤した記録
+    help_shifts = []
+    if cast.stage_name and not cast.stage_name.startswith("[ヘルプ]"):
+        help_shifts = db.query(models.ConfirmedShift).filter(
+            models.ConfirmedShift.help_from_store_id == store_id,
+            models.ConfirmedShift.help_cast_name == cast.stage_name,
+            models.ConfirmedShift.store_id != store_id,
+        ).all()
+
+    shifts = own_shifts + help_shifts
 
     total_minutes = 0.0
     weekday_minutes: dict[int, list[float]] = defaultdict(list)
@@ -342,7 +354,7 @@ def get_cast_stats(
     monthly_late_rows: dict[str, int] = defaultdict(int)
     monthly_daily_pay_rows: dict[str, int] = defaultdict(int)
 
-    # shift_data から集計（Excelインポート分）
+    # shift_data + POSオーダーから集計
     total_set_l = total_set_mg = total_set_shot = 0.0
     total_champagne_back = total_drink_back = 0
     total_drink_count = total_rt = total_nt = total_dist = 0
@@ -388,6 +400,44 @@ def get_cast_stats(
             daily_pay_count += 1
             if mins > 0:
                 monthly_daily_pay_rows[month_key] += 1
+
+    # POSオーダー（OrderItem）からドリンク実績を集計
+    # このキャストに紐づく全オーダー（自店 + ヘルプ先の[ヘルプ]キャスト分）
+    pos_cast_ids = [cast_id]
+    if not cast.stage_name.startswith("[ヘルプ]"):
+        # ヘルプ先で作られた[ヘルプ]cast_idも集約
+        help_cast_ids = [
+            c.id for c in db.query(models.Cast.id).filter(
+                models.Cast.stage_name == f"[ヘルプ]{cast.stage_name}",
+                models.Cast.is_active == True,
+            ).all()
+        ]
+        pos_cast_ids.extend(help_cast_ids)
+
+    from sqlalchemy import func as sqlfunc
+    pos_items = db.query(
+        models.OrderItem.item_type,
+        sqlfunc.sum(models.OrderItem.quantity),
+        sqlfunc.sum(models.OrderItem.amount),
+    ).filter(
+        models.OrderItem.cast_id.in_(pos_cast_ids),
+        models.OrderItem.canceled_at.is_(None),
+    ).group_by(models.OrderItem.item_type).all()
+
+    for item_type, qty, amt in pos_items:
+        qty = int(qty or 0)
+        amt = int(amt or 0)
+        if item_type == 'drink_s':
+            total_set_l += qty  # SもL数として合算（1セットあたりの指標）
+        elif item_type == 'drink_l':
+            total_set_l += qty
+        elif item_type == 'drink_mg':
+            total_set_mg += qty
+        elif item_type == 'shot_cast':
+            total_set_shot += qty
+        elif item_type == 'champagne':
+            total_champagne_back += amt
+        total_drink_count += qty
 
     avg_monthly_shifts = (
         sum(monthly_counts.values()) / len(monthly_counts) if monthly_counts else 0
