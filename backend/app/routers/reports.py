@@ -432,6 +432,48 @@ def get_daily_by_id(
     }
 
 
+class UpdateTissueRequest(BaseModel):
+    snapshot_id: int
+    cast_index: int  # cast_performance配列のインデックス
+    tissue_count: int
+    operator_name: Optional[str] = None
+
+
+@router.post("/daily/update-tissue")
+def update_tissue_count(
+    data: UpdateTissueRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """日報のティッシュ枚数を修正"""
+    snap = db.query(models.DailyReportSnapshot).filter(
+        models.DailyReportSnapshot.id == data.snapshot_id
+    ).first()
+    if not snap:
+        raise HTTPException(status_code=404, detail="スナップショットが見つかりません")
+    payload = snap.payload or {}
+    casts = payload.get("cast_performance", [])
+    if data.cast_index < 0 or data.cast_index >= len(casts):
+        raise HTTPException(status_code=400, detail="キャストインデックスが不正です")
+    old_count = casts[data.cast_index].get("tissue_count", 0)
+    casts[data.cast_index]["tissue_count"] = data.tissue_count
+    payload["cast_performance"] = casts
+    snap.payload = payload
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(snap, "payload")
+    # 変更ログ記録
+    cast_name = casts[data.cast_index].get("cast_name", "不明")
+    log = models.OrderItemLog(
+        store_id=snap.store_id, action='update_tissue',
+        item_name=f"ティッシュ枚数修正: {cast_name} {old_count}→{data.tissue_count}",
+        operator_name=data.operator_name,
+        changed_by=current_user.id,
+    )
+    db.add(log)
+    db.commit()
+    return {"message": "ティッシュ枚数を更新しました"}
+
+
 class RegenerateRequest(BaseModel):
     snapshot_id: int
 

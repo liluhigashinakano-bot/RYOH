@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import apiClient from '../../api/client'
 
@@ -46,6 +47,15 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
 
 export default function DailyReportPanel({ storeId, date, onTicketClick }: Props) {
   const qc = useQueryClient()
+  const [tissueEdit, setTissueEdit] = useState<{ castIndex: number; castName: string; current: number } | null>(null)
+  const [tissueCount, setTissueCount] = useState(0)
+  const [tissueOperator, setTissueOperator] = useState('')
+
+  const { data: staffMembers = [] } = useQuery({
+    queryKey: ['staff-list'],
+    queryFn: () => apiClient.get('/api/staff').then(r => r.data),
+    staleTime: 60000,
+  })
   const { data, isLoading, isError } = useQuery({
     queryKey: ['daily-report', storeId, date],
     queryFn: () => apiClient.get('/api/reports/daily/latest', {
@@ -299,7 +309,9 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
                     <td className="py-1 text-center text-yellow-400">{c.champagne_count > 0 ? c.champagne_count : '—'}</td>
                     <td className="py-1 text-right text-yellow-400">{c.champagne_amount > 0 ? fmtYen(c.champagne_amount) : '—'}</td>
                     <td className="py-1 text-center text-purple-300">{c.closing_count > 0 ? c.closing_count : '—'}</td>
-                    <td className="py-1 text-center text-amber-300">{c.tissue_count > 0 ? c.tissue_count : '—'}</td>
+                    <td className="py-1 text-center text-amber-300 cursor-pointer hover:text-amber-100 hover:underline"
+                      onClick={() => { setTissueEdit({ castIndex: i, castName: c.cast_name, current: c.tissue_count || 0 }); setTissueCount(c.tissue_count || 0); setTissueOperator('') }}
+                    >{c.tissue_count > 0 ? c.tissue_count : '—'}</td>
                     <td className="py-1 text-right text-amber-300">{c.tissue_hours > 0 ? `${c.tissue_hours}h` : '—'}</td>
                     <td className="py-1 text-right text-pink-300">{c.service_hours > 0 ? `${c.service_hours}h` : '—'}</td>
                     <td className="py-1 text-right text-gray-400">{c.idle_hours > 0 ? `${c.idle_hours}h` : '—'}</td>
@@ -463,6 +475,48 @@ export default function DailyReportPanel({ storeId, date, onTicketClick }: Props
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ティッシュ枚数修正モーダル */}
+      {tissueEdit && data?.id && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]" onClick={() => setTissueEdit(null)}>
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-3 shadow-xl" onClick={e => e.stopPropagation()}>
+            <p className="text-white font-bold">ティッシュ枚数修正</p>
+            <p className="text-sm text-gray-300">{tissueEdit.castName}</p>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">枚数</label>
+              <input type="number" value={tissueCount} onChange={e => setTissueCount(Number(e.target.value))}
+                className="input-field w-full text-sm" min={0} />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">担当者</label>
+              <select value={tissueOperator} onChange={e => setTissueOperator(e.target.value)} className="input-field w-full text-sm">
+                <option value="">担当者を選択</option>
+                {(staffMembers as any[]).map((s: any) => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setTissueEdit(null)} className="btn-secondary flex-1 text-sm">キャンセル</button>
+              <button onClick={() => {
+                apiClient.post('/api/reports/daily/update-tissue', {
+                  snapshot_id: data.id,
+                  cast_index: tissueEdit.castIndex,
+                  tissue_count: tissueCount,
+                  operator_name: tissueOperator || undefined,
+                }).then(() => {
+                  qc.invalidateQueries({ queryKey: ['daily-report', storeId, date] })
+                  qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+                  setTissueEdit(null)
+                }).catch((e: any) => alert(`更新に失敗: ${e?.response?.data?.detail ?? e?.message}`))
+              }} disabled={!tissueOperator}
+                className="flex-1 text-sm py-2 rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-medium disabled:opacity-40 transition-colors">
+                更新
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
