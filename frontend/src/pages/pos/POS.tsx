@@ -5395,7 +5395,20 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
   isPending: boolean
 }) {
   const { stores } = useAuthStore()
-  const otherStores = stores.filter(s => s.id !== storeId)
+  const allStores = useQuery({
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
+  })
+  const otherStores = ((allStores.data as any[]) || stores).filter((s: any) => s.id !== storeId)
+
+  // ヘルプ元店舗のキャスト一覧取得
+  const { data: helpCasts = [] } = useQuery({
+    queryKey: ['casts', helpStoreId],
+    queryFn: () => apiClient.get('/api/casts', { params: { store_id: helpStoreId } }).then(r => r.data),
+    enabled: helpStoreId !== '',
+  })
+  const activeCasts = (helpCasts as any[]).filter((c: any) => !c.is_retired && c.is_active)
+
   const timeOptions = (() => {
     const opts: string[] = []
     for (let h = 12; h < 36; h++) {
@@ -5417,16 +5430,24 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
     <div className="space-y-3">
       <div>
         <label className="text-xs text-gray-400 block mb-1">ヘルプ元店舗</label>
-        <select value={helpStoreId} onChange={e => setHelpStoreId(e.target.value ? Number(e.target.value) : '')}
+        <select value={helpStoreId} onChange={e => { setHelpStoreId(e.target.value ? Number(e.target.value) : ''); setHelpCastName('') }}
           className="input-field w-full text-sm">
           <option value="">店舗を選択</option>
-          {otherStores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {otherStores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </div>
       <div>
         <label className="text-xs text-gray-400 block mb-1">キャスト名</label>
-        <input type="text" value={helpCastName} onChange={e => setHelpCastName(e.target.value)}
-          placeholder="キャスト名を入力" className="input-field w-full text-sm" autoFocus />
+        {helpStoreId !== '' && activeCasts.length > 0 ? (
+          <select value={helpCastName} onChange={e => setHelpCastName(e.target.value)}
+            className="input-field w-full text-sm">
+            <option value="">キャストを選択</option>
+            {activeCasts.map((c: any) => <option key={c.id} value={c.stage_name}>{c.stage_name}</option>)}
+          </select>
+        ) : (
+          <input type="text" value={helpCastName} onChange={e => setHelpCastName(e.target.value)}
+            placeholder="キャスト名を入力" className="input-field w-full text-sm" />
+        )}
       </div>
       <div>
         <label className="text-xs text-gray-400 block mb-1">出勤時間</label>
