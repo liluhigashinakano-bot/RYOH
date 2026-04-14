@@ -523,7 +523,6 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
   })
   const [stationSearching, setStationSearching] = useState(false)
   const [newLine, setNewLine] = useState('')
-  const [newRouteFrom, setNewRouteFrom] = useState('')
 
   const mutation = useMutation({
     mutationFn: () => apiClient.put(`/api/stores/${store.id}`, form),
@@ -591,29 +590,7 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
                 onSelect={(line) => { setForm(f => ({ ...f, related_lines: [...f.related_lines, line] })); setNewLine('') }} />
             </div>
 
-            <div className="mt-2">
-              <label className="text-xs text-gray-400 block mb-1">終電（最寄り駅への最終到着を表示する出発駅）</label>
-              <div className="flex flex-wrap gap-1 mb-1">
-                {form.last_train_routes.map((r, i) => (
-                  <span key={i} className="bg-gray-700 text-gray-200 text-xs px-2 py-0.5 rounded-lg flex items-center gap-1">
-                    {r.from}→{form.nearest_station || '最寄り駅'}
-                    <button onClick={() => setForm(f => ({ ...f, last_train_routes: f.last_train_routes.filter((_, j) => j !== i) }))}
-                      className="text-red-400 hover:text-red-300">×</button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input value={newRouteFrom} onChange={e => setNewRouteFrom(e.target.value)}
-                  className="input-field flex-1 text-sm" placeholder="出発駅名（例: 渋谷）"
-                  onKeyDown={e => { if (e.key === 'Enter' && newRouteFrom.trim()) { setForm(f => ({ ...f, last_train_routes: [...f.last_train_routes, { from: newRouteFrom.trim(), to: form.nearest_station || '' }] })); setNewRouteFrom('') } }} />
-                <button onClick={() => {
-                  if (newRouteFrom.trim()) {
-                    setForm(f => ({ ...f, last_train_routes: [...f.last_train_routes, { from: newRouteFrom.trim(), to: form.nearest_station || '' }] }))
-                    setNewRouteFrom('')
-                  }
-                }} className="btn-secondary text-xs px-3 shrink-0">追加</button>
-              </div>
-            </div>
+            <p className="text-[10px] text-gray-500 mt-2">※最寄り駅を設定すると、その駅への終電到着時刻が自動表示されます</p>
           </div>
 
           {/* 領収書情報 */}

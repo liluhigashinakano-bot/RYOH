@@ -96,13 +96,46 @@ def _scrape_yahoo_train_info() -> list[dict]:
     return results
 
 
-# 終電検索ルート（フォールバック用）
+# 路線→ターミナル駅マッピング（上り/下りの主要始発駅）
+_LINE_TERMINALS: dict[str, list[str]] = {
+    "中央線(快速)": ["新宿", "東京"],
+    "中央総武線(各停)": ["新宿", "千葉"],
+    "総武線(快速)": ["新宿", "千葉"],
+    "都営大江戸線": ["新宿西口", "都庁前"],
+    "東京メトロ丸ノ内線": ["池袋", "荻窪"],
+    "京王線": ["新宿", "京王八王子"],
+    "京王井の頭線": ["渋谷", "吉祥寺"],
+    "京王相模原線": ["新宿", "橋本"],
+    "小田急小田原線": ["新宿", "小田原"],
+    "東急東横線": ["渋谷", "横浜"],
+    "東急田園都市線": ["渋谷", "中央林間"],
+    "西武新宿線": ["西武新宿", "本川越"],
+    "西武池袋線": ["池袋", "飯能"],
+    "東武東上線": ["池袋", "川越"],
+    "東京メトロ銀座線": ["渋谷", "浅草"],
+    "東京メトロ日比谷線": ["中目黒", "北千住"],
+    "東京メトロ東西線": ["中野", "西船橋"],
+    "東京メトロ千代田線": ["代々木上原", "綾瀬"],
+    "東京メトロ有楽町線": ["和光市", "新木場"],
+    "東京メトロ半蔵門線": ["渋谷", "押上"],
+    "東京メトロ南北線": ["目黒", "赤羽岩淵"],
+    "東京メトロ副都心線": ["渋谷", "和光市"],
+    "都営新宿線": ["新宿", "本八幡"],
+    "都営三田線": ["目黒", "西高島平"],
+    "都営浅草線": ["西馬込", "押上"],
+    "山手線": ["新宿", "渋谷", "池袋", "東京"],
+    "京浜東北線": ["大宮", "大船"],
+    "埼京線": ["新宿", "大宮"],
+    "湘南新宿ライン": ["新宿", "大船"],
+}
+
+# フォールバック用
 _DEFAULT_LAST_TRAIN_ROUTES = [
-    {"from": "東中野", "to": "新宿", "store": "higashinakano"},
-    {"from": "東中野", "to": "中野", "store": "higashinakano"},
-    {"from": "中野坂上", "to": "新中野", "store": "shinnakano"},
+    {"from": "新宿", "to": "東中野", "store": "higashinakano"},
+    {"from": "中野", "to": "東中野", "store": "higashinakano"},
+    {"from": "池袋", "to": "新中野", "store": "shinnakano"},
     {"from": "荻窪", "to": "新中野", "store": "shinnakano"},
-    {"from": "中野坂上", "to": "方南町", "store": "honancho"},
+    {"from": "池袋", "to": "方南町", "store": "honancho"},
 ]
 
 _last_train_cache: dict = {"data": None, "fetched_at": 0}
@@ -110,7 +143,7 @@ LAST_TRAIN_TTL = 900  # 15分
 
 
 def _get_last_train_routes() -> list[dict]:
-    """DBの店舗設定から終電ルートを取得。未設定ならデフォルト使用"""
+    """DBの店舗設定（最寄り駅+関連路線）から終電ルートを自動生成"""
     from ..database import SessionLocal
     from .. import models
     try:
@@ -118,9 +151,20 @@ def _get_last_train_routes() -> list[dict]:
         stores = db.query(models.Store).filter(models.Store.is_active == True).all()
         routes = []
         for s in stores:
-            if s.last_train_routes:
-                for r in s.last_train_routes:
-                    routes.append({"from": r.get("from", ""), "to": r.get("to", ""), "store": s.code})
+            station = s.nearest_station
+            if not station:
+                continue
+            lines = s.related_lines or []
+            seen = set()
+            for line in lines:
+                terminals = _LINE_TERMINALS.get(line, [])
+                for terminal in terminals:
+                    if terminal == station:
+                        continue
+                    key = (terminal, station)
+                    if key not in seen:
+                        seen.add(key)
+                        routes.append({"from": terminal, "to": station, "store": s.code})
         db.close()
         return routes if routes else _DEFAULT_LAST_TRAIN_ROUTES
     except Exception:
