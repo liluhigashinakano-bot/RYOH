@@ -90,6 +90,60 @@ def get_stores(
     ).all()
 
 
+@router.get("/geocode")
+def geocode_station(
+    station_name: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    """駅名からNominatim (OpenStreetMap) で緯度経度を取得"""
+    import requests
+    query = f"{station_name}駅" if "駅" not in station_name else station_name
+    resp = requests.get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": query, "format": "json", "countrycodes": "jp", "limit": 5},
+        timeout=10,
+        headers={"User-Agent": "RYOH-POS/1.0"},
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Geocoding APIエラー")
+    results = resp.json()
+    if not results:
+        raise HTTPException(status_code=404, detail="駅が見つかりません")
+    best = results[0]
+    return {"latitude": float(best["lat"]), "longitude": float(best["lon"]), "name": best.get("display_name", station_name).split(",")[0]}
+
+
+# 路線名マスタ
+TRAIN_LINE_MASTER = [
+    "中央線(快速)", "中央総武線(各停)", "総武線(快速)",
+    "山手線", "京浜東北線", "埼京線", "湘南新宿ライン",
+    "東海道線", "横須賀線", "南武線", "武蔵野線", "青梅線", "五日市線",
+    "京王線", "京王井の頭線", "京王相模原線", "京王高尾線",
+    "小田急小田原線", "小田急多摩線", "小田急江ノ島線",
+    "東急東横線", "東急田園都市線", "東急目黒線", "東急大井町線", "東急池上線",
+    "西武新宿線", "西武池袋線", "西武拝島線",
+    "東武東上線", "東武スカイツリーライン", "東武伊勢崎線",
+    "東京メトロ丸ノ内線", "東京メトロ銀座線", "東京メトロ日比谷線",
+    "東京メトロ東西線", "東京メトロ千代田線", "東京メトロ有楽町線",
+    "東京メトロ半蔵門線", "東京メトロ南北線", "東京メトロ副都心線",
+    "都営大江戸線", "都営新宿線", "都営三田線", "都営浅草線",
+    "つくばエクスプレス", "りんかい線", "東京モノレール",
+    "京急本線", "京急空港線",
+    "相鉄本線", "相鉄いずみ野線",
+]
+
+
+@router.get("/train-lines")
+def get_train_lines(
+    q: Optional[str] = None,
+    current_user: models.User = Depends(get_current_user),
+):
+    """路線名の候補を返す（部分一致検索対応）"""
+    if q:
+        return [line for line in TRAIN_LINE_MASTER if q in line]
+    return TRAIN_LINE_MASTER
+
+
 @router.get("/{store_id}", response_model=StoreResponse)
 def get_store(
     store_id: int,
@@ -133,31 +187,6 @@ def update_store(
     db.commit()
     db.refresh(store)
     return store
-
-
-@router.get("/geocode/{station_name}")
-def geocode_station(
-    station_name: str,
-    current_user: models.User = Depends(get_current_user),
-):
-    """駅名からOpen-Meteo Geocoding APIで緯度経度を取得"""
-    import requests
-    query = f"{station_name}駅" if "駅" not in station_name else station_name
-    resp = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": query, "count": 5, "language": "ja", "format": "json"},
-        timeout=5,
-    )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Geocoding APIエラー")
-    data = resp.json()
-    results = data.get("results", [])
-    # 日本の結果のみフィルタ
-    jp_results = [r for r in results if r.get("country_code") == "JP"]
-    if not jp_results:
-        raise HTTPException(status_code=404, detail="駅が見つかりません")
-    best = jp_results[0]
-    return {"latitude": best["latitude"], "longitude": best["longitude"], "name": best.get("name", station_name)}
 
 
 @router.delete("/{store_id}")

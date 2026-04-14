@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, X, Trash2, Edit2, Shield, ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
@@ -535,7 +535,7 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
     if (!form.nearest_station) return
     setStationSearching(true)
     try {
-      const res = await apiClient.get(`/api/stores/geocode/${encodeURIComponent(form.nearest_station)}`)
+      const res = await apiClient.get('/api/stores/geocode', { params: { station_name: form.nearest_station } })
       setForm(f => ({ ...f, latitude: res.data.latitude, longitude: res.data.longitude }))
     } catch { alert('駅が見つかりません') }
     setStationSearching(false)
@@ -588,13 +588,8 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
                   </span>
                 ))}
               </div>
-              <div className="flex gap-2">
-                <input value={newLine} onChange={e => setNewLine(e.target.value)}
-                  className="input-field flex-1 text-sm" placeholder="例: 京王井の頭線"
-                  onKeyDown={e => { if (e.key === 'Enter' && newLine.trim()) { setForm(f => ({ ...f, related_lines: [...f.related_lines, newLine.trim()] })); setNewLine('') } }} />
-                <button onClick={() => { if (newLine.trim()) { setForm(f => ({ ...f, related_lines: [...f.related_lines, newLine.trim()] })); setNewLine('') } }}
-                  className="btn-secondary text-xs px-3 shrink-0">追加</button>
-              </div>
+              <TrainLineInput value={newLine} onChange={setNewLine}
+                onSelect={(line) => { setForm(f => ({ ...f, related_lines: [...f.related_lines, line] })); setNewLine('') }} />
             </div>
 
             <div className="mt-2">
@@ -676,6 +671,41 @@ function AddStoreModal({ onClose }: { onClose: () => void }) {
           <button onClick={() => mutation.mutate()} disabled={!form.name || !form.code} className="btn-primary flex-1">追加</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+
+function TrainLineInput({ value, onChange, onSelect }: { value: string; onChange: (v: string) => void; onSelect: (line: string) => void }) {
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  useEffect(() => {
+    if (value.length < 1) { setSuggestions([]); return }
+    apiClient.get('/api/stores/train-lines', { params: { q: value } })
+      .then(r => setSuggestions(r.data))
+      .catch(() => setSuggestions([]))
+  }, [value])
+
+  return (
+    <div className="relative">
+      <div className="flex gap-2">
+        <input value={value} onChange={e => { onChange(e.target.value); setShowSuggestions(true) }}
+          onFocus={() => setShowSuggestions(true)}
+          className="input-field flex-1 text-sm" placeholder="路線名を入力（例: 井の頭）" />
+        <button onClick={() => { if (value.trim()) onSelect(value.trim()) }}
+          className="btn-secondary text-xs px-3 shrink-0">追加</button>
+      </div>
+      {showSuggestions && suggestions.length > 0 && (
+        <div className="absolute z-50 left-0 right-12 mt-1 bg-night-800 border border-night-600 rounded-lg max-h-40 overflow-y-auto shadow-xl">
+          {suggestions.map(line => (
+            <button key={line} onClick={() => { onSelect(line); setShowSuggestions(false) }}
+              className="w-full text-left px-3 py-1.5 text-sm text-gray-200 hover:bg-primary-700/40 transition-colors">
+              {line}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
