@@ -1,5 +1,6 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+import { Trophy } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
 import apiClient from '../api/client'
 import axios from 'axios'
@@ -196,6 +197,19 @@ export default function Dashboard() {
     })),
   })
 
+  // 売上トップ店舗（0は除外、同額首位があれば最初の店舗のみ）
+  const topStoreId = (() => {
+    let maxTotal = 0
+    let topId: number | null = null
+    dashQueries.forEach((q, i) => {
+      const d = q.data as any
+      if (!d) return
+      const total = (d.closed_sales ?? 0) + (d.open_sales ?? 0)
+      if (total > maxTotal) { maxTotal = total; topId = stores[i].id }
+    })
+    return topId
+  })()
+
   return (
     <div className="space-y-3">
       {/* ヘッダー */}
@@ -235,6 +249,9 @@ export default function Dashboard() {
               {/* 店舗名行 */}
               <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800/60" style={{ backgroundColor: '#1e293b' }}>
                 <span className="font-bold text-white text-sm">{store.name}</span>
+                {topStoreId === store.id && (
+                  <Trophy className="w-4 h-4 text-yellow-400" />
+                )}
                 {!isLoading && !isError && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isOpen ? 'bg-green-900 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
                     {isOpen ? '● 営業中' : '営業外'}
