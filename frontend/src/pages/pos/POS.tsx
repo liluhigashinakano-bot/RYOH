@@ -285,14 +285,17 @@ export default function POS() {
     enabled: !!selectedStoreId,
   })
 
-  // 天気 + 鉄道（POS用）
-  const POS_STORE_COORDS: Record<string, { lat: number; lon: number; lines: string[] }> = {
+  // 天気 + 鉄道（POS用）- DB設定優先、フォールバック用ハードコード
+  const _POS_FB: Record<string, { lat: number; lon: number; lines: string[] }> = {
     higashinakano: { lat: 35.7075, lon: 139.6782, lines: ['中央総武線', '中央線(快速)', '総武線(快速)', '都営大江戸線'] },
     shinnakano: { lat: 35.6975, lon: 139.6615, lines: ['東京メトロ丸ノ内線'] },
     honancho: { lat: 35.6835, lon: 139.6480, lines: ['東京メトロ丸ノ内線'] },
   }
   const posStoreCode = (storeInfo as any)?.code || ''
-  const posCoords = POS_STORE_COORDS[posStoreCode]
+  const _fb = _POS_FB[posStoreCode]
+  const posCoords = (storeInfo?.latitude && storeInfo?.longitude)
+    ? { lat: storeInfo.latitude, lon: storeInfo.longitude, lines: (storeInfo.related_lines as string[]) || [] }
+    : _fb || null
   const WMO: Record<number, string> = { 0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',53:'🌦️',55:'🌧️',61:'🌧️',63:'🌧️',65:'🌧️',71:'🌨️',73:'🌨️',75:'❄️',80:'🌦️',81:'🌧️',82:'⛈️',95:'⛈️',96:'⛈️',99:'⛈️' }
 
   const { data: posWeather } = useQuery({

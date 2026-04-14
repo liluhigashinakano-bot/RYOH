@@ -58,6 +58,12 @@ def _run_migrations(engine):
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(20)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_footer TEXT",
+        # Store: 天気・鉄道情報
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS latitude FLOAT",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS longitude FLOAT",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS nearest_station VARCHAR(50)",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS related_lines JSON",
+        "ALTER TABLE stores ADD COLUMN IF NOT EXISTS last_train_routes JSON",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:

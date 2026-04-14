@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user, require_superadmin, is_admin
@@ -20,6 +20,11 @@ class StoreCreate(BaseModel):
     invoice_number: Optional[str] = None
     receipt_name: Optional[str] = None
     receipt_footer: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    nearest_station: Optional[str] = None
+    related_lines: Optional[List[str]] = None
+    last_train_routes: Optional[List[dict]] = None
 
 
 class StoreUpdate(BaseModel):
@@ -35,8 +40,13 @@ class StoreUpdate(BaseModel):
     ai_advisor_enabled: Optional[bool] = None
     manual_set_start: Optional[bool] = None
     is_active: Optional[bool] = None
-    open_time: Optional[str] = None   # "19:00"
-    close_time: Optional[str] = None  # "29:00"
+    open_time: Optional[str] = None
+    close_time: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    nearest_station: Optional[str] = None
+    related_lines: Optional[List[str]] = None
+    last_train_routes: Optional[List[dict]] = None
 
 
 class StoreResponse(BaseModel):
@@ -56,6 +66,11 @@ class StoreResponse(BaseModel):
     is_active: bool
     open_time: Optional[str] = None
     close_time: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    nearest_station: Optional[str] = None
+    related_lines: Optional[List[str]] = None
+    last_train_routes: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True
@@ -118,6 +133,31 @@ def update_store(
     db.commit()
     db.refresh(store)
     return store
+
+
+@router.get("/geocode/{station_name}")
+def geocode_station(
+    station_name: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    """駅名からOpen-Meteo Geocoding APIで緯度経度を取得"""
+    import requests
+    query = f"{station_name}駅" if "駅" not in station_name else station_name
+    resp = requests.get(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": query, "count": 5, "language": "ja", "format": "json"},
+        timeout=5,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Geocoding APIエラー")
+    data = resp.json()
+    results = data.get("results", [])
+    # 日本の結果のみフィルタ
+    jp_results = [r for r in results if r.get("country_code") == "JP"]
+    if not jp_results:
+        raise HTTPException(status_code=404, detail="駅が見つかりません")
+    best = jp_results[0]
+    return {"latitude": best["latitude"], "longitude": best["longitude"], "name": best.get("name", station_name)}
 
 
 @router.delete("/{store_id}")

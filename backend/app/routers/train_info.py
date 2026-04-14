@@ -96,8 +96,8 @@ def _scrape_yahoo_train_info() -> list[dict]:
     return results
 
 
-# 終電検索ルート
-LAST_TRAIN_ROUTES = [
+# 終電検索ルート（フォールバック用）
+_DEFAULT_LAST_TRAIN_ROUTES = [
     {"from": "東中野", "to": "新宿", "store": "higashinakano"},
     {"from": "東中野", "to": "中野", "store": "higashinakano"},
     {"from": "中野坂上", "to": "新中野", "store": "shinnakano"},
@@ -109,9 +109,28 @@ _last_train_cache: dict = {"data": None, "fetched_at": 0}
 LAST_TRAIN_TTL = 900  # 15分
 
 
+def _get_last_train_routes() -> list[dict]:
+    """DBの店舗設定から終電ルートを取得。未設定ならデフォルト使用"""
+    from ..database import SessionLocal
+    from .. import models
+    try:
+        db = SessionLocal()
+        stores = db.query(models.Store).filter(models.Store.is_active == True).all()
+        routes = []
+        for s in stores:
+            if s.last_train_routes:
+                for r in s.last_train_routes:
+                    routes.append({"from": r.get("from", ""), "to": r.get("to", ""), "store": s.code})
+        db.close()
+        return routes if routes else _DEFAULT_LAST_TRAIN_ROUTES
+    except Exception:
+        return _DEFAULT_LAST_TRAIN_ROUTES
+
+
 def _scrape_last_trains() -> list[dict]:
+    routes = _get_last_train_routes()
     results = []
-    for route in LAST_TRAIN_ROUTES:
+    for route in routes:
         try:
             resp = httpx.get(
                 "https://transit.yahoo.co.jp/search/result",

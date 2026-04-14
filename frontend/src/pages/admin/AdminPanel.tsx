@@ -507,7 +507,6 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
   const { fetchMe } = useAuthStore()
   const [form, setForm] = useState({
     name: store.name || '',
-    extension_price: store.extension_price || 2700,
     open_time: store.open_time || '19:00',
     close_time: store.close_time || '29:00',
     postal_code: store.postal_code || '',
@@ -516,26 +515,41 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
     invoice_number: store.invoice_number || '',
     receipt_name: store.receipt_name || '',
     receipt_footer: store.receipt_footer || '',
+    nearest_station: store.nearest_station || '',
+    latitude: store.latitude ?? null as number | null,
+    longitude: store.longitude ?? null as number | null,
+    related_lines: (store.related_lines || []) as string[],
+    last_train_routes: (store.last_train_routes || []) as { from: string; to: string }[],
   })
+  const [stationSearching, setStationSearching] = useState(false)
+  const [newLine, setNewLine] = useState('')
+  const [newRouteFrom, setNewRouteFrom] = useState('')
+  const [newRouteTo, setNewRouteTo] = useState('')
 
   const mutation = useMutation({
     mutationFn: () => apiClient.put(`/api/stores/${store.id}`, form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stores-admin'] }); fetchMe(); onClose() },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stores-all'] }); fetchMe(); onClose() },
   })
+
+  const searchStation = async () => {
+    if (!form.nearest_station) return
+    setStationSearching(true)
+    try {
+      const res = await apiClient.get(`/api/stores/geocode/${encodeURIComponent(form.nearest_station)}`)
+      setForm(f => ({ ...f, latitude: res.data.latitude, longitude: res.data.longitude }))
+    } catch { alert('駅が見つかりません') }
+    setStationSearching(false)
+  }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-sm space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="card w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-white">店舗設定</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <div className="space-y-3">
           <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="店舗名" />
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">延長料金（円）</label>
-            <input type="number" value={form.extension_price} onChange={e => setForm({ ...form, extension_price: Number(e.target.value) })} className="input-field w-full" />
-          </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">営業開始時間</label>
             <TimeSelect value={form.open_time} onChange={v => setForm({ ...form, open_time: v })} />
@@ -544,6 +558,73 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
             <label className="text-xs text-gray-400 block mb-1">営業終了時間（翌5:00 → 29:00）</label>
             <TimeSelect value={form.close_time} onChange={v => setForm({ ...form, close_time: v })} />
           </div>
+
+          {/* 天気・鉄道設定 */}
+          <div className="border-t border-gray-800 pt-3">
+            <div className="text-xs text-gray-500 mb-2 font-bold">天気予報・鉄道運行</div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">最寄り駅名</label>
+              <div className="flex gap-2">
+                <input value={form.nearest_station} onChange={e => setForm({ ...form, nearest_station: e.target.value })}
+                  className="input-field flex-1" placeholder="例: 久我山" />
+                <button onClick={searchStation} disabled={stationSearching || !form.nearest_station}
+                  className="btn-primary text-xs px-3 shrink-0 disabled:opacity-50">
+                  {stationSearching ? '検索中...' : '座標取得'}
+                </button>
+              </div>
+              {form.latitude != null && form.longitude != null && (
+                <p className="text-[10px] text-gray-500 mt-1">座標: {form.latitude.toFixed(4)}, {form.longitude.toFixed(4)}</p>
+              )}
+            </div>
+
+            <div className="mt-2">
+              <label className="text-xs text-gray-400 block mb-1">関連路線</label>
+              <div className="flex flex-wrap gap-1 mb-1">
+                {form.related_lines.map((line, i) => (
+                  <span key={i} className="bg-gray-700 text-gray-200 text-xs px-2 py-0.5 rounded-lg flex items-center gap-1">
+                    {line}
+                    <button onClick={() => setForm(f => ({ ...f, related_lines: f.related_lines.filter((_, j) => j !== i) }))}
+                      className="text-red-400 hover:text-red-300">×</button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newLine} onChange={e => setNewLine(e.target.value)}
+                  className="input-field flex-1 text-sm" placeholder="例: 京王井の頭線"
+                  onKeyDown={e => { if (e.key === 'Enter' && newLine.trim()) { setForm(f => ({ ...f, related_lines: [...f.related_lines, newLine.trim()] })); setNewLine('') } }} />
+                <button onClick={() => { if (newLine.trim()) { setForm(f => ({ ...f, related_lines: [...f.related_lines, newLine.trim()] })); setNewLine('') } }}
+                  className="btn-secondary text-xs px-3 shrink-0">追加</button>
+              </div>
+            </div>
+
+            <div className="mt-2">
+              <label className="text-xs text-gray-400 block mb-1">終電ルート</label>
+              <div className="space-y-1 mb-1">
+                {form.last_train_routes.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-gray-800 rounded-lg px-2 py-1">
+                    <span className="text-xs text-gray-200">{r.from} → {r.to}</span>
+                    <button onClick={() => setForm(f => ({ ...f, last_train_routes: f.last_train_routes.filter((_, j) => j !== i) }))}
+                      className="text-red-400 hover:text-red-300 text-xs ml-auto">×</button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-1">
+                <input value={newRouteFrom} onChange={e => setNewRouteFrom(e.target.value)}
+                  className="input-field flex-1 text-sm" placeholder="出発駅" />
+                <span className="text-gray-500 self-center text-xs">→</span>
+                <input value={newRouteTo} onChange={e => setNewRouteTo(e.target.value)}
+                  className="input-field flex-1 text-sm" placeholder="到着駅" />
+                <button onClick={() => {
+                  if (newRouteFrom.trim() && newRouteTo.trim()) {
+                    setForm(f => ({ ...f, last_train_routes: [...f.last_train_routes, { from: newRouteFrom.trim(), to: newRouteTo.trim() }] }))
+                    setNewRouteFrom(''); setNewRouteTo('')
+                  }
+                }} className="btn-secondary text-xs px-3 shrink-0">追加</button>
+              </div>
+            </div>
+          </div>
+
+          {/* 領収書情報 */}
           <div className="border-t border-gray-800 pt-3">
             <div className="text-xs text-gray-500 mb-2 font-bold">領収書情報</div>
             <input value={form.postal_code} onChange={e => setForm({ ...form, postal_code: e.target.value })} className="input-field w-full mb-2" placeholder="郵便番号 (例: 164-0003)" />

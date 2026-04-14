@@ -15,23 +15,23 @@ const WMO_CODES: Record<number, { icon: string; label: string }> = {
   95: { icon: '⛈️', label: '雷雨' }, 96: { icon: '⛈️', label: '雹を伴う雷雨' }, 99: { icon: '⛈️', label: '激しい雷雨' },
 }
 
-// 店舗ごとの座標 + 関連路線
-const STORE_META: Record<string, {
+// 店舗ごとの座標 + 関連路線（フォールバック用、DB設定優先）
+const STORE_META_FALLBACK: Record<string, {
   lat: number; lon: number
-  relatedLines: string[]  // train-info APIから取得した路線名でマッチ
+  relatedLines: string[]
 }> = {
-  higashinakano: {
-    lat: 35.7075, lon: 139.6782,
-    relatedLines: ['中央総武線', '中央線(快速)', '総武線(快速)', '都営大江戸線'],
-  },
-  shinnakano: {
-    lat: 35.6975, lon: 139.6615,
-    relatedLines: ['東京メトロ丸ノ内線'],
-  },
-  honancho: {
-    lat: 35.6835, lon: 139.6480,
-    relatedLines: ['東京メトロ丸ノ内線'],
-  },
+  higashinakano: { lat: 35.7075, lon: 139.6782, relatedLines: ['中央総武線', '中央線(快速)', '総武線(快速)', '都営大江戸線'] },
+  shinnakano: { lat: 35.6975, lon: 139.6615, relatedLines: ['東京メトロ丸ノ内線'] },
+  honancho: { lat: 35.6835, lon: 139.6480, relatedLines: ['東京メトロ丸ノ内線'] },
+}
+
+function getStoreMeta(store: any) {
+  const fb = STORE_META_FALLBACK[store.code] || null
+  return {
+    lat: store.latitude ?? fb?.lat,
+    lon: store.longitude ?? fb?.lon,
+    relatedLines: (store.related_lines as string[]) ?? fb?.relatedLines ?? [],
+  }
 }
 
 function useWeather(lat: number, lon: number) {
@@ -78,9 +78,9 @@ function parseWeatherHours(weather: any) {
   }).filter(Boolean)
 }
 
-function StoreWeatherTrain({ storeCode, trainData, lastTrains }: { storeCode: string; trainData: any[]; lastTrains: any[] }) {
-  const meta = STORE_META[storeCode]
-  if (!meta) return null
+function StoreWeatherTrain({ store, trainData, lastTrains }: { store: any; trainData: any[]; lastTrains: any[] }) {
+  const meta = getStoreMeta(store)
+  if (!meta.lat || !meta.lon) return null
 
   const { data: weather } = useWeather(meta.lat, meta.lon)
   const hours = parseWeatherHours(weather)
@@ -89,7 +89,7 @@ function StoreWeatherTrain({ storeCode, trainData, lastTrains }: { storeCode: st
 
   // この店舗に関連する路線の運行情報（部分一致）
   const storeTrains = trainData.filter(t => meta.relatedLines.some(rl => t.line.includes(rl) || rl.includes(t.line)))
-  const storeLastTrains = lastTrains.filter((t: any) => t.store === storeCode && t.arrive)
+  const storeLastTrains = lastTrains.filter((t: any) => t.store === store.code && t.arrive)
 
   return (
     <div className="space-y-1 pt-1 border-t border-gray-800/60">
@@ -297,7 +297,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* 天気 + 鉄道（店舗ごと） */}
-                  <StoreWeatherTrain storeCode={(store as any).code} trainData={trainData} lastTrains={lastTrainsData} />
+                  <StoreWeatherTrain store={store} trainData={trainData} lastTrains={lastTrainsData} />
                 </div>
               )}
             </div>

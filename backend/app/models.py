@@ -77,8 +77,13 @@ class Store(Base):
     invoice_number = Column(String(20), nullable=True)  # インボイス登録番号 T+13桁
     receipt_name = Column(String(100), nullable=True)    # 領収書用店舗名（空ならnameを使用）
     receipt_footer = Column(Text, nullable=True)         # 領収書フッター
-    ai_advisor_enabled = Column(Boolean, default=True)   # 付け回しAIアドバイス ON/OFF
-    manual_set_start = Column(Boolean, default=True)     # 伝票開始ボタン ON=手動 / OFF=自動開始
+    latitude = Column(Float, nullable=True)               # 天気予報用 緯度
+    longitude = Column(Float, nullable=True)              # 天気予報用 経度
+    nearest_station = Column(String(50), nullable=True)   # 最寄り駅名
+    related_lines = Column(JSON, nullable=True)           # 関連路線名リスト ["中央総武線", ...]
+    last_train_routes = Column(JSON, nullable=True)       # 終電ルート [{"from":"東中野","to":"新宿"}, ...]
+    ai_advisor_enabled = Column(Boolean, default=True)    # 付け回しAIアドバイス ON/OFF
+    manual_set_start = Column(Boolean, default=True)      # 伝票開始ボタン ON=手動 / OFF=自動開始
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
