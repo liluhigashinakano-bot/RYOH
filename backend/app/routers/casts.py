@@ -872,6 +872,14 @@ def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Sess
         shift.actual_end = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
     else:
         shift.actual_end = datetime.utcnow()
+    # 退勤と同時に対応中（未終了のCastAssignment）を全て終了
+    if shift.cast_id:
+        active_assigns = db.query(models.CastAssignment).filter(
+            models.CastAssignment.cast_id == shift.cast_id,
+            models.CastAssignment.ended_at.is_(None),
+        ).all()
+        for a in active_assigns:
+            a.ended_at = shift.actual_end
     log = models.OrderItemLog(
         store_id=shift.store_id, action='attendance_clock_out',
         item_name=f"退勤: {cast_name} {data.actual_end or '現在時刻'}",
