@@ -306,7 +306,8 @@ def _calc_prefs_from_monthly(monthly_data: dict, day_labels: list) -> dict:
     avg_spend = int(total_spend / total_visits) if total_visits > 0 else 0
     avg_extensions = round(total_extensions / max(total_persons, 1), 2) if total_persons > 0 else round(total_extensions / max(total_visits, 1), 2)
     avg_group = round(total_persons / total_visits, 1) if total_visits > 0 and total_persons > 0 else 1
-    divisor = total_extensions + 1
+    # 1セット = 来店1回目(=来店数) + 延長回数
+    divisor = max(total_visits + total_extensions, 1)
     set_l_avg = round(total_set_l / divisor, 2)
     set_mg_avg = round(total_set_mg / divisor, 2)
     set_shot_avg = round(total_set_shot / divisor, 2)

@@ -77,7 +77,8 @@ def _calc_prefs(monthly_data: dict) -> dict:
     avg_spend = int(total_spend / total_visits) if total_visits > 0 else 0
     avg_extensions = round(total_extensions / max(total_persons, 1), 2)
     avg_group = round(total_persons / total_visits, 1) if total_visits > 0 else 1
-    divisor = total_extensions + 1
+    # 1セット = 来店1回目(=来店数) + 延長回数
+    divisor = max(total_visits + total_extensions, 1)
     set_l_avg = round(total_set_l / divisor, 2)
     set_mg_avg = round(total_set_mg / divisor, 2)
     set_shot_avg = round(total_set_shot / divisor, 2)
@@ -256,6 +257,28 @@ class CustomerResponse(BaseModel):
 class NoteCreate(BaseModel):
     note: str
     ticket_id: Optional[int] = None
+
+
+@router.post("/recalculate-all")
+def recalculate_all_customers(
+    store_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """全顧客の preferences を再計算する（セット傾向の式修正などを反映）"""
+    query = db.query(models.Customer).filter(models.Customer.merged_into_id.is_(None))
+    if store_id:
+        query = query.filter(models.Customer.store_id == store_id)
+    customers = query.all()
+    updated = 0
+    for c in customers:
+        try:
+            _recalculate_customer(db, c)
+            updated += 1
+        except Exception:
+            continue
+    db.commit()
+    return {"message": "再計算しました", "updated": updated, "total": len(customers)}
 
 
 @router.get("", response_model=list[CustomerResponse])
