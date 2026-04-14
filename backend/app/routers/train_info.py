@@ -162,18 +162,22 @@ LAST_TRAIN_TTL = 900  # 15分
 
 
 def _get_last_train_routes() -> list[dict]:
-    """DBの店舗設定（最寄り駅+関連路線）から終電ルートを自動生成"""
+    """DBの店舗設定（最寄り駅+関連路線）から終電ルートを自動生成。未設定店舗はフォールバック"""
     from ..database import SessionLocal
     from .. import models
     try:
         db = SessionLocal()
         stores = db.query(models.Store).filter(models.Store.is_active == True).all()
         routes = []
+        configured_codes = set()
         for s in stores:
             station = s.nearest_station
             if not station:
                 continue
             lines = s.related_lines or []
+            if not lines:
+                continue
+            configured_codes.add(s.code)
             seen = set()
             for line in lines:
                 terminals = _LINE_TERMINALS.get(line, [])
@@ -185,6 +189,10 @@ def _get_last_train_routes() -> list[dict]:
                         seen.add(key)
                         routes.append({"from": terminal, "to": station, "store": s.code})
         db.close()
+        # 未設定店舗のフォールバックルートを追加
+        for fb in _DEFAULT_LAST_TRAIN_ROUTES:
+            if fb["store"] not in configured_codes:
+                routes.append(fb)
         return routes if routes else _DEFAULT_LAST_TRAIN_ROUTES
     except Exception:
         return _DEFAULT_LAST_TRAIN_ROUTES
