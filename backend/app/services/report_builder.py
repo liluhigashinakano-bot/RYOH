@@ -709,16 +709,19 @@ def build_daily_report_payload(
         })
 
     # ─── キャスト勤怠 ───
-    # 同キャスト複数シフト時のインセンティブ重複を防ぐため、シフト時間帯でフィルタ
+    # 1キャストのインセンティブは時間外も含めて全期間で集計。複数シフトの
+    # 場合、最初の行にだけ計上して二重計上を防ぐ。
     cast_blocks = []
+    cid_already_counted: set = set()
     for s in shifts:
         cid = s.cast_id
-        # 各キャスト個別データ（このシフトの勤務時間帯で受けた注文のみを対象）
-        incentive = rc.cast_incentive_total_for(
-            cid, tickets,
-            since=s.actual_start_jst,
-            until=s.actual_end_jst,
-        ) if cid is not None else 0
+        is_first_row_for_cast = cid is not None and cid not in cid_already_counted
+        # 各キャスト個別データ
+        if is_first_row_for_cast:
+            incentive = rc.cast_incentive_total_for(cid, tickets)
+            cid_already_counted.add(cid)
+        else:
+            incentive = 0
         hours = rc.work_hours(s.actual_start_jst, s.actual_end_jst)
         rate = rc.applied_hourly_rate(s)
         base = rc.cast_base_pay(s)
@@ -745,10 +748,11 @@ def build_daily_report_payload(
                         customer_names.add(t.customer_name)
                     break
 
-        # シャンパン分配額の計算（incentive_total に含まれているシャンパン分のみ）
+        # シャンパン分配額の計算（incentive_total に含まれているシャンパン分のみ）。
+        # 複数シフトの cast には最初の行だけ計上して二重計上を防ぐ。
         champagne_amount = 0
         champagne_count = 0
-        if cid is not None:
+        if cid is not None and is_first_row_for_cast:
             for t in tickets:
                 for group in rc.champagne_groups(t):
                     dist_holder = next(

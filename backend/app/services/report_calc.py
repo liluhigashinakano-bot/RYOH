@@ -404,28 +404,16 @@ def total_cast_base_pay(shifts: List[CastShiftInput]) -> int:
 def cast_incentive_total_for(
     cast_id: int,
     tickets: List[TicketInput],
-    since: Optional[datetime] = None,
-    until: Optional[datetime] = None,
 ) -> int:
     """1キャストのインセンティブ合計（非シャンパン + シャンパン分配）。
-    since/until を指定すると、その時間帯(JST)に作成された注文のみを対象にする。"""
-    def _in_range(o) -> bool:
-        if since is None and until is None:
-            return True
-        t_jst = o.created_at_jst
-        if since is not None and t_jst < since:
-            return False
-        if until is not None and t_jst >= until:
-            return False
-        return True
-
+    シフト時間外に受けた注文も含む（当日セッション内の全注文が対象）。"""
     total = 0
     for t in tickets:
         # 非シャンパン: そのキャストが受けた order の incentive_amount を合算
         for o in t.orders:
             if o.canceled or o.item_type == "champagne":
                 continue
-            if o.cast_id == cast_id and _in_range(o):
+            if o.cast_id == cast_id:
                 total += o.incentive_amount
 
         # シャンパン: 同一グループの代表行から back_pool を取って按分
@@ -435,8 +423,6 @@ def cast_incentive_total_for(
                 None,
             )
             if dist_holder is None:
-                continue
-            if not _in_range(dist_holder):
                 continue
             back_pool = dist_holder.incentive_amount
             for entry in dist_holder.cast_distribution:
