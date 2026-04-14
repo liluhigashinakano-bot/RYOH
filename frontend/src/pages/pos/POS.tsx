@@ -3854,7 +3854,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 <span className="text-gray-400 text-xs">（サービス料10％／消費税10％）合計</span>
                 {!isClosed ? (
                   <button onClick={() => setShowDiscountModal(true)}
-                    className="text-primary-400 font-bold text-lg hover:text-primary-300 transition-colors active:scale-95">
+                    className="text-primary-400 font-bold text-lg hover:text-primary-300 transition-colors active:scale-95 flex items-center gap-1.5"
+                    title="クリックで値引き（合計修正）">
+                    <Pencil className="w-3.5 h-3.5 text-gray-400" />
                     ¥{grandTotal.toLocaleString()}
                   </button>
                 ) : (
