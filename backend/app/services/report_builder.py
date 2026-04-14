@@ -709,11 +709,16 @@ def build_daily_report_payload(
         })
 
     # ─── キャスト勤怠 ───
+    # 同キャスト複数シフト時のインセンティブ重複を防ぐため、シフト時間帯でフィルタ
     cast_blocks = []
     for s in shifts:
         cid = s.cast_id
-        # 各キャスト個別データ
-        incentive = rc.cast_incentive_total_for(cid, tickets) if cid is not None else 0
+        # 各キャスト個別データ（このシフトの勤務時間帯で受けた注文のみを対象）
+        incentive = rc.cast_incentive_total_for(
+            cid, tickets,
+            since=s.actual_start_jst,
+            until=s.actual_end_jst,
+        ) if cid is not None else 0
         hours = rc.work_hours(s.actual_start_jst, s.actual_end_jst)
         rate = rc.applied_hourly_rate(s)
         base = rc.cast_base_pay(s)
