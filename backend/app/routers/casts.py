@@ -17,6 +17,24 @@ router = APIRouter(prefix="/api/casts", tags=["casts"])
 MANAGER_ROLES = {models.UserRole.administrator, models.UserRole.superadmin, models.UserRole.manager, models.UserRole.editor}
 
 
+def _bar_hhmm_to_utc(hhmm: str, base_date: date) -> datetime:
+    """バー営業表記 HH:MM (JST, 0-35時) を UTC datetime に変換。
+    - 12-23時: 同日扱い
+    - 24-35時: 翌日扱い（hour は -24 して 0-11 に正規化）
+    - 0-11時: 翌日AM扱い（営業跨ぎ）
+    """
+    from datetime import timedelta
+    h, m = int(hhmm.split(':')[0]), int(hhmm.split(':')[1])
+    if h >= 24:
+        h -= 24
+        d = base_date + timedelta(days=1)
+    elif h < 12:
+        d = base_date + timedelta(days=1)
+    else:
+        d = base_date
+    return datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+
+
 def generate_cast_code(db: Session, store_id: int) -> str:
     """店舗IDに基づいてユニークなキャストコードを生成する（例: L001F0001）"""
     store = db.query(models.Store).filter(models.Store.id == store_id).first()
@@ -653,12 +671,7 @@ def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), curre
     from datetime import timedelta
     today = date.today()
 
-    if data.actual_start:
-        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
-        d = today if h >= 12 else today + timedelta(days=1)
-        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
-    else:
-        now = datetime.utcnow()
+    now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
     # ヘルプキャスト用のCastレコードを検索or作成
     help_name = f"[ヘルプ]{data.help_cast_name}"
@@ -704,15 +717,8 @@ class TaikenClockInRequest(BaseModel):
 @router.post("/attendance/taiken-clock-in")
 def taiken_clock_in(data: TaikenClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """体験入店打刻: Castレコード「[体入]名前」を作成 or 再利用して紐付け"""
-    from datetime import timedelta
     today = date.today()
-
-    if data.actual_start:
-        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
-        d = today if h >= 12 else today + timedelta(days=1)
-        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
-    else:
-        now = datetime.utcnow()
+    now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
     taiken_name = f"[体入]{data.cast_name}"
     cast = db.query(models.Cast).filter(
@@ -788,13 +794,7 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
     today = date.today()
     from datetime import timedelta
 
-    if data.actual_start:
-        h, m = int(data.actual_start.split(':')[0]), int(data.actual_start.split(':')[1])
-        # バー営業: 12時未満は翌日扱い
-        d = today if h >= 12 else today + timedelta(days=1)
-        now = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
-    else:
-        now = datetime.utcnow()
+    now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
     # 既に出勤中なら何もしない
     already = db.query(models.ConfirmedShift).filter(
@@ -867,9 +867,7 @@ def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Sess
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
     cast_name = shift.help_cast_name or (db.query(models.Cast.stage_name).filter(models.Cast.id == shift.cast_id).scalar() if shift.cast_id else "不明")
     if data.actual_end:
-        h, m = int(data.actual_end.split(':')[0]), int(data.actual_end.split(':')[1])
-        d = shift.date if h >= 12 else shift.date + timedelta(days=1)
-        shift.actual_end = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+        shift.actual_end = _bar_hhmm_to_utc(data.actual_end, shift.date)
     else:
         shift.actual_end = datetime.utcnow()
     # 退勤と同時に対応中（未終了のCastAssignment）を全て終了
@@ -898,13 +896,7 @@ def update_attendance_time(shift_id: int, data: AttendanceTimeUpdate, db: Sessio
     if not shift:
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
 
-    def hhmm_jst_to_utc(hhmm: str, base_date: date) -> datetime:
-        h, m = int(hhmm.split(':')[0]), int(hhmm.split(':')[1])
-        # バー営業は深夜をまたぐため、時刻が12時未満なら翌日扱い
-        from datetime import timedelta
-        d = base_date if h >= 12 else base_date + timedelta(days=1)
-        jst_dt = datetime(d.year, d.month, d.day, h, m)
-        return jst_dt - timedelta(hours=9)
+    hhmm_jst_to_utc = _bar_hhmm_to_utc
 
     changes = []
     cast_name = shift.help_cast_name or (db.query(models.Cast.stage_name).filter(models.Cast.id == shift.cast_id).scalar() if shift.cast_id else "不明")
@@ -972,12 +964,7 @@ class StaffTimeUpdate(BaseModel):
     reason: Optional[str] = None
 
 
-def _hhmm_to_utc(hhmm: str, base_date) -> datetime:
-    """HH:MM JST (バー営業対応) → UTC datetime"""
-    from datetime import timedelta
-    h, m = int(hhmm.split(':')[0]), int(hhmm.split(':')[1])
-    d = base_date if h >= 12 else base_date + timedelta(days=1)
-    return datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
+_hhmm_to_utc = _bar_hhmm_to_utc
 
 
 @router.get("/staff-attendance/today/{store_id}")
