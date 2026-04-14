@@ -7,7 +7,7 @@ import httpx
 router = APIRouter(prefix="/api/train-info", tags=["train-info"])
 
 # 対象路線キーワード（Yahoo上の表記）
-TARGET_LINES = [
+_DEFAULT_TARGET_LINES = [
     "中央線(快速)",
     "中央総武線(各停)",
     "総武線(快速)",
@@ -15,12 +15,31 @@ TARGET_LINES = [
     "東京メトロ丸ノ内線",
 ]
 
+
+def _get_target_lines() -> list[str]:
+    """DBの全店舗のrelated_linesを統合してスクレイピング対象路線を取得"""
+    from ..database import SessionLocal
+    from .. import models
+    try:
+        db = SessionLocal()
+        stores = db.query(models.Store).filter(models.Store.is_active == True).all()
+        lines = set(_DEFAULT_TARGET_LINES)
+        for s in stores:
+            if s.related_lines:
+                for line in s.related_lines:
+                    lines.add(line)
+        db.close()
+        return list(lines)
+    except Exception:
+        return _DEFAULT_TARGET_LINES
+
 # キャッシュ（5分間）
 _cache: dict = {"data": None, "fetched_at": 0}
 CACHE_TTL = 300
 
 
 def _scrape_yahoo_train_info() -> list[dict]:
+    TARGET_LINES = _get_target_lines()
     url = "https://transit.yahoo.co.jp/traininfo/area/4/"
     try:
         resp = httpx.get(url, timeout=10, headers={
