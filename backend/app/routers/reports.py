@@ -905,6 +905,111 @@ _RANKING_METRICS = [
 ]
 
 
+def _compute_live_today_stats(db: Session, store_id: int) -> dict:
+    """当日セッション中のライブ統計（月間ランキング用・当日分の加算値）"""
+    session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == False,
+    ).order_by(models.BusinessSession.opened_at.desc()).first()
+    if session:
+        since = session.opened_at
+    else:
+        now_jst = datetime.utcnow() + timedelta(hours=9)
+        business_date = now_jst.date() - timedelta(days=1) if now_jst.hour < 12 else now_jst.date()
+        since = datetime(business_date.year, business_date.month, business_date.day, 3, 0, 0)
+
+    closed = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.ended_at >= since,
+        models.Ticket.deleted_at.is_(None),
+    ).all()
+    opened = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.is_closed == False,
+        models.Ticket.deleted_at.is_(None),
+        models.Ticket.started_at >= since,
+    ).all()
+    all_tickets = closed + opened
+
+    def _grand(t):
+        senkaikei = sum(
+            abs(i.amount or 0) for i in (t.order_items or [])
+            if i.canceled_at is None and (
+                (i.item_name or '').startswith('先会計')
+                or (i.item_name or '').startswith('分割清算')
+                or (i.item_name or '').startswith('値引き')
+            )
+        )
+        subtotal = (t.total_amount or 0) + senkaikei
+        gross = round(subtotal * 1.21) - senkaikei
+        return max(0, gross - (t.discount_amount or 0))
+
+    total_amount = sum(_grand(t) for t in all_tickets)
+    guest_count = sum(t.guest_count or 0 for t in all_tickets)
+    extension_count = sum(t.extension_count or 0 for t in all_tickets)
+    set_count = guest_count + extension_count
+
+    drink_l = drink_mg = shot = champagne_count = champagne_amount = 0
+    motivation_tissue_guests = 0
+    for t in all_tickets:
+        if (t.visit_motivation or '') == 'ティッシュ':
+            motivation_tissue_guests += int(t.guest_count or 0)
+        groups: dict = defaultdict(list)
+        for o in (t.order_items or []):
+            if o.canceled_at is not None:
+                continue
+            if o.item_type == 'drink_l':
+                drink_l += int(o.quantity or 0)
+            elif o.item_type == 'drink_mg':
+                drink_mg += int(o.quantity or 0)
+            elif o.item_type == 'shot_cast':
+                shot += int(o.quantity or 0)
+            elif o.item_type == 'champagne':
+                groups[o.item_name or ''].append(o)
+        for items in groups.values():
+            champagne_count += 1
+            for it in items:
+                if (it.unit_price or 0) > 0:
+                    champagne_amount += int(it.unit_price * (it.quantity or 0))
+
+    # キャスト交代数（report_calc.rotation_count_for_ticket と同等のロジック）
+    CAST_DRINK_TYPES = {'drink_s', 'drink_l', 'drink_mg', 'shot_cast', 'champagne', 'custom_menu'}
+    rotation_total = 0
+    for t in all_tickets:
+        items = [
+            o for o in (t.order_items or [])
+            if o.cast_id is not None and o.canceled_at is None and o.item_type in CAST_DRINK_TYPES
+        ]
+        items.sort(key=lambda o: (o.created_at or datetime.min, o.id))
+        for i in range(len(items) - 1):
+            if items[i].cast_id != items[i + 1].cast_id:
+                rotation_total += 1
+
+    # ティッシュ配布枚数（当日 store の TissueDistribution 合算）
+    tissue_total = 0
+    for td in db.query(models.TissueDistribution).filter(
+        models.TissueDistribution.store_id == store_id,
+        models.TissueDistribution.started_at >= since,
+    ).all():
+        tissue_total += int(td.count or 0)
+
+    return {
+        "total_amount": total_amount,
+        "guest_count": guest_count,
+        "extension_count": extension_count,
+        "set_count": set_count,
+        "drink_l_total": drink_l,
+        "drink_mg_total": drink_mg,
+        "shot_cast_total": shot,
+        "champagne_count": champagne_count,
+        "champagne_amount": champagne_amount,
+        "motivation_tissue": motivation_tissue_guests,
+        "cast_rotation_total": rotation_total,
+        "tissue_total": tissue_total,
+    }
+
+
 @router.get("/monthly-rankings")
 def get_monthly_rankings(
     year: int = Query(...),
@@ -912,7 +1017,7 @@ def get_monthly_rankings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """指定月の各指標について1位の店舗を返す"""
+    """指定月の各指標について1位の店舗を返す（当月の場合は当日ライブデータを加算）"""
     if not (1 <= month <= 12):
         raise HTTPException(status_code=400, detail="month は 1-12")
     stores = db.query(models.Store).filter(models.Store.is_active == True).all()
@@ -921,6 +1026,8 @@ def get_monthly_rankings(
         end = date_cls(year + 1, 1, 1) - timedelta(days=1)
     else:
         end = date_cls(year, month + 1, 1) - timedelta(days=1)
+    today = (datetime.utcnow() + timedelta(hours=9)).date()
+    is_current_month = (today.year == year and today.month == month)
 
     per_store: list[dict] = []
     for store in stores:
@@ -938,7 +1045,33 @@ def get_monthly_rankings(
                 continue
             by_date[r.business_date] = r
         payloads = [_enrich_legacy_payload(db, r.payload) for r in by_date.values() if r.payload]
-        summary = _aggregate_monthly(payloads)
+        summary = dict(_aggregate_monthly(payloads))
+
+        # 当月なら当日ライブデータを加算
+        if is_current_month:
+            live = _compute_live_today_stats(db, store.id)
+            for k in ("total_amount", "guest_count", "extension_count",
+                      "drink_l_total", "drink_mg_total", "shot_cast_total",
+                      "champagne_count", "champagne_amount",
+                      "motivation_tissue", "cast_rotation_total", "tissue_total"):
+                summary[k] = (summary.get(k) or 0) + live.get(k, 0)
+            live_set = live.get("set_count", 0)
+            total_set = (summary.get("set_count") or 0) + live_set
+            summary["set_count"] = total_set
+            # per_set 系を再計算
+            def _ps(num: float) -> Optional[float]:
+                return round(num / total_set, 2) if total_set else None
+            summary["drink_l_per_set"] = _ps(summary.get("drink_l_total") or 0)
+            summary["drink_mg_per_set"] = _ps(summary.get("drink_mg_total") or 0)
+            summary["shot_cast_per_set"] = _ps(summary.get("shot_cast_total") or 0)
+            summary["champagne_count_per_set"] = _ps(summary.get("champagne_count") or 0)
+            summary["champagne_amount_per_set"] = (
+                round((summary.get("champagne_amount") or 0) / total_set) if total_set else None
+            )
+            # 客単価 再計算
+            g = summary.get("guest_count") or 0
+            summary["avg_per_guest"] = int((summary.get("total_amount") or 0) / g) if g else None
+
         per_store.append({
             "store_id": store.id,
             "store_name": store.name,
@@ -947,13 +1080,20 @@ def get_monthly_rankings(
 
     rankings: dict = {}
     for key, label, fmt in _RANKING_METRICS:
-        best = None
+        # 最大値と同値の店舗を全て拾う
+        max_v = None
         for s in per_store:
             v = s["summary"].get(key)
             if v is None:
                 continue
-            if best is None or (v or 0) > (best["value"] or 0):
-                best = {"store_id": s["store_id"], "store_name": s["store_name"], "value": v}
-        rankings[key] = {"label": label, "format": fmt, "top": best}
+            if max_v is None or v > max_v:
+                max_v = v
+        tops: list = []
+        if max_v is not None:
+            for s in per_store:
+                v = s["summary"].get(key)
+                if v is not None and v == max_v:
+                    tops.append({"store_id": s["store_id"], "store_name": s["store_name"], "value": v})
+        rankings[key] = {"label": label, "format": fmt, "tops": tops}
 
     return {"year": year, "month": month, "rankings": rankings}

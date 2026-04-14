@@ -237,20 +237,21 @@ export default function Dashboard() {
       {rankings && (
         <div className="rounded-xl border border-yellow-900/40 px-3 py-2" style={{ backgroundColor: '#1a1206' }}>
           <div className="text-yellow-400 text-xs font-medium mb-1.5 flex items-center gap-1">
-            🏆 今月の1位（{rankings.year}年{rankings.month}月）
+            🏆 今月の1位（{rankings.year}年{rankings.month}月 / 月初〜現在）
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
             {Object.entries(rankings.rankings as Record<string, any>).map(([key, r]) => {
-              const top = r.top
-              const v = top?.value
+              const tops: any[] = r.tops || []
+              const v = tops[0]?.value
               const fmtV = v == null ? '—' : r.format === 'yen'
                 ? `¥${Number(v).toLocaleString()}`
                 : Number(v).toLocaleString()
+              const names = tops.map((t: any) => t.store_name).join('・') || '—'
               return (
                 <div key={key} className="bg-gray-900/60 rounded px-2 py-1 text-[11px] flex items-center justify-between gap-2">
                   <span className="text-gray-400 truncate">{r.label}</span>
                   <span className="text-right shrink-0">
-                    <span className="text-yellow-300 font-bold">{top?.store_name ?? '—'}</span>
+                    <span className="text-yellow-300 font-bold">{names}</span>
                     <span className="text-white ml-1">{fmtV}</span>
                   </span>
                 </div>
