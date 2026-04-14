@@ -3,7 +3,7 @@ import { LayoutDashboard, ShoppingCart, Users, Star, UserCog, SlidersHorizontal,
 import { useAuthStore, type PermPage } from '../store/authStore'
 
 const navItems: { to: string; icon: any; label: string; exact?: boolean; page: PermPage }[] = [
-  { to: '/', icon: LayoutDashboard, label: 'リアルタイム状況', exact: true, page: 'realtime' },
+  { to: '/', icon: LayoutDashboard, label: 'リアルタイム情報', exact: true, page: 'realtime' },
   { to: '/pos', icon: ShoppingCart, label: 'POS・伝票', page: 'pos' },
   { to: '/customers', icon: Users, label: '顧客管理', page: 'customers' },
   { to: '/casts', icon: Star, label: '従業員管理', page: 'employees' },

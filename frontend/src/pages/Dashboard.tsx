@@ -201,7 +201,7 @@ export default function Dashboard() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-bold text-white">リアルタイム状況</h1>
+          <h1 className="text-lg font-bold text-white">リアルタイム情報</h1>
           <p className="text-gray-500 text-xs">
             {new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
           </p>
@@ -254,11 +254,16 @@ export default function Dashboard() {
                 <p className="text-gray-600 text-xs px-3 py-2">読み込み中...</p>
               ) : (
                 <div className="px-3 py-1.5 space-y-1">
-                  {/* 売上行 */}
+                  {/* 総売上（会計済 + 未会計） */}
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-gray-500 text-xs">総売上</span>
+                    <span className="text-red-500 font-bold text-lg">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</span>
+                    <span className="text-[10px] text-gray-500">{(dash.closed_groups ?? 0) + (dash.open_groups ?? 0)}組/{(dash.closed_guests ?? 0) + (dash.open_guests ?? 0)}名</span>
+                  </div>
+                  {/* 売上内訳 */}
                   <div className="flex items-center gap-3 flex-wrap text-xs">
                     <span><span className="text-gray-500">会計済 </span><span className="text-white font-bold">¥{(dash.closed_sales ?? 0).toLocaleString()}</span><span className="text-[10px] text-gray-500 ml-1">{dash.closed_groups ?? 0}組/{dash.closed_guests ?? 0}名</span></span>
                     <span><span className="text-gray-500">未会計 </span><span className="text-yellow-400 font-bold">¥{(dash.open_sales ?? 0).toLocaleString()}</span><span className="text-[10px] text-yellow-500/80 ml-1">{dash.open_groups ?? 0}組/{dash.open_guests ?? 0}名</span></span>
-                    <span><span className="text-gray-500">合計 </span><span className="text-white font-bold">¥{((dash.closed_sales ?? 0) + (dash.open_sales ?? 0)).toLocaleString()}</span><span className="text-[10px] text-gray-500 ml-1">{(dash.closed_groups ?? 0) + (dash.open_groups ?? 0)}組/{(dash.closed_guests ?? 0) + (dash.open_guests ?? 0)}名</span></span>
                   </div>
 
                   {/* スタッフ・キャスト行 */}

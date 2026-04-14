@@ -7,7 +7,7 @@ import apiClient from '../../api/client'
 type Tab = 'users' | 'account-perms' | 'group-perms' | 'stores'
 
 const PERM_PAGES = [
-  { key: 'realtime', label: 'リアルタイム状況', hasEdit: false },
+  { key: 'realtime', label: 'リアルタイム情報', hasEdit: false },
   { key: 'pos', label: 'POS・伝票', hasEdit: true },
   { key: 'customers', label: '顧客管理', hasEdit: true },
   { key: 'employees', label: '従業員管理', hasEdit: true },
