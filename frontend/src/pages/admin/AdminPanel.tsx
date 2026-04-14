@@ -566,11 +566,11 @@ function EditStoreModal({ store, onClose }: { store: any; onClose: () => void })
 function AddStoreModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const { fetchMe } = useAuthStore()
-  const [form, setForm] = useState({ name: '', code: '', set_price: 0, extension_price: 2700 })
+  const [form, setForm] = useState({ name: '', code: '' })
 
   const mutation = useMutation({
     mutationFn: () => apiClient.post('/api/stores', form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stores-admin'] }); fetchMe(); onClose() },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['stores-all'] }); fetchMe(); onClose() },
   })
 
   return (
@@ -581,10 +581,14 @@ function AddStoreModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <div className="space-y-3">
-          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="店舗名" />
-          <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} className="input-field w-full" placeholder="コード（英数字）例: nakameguro" />
-          <input type="number" value={form.set_price} onChange={e => setForm({ ...form, set_price: Number(e.target.value) })} className="input-field w-full" placeholder="セット料金" />
-          <input type="number" value={form.extension_price} onChange={e => setForm({ ...form, extension_price: Number(e.target.value) })} className="input-field w-full" placeholder="延長料金" />
+          <div>
+            <label className="text-xs text-gray-400">店舗名</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="例: 久我山" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400">コード（英数字）</label>
+            <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} className="input-field w-full" placeholder="例: kugayama" />
+          </div>
         </div>
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
