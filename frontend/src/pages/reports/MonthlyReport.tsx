@@ -130,6 +130,8 @@ export default function MonthlyReport() {
               <StatBox label="人件費率" value={summary.ratio_percent != null ? `${summary.ratio_percent}%` : '—'} accent="pink" />
               <StatBox label="利益率(コスト/売上)" value={summary.profit_rate != null ? `${summary.profit_rate}%` : '—'} accent={summary.profit_rate != null && summary.profit_rate <= 50 ? 'green' : 'pink'} />
               <StatBox label="総コスト" value={fmtYen(summary.total_cost)} />
+              <StatBox label="キャスト基本給合計" value={fmtYen(summary.base_pay_total)} />
+              <StatBox label="キャストインセンティブ合計" value={fmtYen(summary.incentive_total)} accent="pink" />
             </div>
           </div>
 
