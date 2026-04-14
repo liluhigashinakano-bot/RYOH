@@ -58,6 +58,9 @@ def _run_migrations(engine):
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS postal_code VARCHAR(10)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(20)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_footer TEXT",
+        # OrderItemLog: ticket_id nullable化 + store_id追加（勤怠変更ログ用）
+        "ALTER TABLE order_item_logs ALTER COLUMN ticket_id DROP NOT NULL",
+        "ALTER TABLE order_item_logs ADD COLUMN IF NOT EXISTS store_id INTEGER REFERENCES stores(id)",
         # Store: 天気・鉄道情報
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS latitude FLOAT",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS longitude FLOAT",

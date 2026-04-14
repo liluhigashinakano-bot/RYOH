@@ -216,9 +216,32 @@ def update_cast(
     return CastResponse.from_orm_cast(cast)
 
 
+class StaffDeleteRequest(BaseModel):
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@router.post("/staff-attendance/{record_id}/remove")
+def delete_staff_attendance_post(record_id: int, data: StaffDeleteRequest = StaffDeleteRequest(), db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """社員/アルバイト勤怠記録を削除（担当者・理由付き）"""
+    record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="記録が見つかりません")
+    log = models.OrderItemLog(
+        store_id=record.store_id, action='staff_delete',
+        item_name=f"社員勤怠削除: {record.name}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
+    db.delete(record)
+    db.commit()
+    return {"message": "削除しました"}
+
+
 @router.delete("/staff-attendance/{record_id}")
 def delete_staff_attendance(record_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    """社員/アルバイト勤怠記録を削除"""
+    """社員/アルバイト勤怠記録を削除（後方互換）"""
     record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="記録が見つかりません")
@@ -572,6 +595,8 @@ class ClockInRequest(BaseModel):
 class AttendanceTimeUpdate(BaseModel):
     actual_start: Optional[str] = None  # "HH:MM" JST
     actual_end: Optional[str] = None    # "HH:MM" JST
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
 
 
 @router.get("/attendance/working/{store_id}")
@@ -828,7 +853,9 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
 
 
 class ClockOutRequest(BaseModel):
-    actual_end: Optional[str] = None  # "HH:MM" JST、未指定なら現在時刻
+    actual_end: Optional[str] = None
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
 
 
 @router.post("/attendance/{shift_id}/clock-out")
@@ -838,12 +865,20 @@ def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Sess
     shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
+    cast_name = shift.help_cast_name or (db.query(models.Cast.stage_name).filter(models.Cast.id == shift.cast_id).scalar() if shift.cast_id else "不明")
     if data.actual_end:
         h, m = int(data.actual_end.split(':')[0]), int(data.actual_end.split(':')[1])
         d = shift.date if h >= 12 else shift.date + timedelta(days=1)
         shift.actual_end = datetime(d.year, d.month, d.day, h, m) - timedelta(hours=9)
     else:
         shift.actual_end = datetime.utcnow()
+    log = models.OrderItemLog(
+        store_id=shift.store_id, action='attendance_clock_out',
+        item_name=f"退勤: {cast_name} {data.actual_end or '現在時刻'}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
     db.commit()
     return {"message": "退勤しました"}
 
@@ -863,22 +898,44 @@ def update_attendance_time(shift_id: int, data: AttendanceTimeUpdate, db: Sessio
         jst_dt = datetime(d.year, d.month, d.day, h, m)
         return jst_dt - timedelta(hours=9)
 
+    changes = []
+    cast_name = shift.help_cast_name or (db.query(models.Cast.stage_name).filter(models.Cast.id == shift.cast_id).scalar() if shift.cast_id else "不明")
     if data.actual_start:
         shift.actual_start = hhmm_jst_to_utc(data.actual_start, shift.date)
+        changes.append(f"出勤→{data.actual_start}")
     if data.actual_end:
         shift.actual_end = hhmm_jst_to_utc(data.actual_end, shift.date)
-
+        changes.append(f"退勤→{data.actual_end}")
+    log = models.OrderItemLog(
+        store_id=shift.store_id, action='attendance_time_update',
+        item_name=f"時間修正: {cast_name} {' '.join(changes)}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
     db.commit()
     return {"message": "時刻を更新しました"}
 
 
+class AttendanceRemoveRequest(BaseModel):
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
+
+
 @router.post("/attendance/{shift_id}/remove")
-def delete_attendance(shift_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def delete_attendance(shift_id: int, data: AttendanceRemoveRequest = AttendanceRemoveRequest(), db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """出勤記録を削除（actual_start/actual_end をクリア）"""
     shift = db.query(models.ConfirmedShift).filter(models.ConfirmedShift.id == shift_id).first()
     if not shift:
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
-    # ヘルプキャスト（cast_id=None）はレコードごと削除、通常キャストはタイムスタンプのみクリア
+    cast_name = shift.help_cast_name or (db.query(models.Cast.stage_name).filter(models.Cast.id == shift.cast_id).scalar() if shift.cast_id else "不明")
+    log = models.OrderItemLog(
+        store_id=shift.store_id, action='attendance_delete',
+        item_name=f"勤怠削除: {cast_name}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
     if shift.cast_id is None:
         db.delete(shift)
     else:
@@ -901,8 +958,10 @@ class StaffClockInRequest(BaseModel):
 
 
 class StaffTimeUpdate(BaseModel):
-    actual_start: Optional[str] = None  # "HH:MM" JST
-    actual_end: Optional[str] = None    # "HH:MM" JST
+    actual_start: Optional[str] = None
+    actual_end: Optional[str] = None
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
 
 
 def _hhmm_to_utc(hhmm: str, base_date) -> datetime:
@@ -980,7 +1039,9 @@ def staff_clock_in(data: StaffClockInRequest, db: Session = Depends(get_db), cur
 
 
 class StaffClockOutRequest(BaseModel):
-    actual_end: Optional[str] = None  # "HH:MM" JST
+    actual_end: Optional[str] = None
+    operator_name: Optional[str] = None
+    reason: Optional[str] = None
 
 
 @router.post("/staff-attendance/{record_id}/clock-out")
@@ -993,6 +1054,13 @@ def staff_clock_out(record_id: int, data: StaffClockOutRequest = StaffClockOutRe
         record.actual_end = _hhmm_to_utc(data.actual_end, record.date)
     else:
         record.actual_end = datetime.utcnow()
+    log = models.OrderItemLog(
+        store_id=record.store_id, action='staff_clock_out',
+        item_name=f"社員退勤: {record.name} {data.actual_end or '現在時刻'}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
     db.commit()
     return {"message": "退勤しました"}
 
@@ -1003,9 +1071,19 @@ def update_staff_time(record_id: int, data: StaffTimeUpdate, db: Session = Depen
     record = db.query(models.StaffAttendance).filter(models.StaffAttendance.id == record_id).first()
     if not record:
         raise HTTPException(status_code=404, detail="記録が見つかりません")
+    changes = []
     if data.actual_start is not None:
         record.actual_start = _hhmm_to_utc(data.actual_start, record.date)
+        changes.append(f"出勤→{data.actual_start}")
     if data.actual_end is not None:
         record.actual_end = _hhmm_to_utc(data.actual_end, record.date)
+        changes.append(f"退勤→{data.actual_end}")
+    log = models.OrderItemLog(
+        store_id=record.store_id, action='staff_time_update',
+        item_name=f"社員時間修正: {record.name} {' '.join(changes)}",
+        operator_name=data.operator_name, reason=data.reason,
+        changed_by=current_user.id,
+    )
+    db.add(log)
     db.commit()
     return {"message": "時刻を更新しました"}

@@ -326,9 +326,10 @@ class OrderItemLog(Base):
     __tablename__ = "order_item_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
     order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
-    action = Column(String(20), nullable=False)   # 'cancel' | 'update_quantity'
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    action = Column(String(20), nullable=False)   # 'cancel' | 'update_quantity' | 'attendance_*'
     item_type = Column(String(50))
     item_name = Column(String(100))
     old_quantity = Column(Integer, nullable=True)

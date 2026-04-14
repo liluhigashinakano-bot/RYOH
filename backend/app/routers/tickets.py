@@ -317,18 +317,24 @@ def get_order_logs(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """店舗の注文削除・変更履歴を返す（直近200件）"""
+    """店舗の注文削除・変更履歴を返す（直近200件、勤怠変更ログ含む）"""
+    from sqlalchemy import or_
     logs = (
         db.query(models.OrderItemLog)
-        .join(models.Ticket, models.OrderItemLog.ticket_id == models.Ticket.id)
-        .filter(models.Ticket.store_id == store_id)
+        .outerjoin(models.Ticket, models.OrderItemLog.ticket_id == models.Ticket.id)
+        .filter(
+            or_(
+                models.Ticket.store_id == store_id,
+                models.OrderItemLog.store_id == store_id,
+            )
+        )
         .order_by(models.OrderItemLog.changed_at.desc())
         .limit(200)
         .all()
     )
     result = []
     for log in logs:
-        ticket = log.ticket
+        ticket = db.query(models.Ticket).filter(models.Ticket.id == log.ticket_id).first() if log.ticket_id else None
         result.append({
             "id": log.id,
             "changed_at": log.changed_at,

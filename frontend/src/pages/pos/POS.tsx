@@ -1871,11 +1871,18 @@ function OrderLogsView({ storeId }: { storeId: number }) {
     cancel: '削除',
     update_quantity: '数量変更',
     change_start_time: '時間変更',
+    attendance_clock_out: '退勤',
+    attendance_time_update: '時間修正',
+    attendance_delete: '勤怠削除',
+    staff_clock_out: '社員退勤',
+    staff_time_update: '社員時間修正',
+    staff_delete: '社員勤怠削除',
   }
 
   const actionColor = (action: string) =>
-    action === 'cancel' ? 'bg-red-900/60 text-red-400'
-    : action === 'change_start_time' ? 'bg-blue-900/60 text-blue-400'
+    action === 'cancel' || action.includes('delete') ? 'bg-red-900/60 text-red-400'
+    : action === 'change_start_time' || action.includes('time') ? 'bg-blue-900/60 text-blue-400'
+    : action.includes('clock_out') ? 'bg-green-900/60 text-green-400'
     : 'bg-yellow-900/60 text-yellow-400'
 
   return (
@@ -5777,10 +5784,13 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   const [editStart, setEditStart] = useState('')
   const [editEnd, setEditEnd] = useState('')
   const [editTarget, setEditTarget] = useState<'start' | 'end' | null>(null)
+  const [editOperator, setEditOperator] = useState('')
+  const [editReason, setEditReason] = useState('')
 
   // 削除確認（担当者選択）
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'cast' | 'staff'; id: number; name: string } | null>(null)
   const [deleteOperator, setDeleteOperator] = useState('')
+  const [deleteReason, setDeleteReason] = useState('')
 
   // スタッフ一覧（担当者選択用）
   const { data: staffMembers = [] } = useQuery({
@@ -5935,12 +5945,15 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   })
 
   const updateTimeMutation = useMutation({
-    mutationFn: ({ shiftId, actual_start, actual_end }: { shiftId: number; actual_start?: string; actual_end?: string }) =>
-      apiClient.patch(`/api/casts/attendance/${shiftId}/time`, { actual_start, actual_end }).then(r => r.data),
+    mutationFn: ({ shiftId, actual_start, actual_end, operator_name, reason }: { shiftId: number; actual_start?: string; actual_end?: string; operator_name?: string; reason?: string }) =>
+      apiClient.patch(`/api/casts/attendance/${shiftId}/time`, { actual_start, actual_end, operator_name, reason }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingShiftId(null)
       setEditTarget(null)
+      setEditOperator('')
+      setEditReason('')
     },
   })
 
@@ -6032,7 +6045,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
           className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
           退勤
         </button>
-        <button onClick={() => { setDeleteConfirm({ type: 'cast', id: w.shift_id, name: w.cast_name }); setDeleteOperator('') }}
+        <button onClick={() => { setDeleteConfirm({ type: 'cast', id: w.shift_id, name: w.cast_name }); setDeleteOperator(''); setDeleteReason('') }}
           className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors">
           削除
         </button>
@@ -6051,9 +6064,14 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
               <div className="text-sm text-white font-mono">{editEnd ? toBarDisplay(editEnd) : '未設定'}</div>
             </button>
           </div>
+          <select value={editOperator} onChange={e => setEditOperator(e.target.value)} className="input-field w-full text-xs">
+            <option value="">担当者を選択</option>
+            {(staffMembers as any[]).map((s: any) => <option key={s.id} value={s.name}>{s.name}</option>)}
+          </select>
+          <input value={editReason} onChange={e => setEditReason(e.target.value)} className="input-field w-full text-xs" placeholder="理由（任意）" />
           <div className="flex gap-1.5 justify-end">
-            <button onClick={() => updateTimeMutation.mutate({ shiftId: w.shift_id, actual_start: editStart || undefined, actual_end: editEnd || undefined })}
-              disabled={!editStart || updateTimeMutation.isPending}
+            <button onClick={() => updateTimeMutation.mutate({ shiftId: w.shift_id, actual_start: editStart || undefined, actual_end: editEnd || undefined, operator_name: editOperator || undefined, reason: editReason || undefined })}
+              disabled={!editStart || !editOperator || updateTimeMutation.isPending}
               className="text-xs px-3 py-1 bg-primary-700 hover:bg-primary-600 text-white rounded-lg disabled:opacity-40 transition-colors">確定</button>
             <button onClick={() => { setEditingShiftId(null); setEditTarget(null) }}
               className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded-lg transition-colors">キャンセル</button>
@@ -6117,7 +6135,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                       className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                       退勤
                     </button>
-                    <button onClick={() => { setDeleteConfirm({ type: 'staff', id: r.id, name: r.name }); setDeleteOperator('') }}
+                    <button onClick={() => { setDeleteConfirm({ type: 'staff', id: r.id, name: r.name }); setDeleteOperator(''); setDeleteReason('') }}
                       className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors">
                       削除
                     </button>
@@ -6300,7 +6318,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
           onClose={() => setStaffEditTarget(null)} />
       )}
 
-      {/* 削除確認ダイアログ（担当者選択付き） */}
+      {/* 削除確認ダイアログ（担当者選択+理由入力） */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]" onClick={() => setDeleteConfirm(null)}>
           <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-3 shadow-xl" onClick={e => e.stopPropagation()}>
@@ -6315,13 +6333,25 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                 ))}
               </select>
             </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">理由（任意）</label>
+              <input value={deleteReason} onChange={e => setDeleteReason(e.target.value)}
+                className="input-field w-full text-sm" placeholder="削除理由" />
+            </div>
             <div className="flex gap-2 pt-1">
               <button onClick={() => setDeleteConfirm(null)} className="btn-secondary flex-1 text-sm">キャンセル</button>
               <button onClick={() => {
+                const payload = { operator_name: deleteOperator, reason: deleteReason || undefined }
                 if (deleteConfirm.type === 'cast') {
-                  deleteMutation.mutate(deleteConfirm.id)
+                  apiClient.post(`/api/casts/attendance/${deleteConfirm.id}/remove`, payload).then(() => {
+                    qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+                    qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+                  }).catch((e: any) => alert(`削除に失敗しました: ${e?.response?.data?.detail ?? e?.message}`))
                 } else {
-                  staffDeleteMutation.mutate(deleteConfirm.id)
+                  apiClient.post(`/api/casts/staff-attendance/${deleteConfirm.id}/remove`, payload).then(() => {
+                    qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
+                    qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+                  }).catch((e: any) => alert(`削除に失敗しました: ${e?.response?.data?.detail ?? e?.message}`))
                 }
                 setDeleteConfirm(null)
               }} disabled={!deleteOperator}
