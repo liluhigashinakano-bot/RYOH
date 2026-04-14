@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, X, User, Upload, Cake } from 'lucide-react'
+import { Search, Plus, X, User, Upload, Cake, RefreshCw } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
@@ -73,6 +73,18 @@ export default function CustomerList() {
 
   const customers = sortCustomers(rawCustomers, sortKey, sortAsc)
 
+  const qc = useQueryClient()
+  const recalcMutation = useMutation({
+    mutationFn: () => apiClient.post('/api/customers/recalculate-all', null, {
+      params: storeId ? { store_id: storeId } : {}
+    }).then(r => r.data),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      alert(`再計算完了：${data.updated}/${data.total} 件`)
+    },
+    onError: () => alert('再計算に失敗しました'),
+  })
+
   const { data: birthdays = [] } = useQuery({
     queryKey: ['birthdays'],
     queryFn: () => apiClient.get('/api/customers/birthdays/upcoming', { params: { days: 14 } }).then(r => r.data),
@@ -91,6 +103,18 @@ export default function CustomerList() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-white">顧客管理</h1>
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              const scope = storeId ? 'この店舗' : '全店舗'
+              if (confirm(`${scope}の顧客データを再計算します。よろしいですか？`)) recalcMutation.mutate()
+            }}
+            disabled={recalcMutation.isPending}
+            className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-50"
+            title="セット傾向などの集計値を再計算"
+          >
+            <RefreshCw className={`w-4 h-4 ${recalcMutation.isPending ? 'animate-spin' : ''}`} />
+            {recalcMutation.isPending ? '再計算中...' : '再計算'}
+          </button>
           <button onClick={() => setShowImport(true)} className="btn-secondary flex items-center gap-2 text-sm">
             <Upload className="w-4 h-4" />
             Excel取込
