@@ -5778,6 +5778,17 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
   const [editEnd, setEditEnd] = useState('')
   const [editTarget, setEditTarget] = useState<'start' | 'end' | null>(null)
 
+  // 削除確認（担当者選択）
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'cast' | 'staff'; id: number; name: string } | null>(null)
+  const [deleteOperator, setDeleteOperator] = useState('')
+
+  // スタッフ一覧（担当者選択用）
+  const { data: staffMembers = [] } = useQuery({
+    queryKey: ['staff-list'],
+    queryFn: () => apiClient.get('/api/staff').then(r => r.data),
+    staleTime: 60000,
+  })
+
   // 社員/アルバイト出勤フロー: null=非表示, 'name'=名前入力, 'time'=時刻選択
   const [staffClockInStep, setStaffClockInStep] = useState<null | 'name' | 'time'>(null)
   const [staffClockInName, setStaffClockInName] = useState('')
@@ -6021,9 +6032,8 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
           className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
           退勤
         </button>
-        <button onClick={() => deleteMutation.mutate(w.shift_id)}
-          disabled={deleteMutation.isPending}
-          className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors disabled:opacity-40">
+        <button onClick={() => { setDeleteConfirm({ type: 'cast', id: w.shift_id, name: w.cast_name }); setDeleteOperator('') }}
+          className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors">
           削除
         </button>
       </div>
@@ -6107,9 +6117,8 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
                       className="text-xs px-2 py-1 bg-gray-700 hover:bg-blue-800/70 text-gray-300 hover:text-blue-300 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
                       退勤
                     </button>
-                    <button onClick={() => staffDeleteMutation.mutate(r.id)}
-                      disabled={staffDeleteMutation.isPending}
-                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors disabled:opacity-40">
+                    <button onClick={() => { setDeleteConfirm({ type: 'staff', id: r.id, name: r.name }); setDeleteOperator('') }}
+                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-red-800/70 text-gray-300 hover:text-red-300 rounded-lg transition-colors">
                       削除
                     </button>
                   </div>
@@ -6289,6 +6298,39 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
         <TimePickerModal title="退勤時間を選択" defaultValue={staffEditEnd || nowHhmm()}
           onSelect={time => { setStaffEditEnd(time); setStaffEditTarget(null) }}
           onClose={() => setStaffEditTarget(null)} />
+      )}
+
+      {/* 削除確認ダイアログ（担当者選択付き） */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[200]" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-80 space-y-3 shadow-xl" onClick={e => e.stopPropagation()}>
+            <p className="text-white font-bold">勤怠削除</p>
+            <p className="text-sm text-gray-300">「{deleteConfirm.name}」の勤怠を削除しますか？</p>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">担当者</label>
+              <select value={deleteOperator} onChange={e => setDeleteOperator(e.target.value)} className="input-field w-full text-sm">
+                <option value="">担当者を選択</option>
+                {(staffMembers as any[]).map((s: any) => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setDeleteConfirm(null)} className="btn-secondary flex-1 text-sm">キャンセル</button>
+              <button onClick={() => {
+                if (deleteConfirm.type === 'cast') {
+                  deleteMutation.mutate(deleteConfirm.id)
+                } else {
+                  staffDeleteMutation.mutate(deleteConfirm.id)
+                }
+                setDeleteConfirm(null)
+              }} disabled={!deleteOperator}
+                className="flex-1 text-sm py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-medium disabled:opacity-40 transition-colors">
+                削除
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
