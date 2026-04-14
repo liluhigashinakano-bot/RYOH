@@ -197,9 +197,9 @@ export default function Dashboard() {
     })),
   })
 
-  // 売上トップ店舗（0は除外、同額首位があれば最初の店舗のみ）
+  // 売上トップ店舗（データ取得済みの店舗の中で最大。同額首位は先頭のみ）
   const topStoreId = (() => {
-    let maxTotal = 0
+    let maxTotal = -1
     let topId: number | null = null
     dashQueries.forEach((q, i) => {
       const d = q.data as any
