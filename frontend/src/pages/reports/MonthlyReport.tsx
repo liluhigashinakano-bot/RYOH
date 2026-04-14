@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { RefreshCw } from 'lucide-react'
 import apiClient from '../../api/client'
 import { useAuthStore } from '../../store/authStore'
 
@@ -71,12 +72,35 @@ export default function MonthlyReport() {
     return ys
   }, [])
 
+  const qc = useQueryClient()
+  const regenMutation = useMutation({
+    mutationFn: () => apiClient.post('/api/reports/daily/regenerate-bulk', {
+      store_id: selectedStoreId, year, month,
+    }).then(r => r.data),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['monthly-report'] })
+      alert(`再生成完了：${res.regenerated}件（スキップ${res.skipped} / 失敗${res.failed}）`)
+    },
+    onError: () => alert('再生成に失敗しました'),
+  })
+
   return (
     <div className="space-y-4">
       {/* ヘッダー */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-white">月次レポート</h1>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              if (confirm(`${year}年${month}月の日報を一括再生成します。よろしいですか？`)) regenMutation.mutate()
+            }}
+            disabled={regenMutation.isPending}
+            className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-50"
+            title="この月の日報を最新ロジックで再計算します"
+          >
+            <RefreshCw className={`w-4 h-4 ${regenMutation.isPending ? 'animate-spin' : ''}`} />
+            {regenMutation.isPending ? '再生成中...' : '日報再生成'}
+          </button>
           <select
             value={selectedStoreId}
             onChange={e => setSelectedStoreId(Number(e.target.value))}

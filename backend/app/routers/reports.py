@@ -478,6 +478,68 @@ class RegenerateRequest(BaseModel):
     snapshot_id: int
 
 
+class BulkRegenerateRequest(BaseModel):
+    store_id: Optional[int] = None
+    year: Optional[int] = None
+    month: Optional[int] = None
+
+
+@router.post("/daily/regenerate-bulk")
+def regenerate_bulk(
+    data: BulkRegenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """指定範囲の日報を一括再生成する（各営業日の最新版 raw_inputs を使う）"""
+    from sqlalchemy import func
+    q = db.query(
+        models.DailyReportSnapshot.store_id,
+        models.DailyReportSnapshot.business_date,
+        func.max(models.DailyReportSnapshot.version).label("max_v"),
+    )
+    if data.store_id:
+        q = q.filter(models.DailyReportSnapshot.store_id == data.store_id)
+    if data.year and data.month:
+        from datetime import date as _date
+        start = _date(data.year, data.month, 1)
+        end = _date(data.year + (1 if data.month == 12 else 0),
+                    1 if data.month == 12 else data.month + 1, 1)
+        q = q.filter(
+            models.DailyReportSnapshot.business_date >= start,
+            models.DailyReportSnapshot.business_date < end,
+        )
+    latest_keys = q.group_by(
+        models.DailyReportSnapshot.store_id,
+        models.DailyReportSnapshot.business_date,
+    ).all()
+
+    regenerated, skipped, failed = 0, 0, 0
+    for store_id, bdate, max_v in latest_keys:
+        snap = db.query(models.DailyReportSnapshot).filter(
+            models.DailyReportSnapshot.store_id == store_id,
+            models.DailyReportSnapshot.business_date == bdate,
+            models.DailyReportSnapshot.version == max_v,
+        ).first()
+        if not snap or not snap.raw_inputs:
+            skipped += 1
+            continue
+        try:
+            payload, raw_inputs = regenerate_from_snapshot(db, snap, generated_by=current_user.id)
+            save_snapshot(db, snap.store_id, snap.business_date, payload,
+                          raw_inputs=raw_inputs, generated_by=current_user.id)
+            regenerated += 1
+        except Exception:
+            failed += 1
+            continue
+    return {
+        "message": "一括再生成が完了しました",
+        "regenerated": regenerated,
+        "skipped": skipped,
+        "failed": failed,
+        "total": len(latest_keys),
+    }
+
+
 @router.post("/daily/regenerate")
 def regenerate_daily(
     data: RegenerateRequest,
