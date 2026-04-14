@@ -896,7 +896,8 @@ def build_daily_report_payload(
     # ─── 利益率計算 ───
     alcohol_exp = int(expenses.get("alcohol") or 0)
     other_exp = int(expenses.get("other") or 0)
-    cast_labor = cast_payroll_block.get("total_base_pay", 0)
+    # キャスト人件費 = 基本給 + インセンティブ
+    cast_labor = cast_payroll_block.get("actual_pay_total", 0)
     # 社員人件費: 出勤社員数 × 14,000円
     staff_count = sum(1 for a in staff_atts if a.employee_type == "社員" and a.actual_start_jst and not a.is_absent)
     staff_labor = staff_count * 14000
