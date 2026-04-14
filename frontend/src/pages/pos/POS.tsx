@@ -3121,6 +3121,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [receiptHistory, setReceiptHistory] = useState<any[]>([])
   const [receiptRecipient, setReceiptRecipient] = useState('')
+  const [receiptNote, setReceiptNote] = useState('ご飲食代として')
   const [receiptPaperSize, setReceiptPaperSize] = useState<'80mm' | 'a4'>('80mm')
   const [receiptIssuing, setReceiptIssuing] = useState(false)
   const [showMergeModal, setShowMergeModal] = useState(false)
@@ -3129,6 +3130,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showSentaitenModal, setShowSentaitenModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showDiscountModal, setShowDiscountModal] = useState(false)
+  const [showPostDiscountModal, setShowPostDiscountModal] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [showNextVisitModal, setShowNextVisitModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
@@ -3886,6 +3888,11 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   }}
                   className="bg-emerald-800 hover:bg-emerald-700 text-white text-xs py-2 rounded-lg w-full"
                 >📄 領収書発行</button>
+                <p className="text-xs text-gray-500 pt-2">合計修正</p>
+                <button
+                  onClick={() => setShowPostDiscountModal(true)}
+                  className="bg-orange-800 hover:bg-orange-700 text-white text-xs py-2 rounded-lg w-full"
+                >✏️ 値引きで修正</button>
               </div>
             </div>
           )}
@@ -4043,6 +4050,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   className="input-field w-full text-sm mt-1" />
               </div>
               <div>
+                <label className="text-gray-400 text-xs">但し書き</label>
+                <input type="text" value={receiptNote} onChange={e => setReceiptNote(e.target.value)}
+                  placeholder="例: ご飲食代として"
+                  className="input-field w-full text-sm mt-1" />
+              </div>
+              <div>
                 <label className="text-gray-400 text-xs">用紙サイズ</label>
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   <button onClick={() => setReceiptPaperSize('80mm')}
@@ -4055,7 +4068,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   </button>
                 </div>
               </div>
-              <div className="text-[10px] text-gray-500">但し書き: ご飲食代として（固定）</div>
               <button
                 disabled={receiptIssuing}
                 onClick={async () => {
@@ -4063,7 +4075,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   try {
                     const r = await apiClient.post(`/api/receipts/issue/${ticketId}`, {
                       recipient_name: receiptRecipient,
-                      note: 'ご飲食代として',
+                      note: receiptNote || 'ご飲食代として',
                       paper_size: receiptPaperSize,
                     }, { responseType: 'blob' })
                     const url = URL.createObjectURL(r.data)
@@ -4415,6 +4427,28 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             })
           }}
           onClose={() => setShowDiscountModal(false)}
+        />
+      )}
+
+      {/* 会計済み伝票の合計修正（値引き）モーダル */}
+      {showPostDiscountModal && (
+        <DiscountModal
+          storeId={storeId}
+          onSubmit={async (amount, reason, operator) => {
+            setShowPostDiscountModal(false)
+            try {
+              await apiClient.post(`/api/tickets/${ticketId}/post_discount`, {
+                amount,
+                reason,
+                operator_name: operator,
+              })
+              qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+              qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+            } catch (e: any) {
+              alert(e?.response?.data?.detail || '合計修正に失敗しました')
+            }
+          }}
+          onClose={() => setShowPostDiscountModal(false)}
         />
       )}
 

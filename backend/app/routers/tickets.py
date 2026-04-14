@@ -1424,6 +1424,68 @@ def close_ticket(
     return _to_response(ticket)
 
 
+class PostCloseDiscountRequest(BaseModel):
+    amount: int
+    reason: str
+    operator_name: str
+
+
+@router.post("/{ticket_id}/post_discount")
+def add_post_close_discount(
+    ticket_id: int,
+    data: PostCloseDiscountRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """会計済み伝票の合計を値引きで修正する"""
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="値引き金額は1以上にしてください")
+    if not (data.operator_name or '').strip():
+        raise HTTPException(status_code=400, detail="担当者は必須です")
+    ticket = db.query(models.Ticket).filter(
+        models.Ticket.id == ticket_id,
+        models.Ticket.is_closed == True,
+        models.Ticket.deleted_at.is_(None),
+    ).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="会計済み伝票が見つかりません")
+
+    item = models.OrderItem(
+        ticket_id=ticket_id,
+        item_type="other",
+        item_name=f"値引き（{data.reason}）担当:{data.operator_name}",
+        quantity=1,
+        unit_price=-data.amount,
+        amount=-data.amount,
+    )
+    db.add(item)
+    ticket.total_amount += item.amount
+    if ticket.customer_id:
+        customer = db.query(models.Customer).filter(models.Customer.id == ticket.customer_id).first()
+        if customer:
+            customer.total_spend = max(0, (customer.total_spend or 0) + item.amount)
+            customer.ltv = customer.total_spend
+    db.flush()
+
+    log = models.OrderItemLog(
+        ticket_id=ticket_id,
+        order_item_id=item.id,
+        store_id=ticket.store_id,
+        action='post_close_discount',
+        item_type='other',
+        item_name=item.item_name,
+        old_amount=0,
+        new_amount=item.amount,
+        changed_by=current_user.id,
+        operator_name=data.operator_name,
+        reason=data.reason,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(ticket)
+    return {"ok": True, "total_amount": ticket.total_amount, "grand_total": _calc_grand_total(ticket)}
+
+
 class JoinRequest(BaseModel):
     guest_count: int = 1
     n_count: Optional[int] = None             # 指定なしなら visit_type から自動算出
