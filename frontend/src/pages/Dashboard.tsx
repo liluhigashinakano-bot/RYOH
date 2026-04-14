@@ -253,16 +253,29 @@ export default function Dashboard() {
           )
         }
         const entries = Object.entries(rankings.rankings as Record<string, any>)
+        const DRINK_TOTAL_KEYS = new Set([
+          'drink_l_total', 'drink_mg_total', 'shot_cast_total',
+          'champagne_count', 'champagne_amount',
+        ])
         const perSet = entries.filter(([k]) => k.includes('_per_set'))
-        const others = entries.filter(([k]) => !k.includes('_per_set'))
+        const drinkTotals = entries.filter(([k]) => DRINK_TOTAL_KEYS.has(k))
+        const general = entries.filter(([k]) => !k.includes('_per_set') && !DRINK_TOTAL_KEYS.has(k))
         return (
           <div className="rounded-xl border border-yellow-900/40 px-3 py-2 space-y-2" style={{ backgroundColor: '#1a1206' }}>
             <div className="text-yellow-400 text-xs font-medium flex items-center gap-1">
               🏆 今月の1位（{rankings.year}年{rankings.month}月 / 月初〜現在）
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-              {others.map(renderItem)}
+              {general.map(renderItem)}
             </div>
+            {drinkTotals.length > 0 && (
+              <>
+                <div className="text-yellow-400/70 text-[10px] font-medium pt-1 border-t border-yellow-900/40">ドリンク・シャンパン合計</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1.5">
+                  {drinkTotals.map(renderItem)}
+                </div>
+              </>
+            )}
             {perSet.length > 0 && (
               <>
                 <div className="text-yellow-400/70 text-[10px] font-medium pt-1 border-t border-yellow-900/40">1セットあたり</div>
