@@ -235,16 +235,17 @@ export default function Dashboard() {
 
       {/* 月間ランキング（各指標の1位店舗） */}
       {rankings && (() => {
-        const renderItem = ([key, r]: [string, any]) => {
+        const renderItem = (stripPrefix?: string) => ([key, r]: [string, any]) => {
           const tops: any[] = r.tops || []
           const v = tops[0]?.value
           const fmtV = v == null ? '—' : r.format === 'yen'
             ? `¥${Number(v).toLocaleString()}`
             : Number(v).toLocaleString()
           const names = tops.map((t: any) => t.store_name).join('・') || '—'
+          const label = stripPrefix && r.label.startsWith(stripPrefix) ? r.label.slice(stripPrefix.length) : r.label
           return (
             <div key={key} className="bg-gray-900/60 rounded px-2 py-1 text-[11px] flex items-center justify-between gap-2">
-              <span className="text-gray-400 truncate">{r.label}</span>
+              <span className="text-gray-400 truncate">{label}</span>
               <span className="text-right shrink-0">
                 <span className="text-yellow-300 font-bold">{names}</span>
                 <span className="text-white ml-1">{fmtV}</span>
@@ -266,13 +267,13 @@ export default function Dashboard() {
               🏆 今月の1位（{rankings.year}年{rankings.month}月 / 月初〜現在）
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-              {general.map(renderItem)}
+              {general.map(renderItem())}
             </div>
             {drinkTotals.length > 0 && (
               <>
                 <div className="text-yellow-400/70 text-[10px] font-medium pt-1 border-t border-yellow-900/40">ドリンク・シャンパン合計</div>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1.5">
-                  {drinkTotals.map(renderItem)}
+                  {drinkTotals.map(renderItem())}
                 </div>
               </>
             )}
@@ -280,7 +281,7 @@ export default function Dashboard() {
               <>
                 <div className="text-yellow-400/70 text-[10px] font-medium pt-1 border-t border-yellow-900/40">1セットあたり</div>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-1.5">
-                  {perSet.map(renderItem)}
+                  {perSet.map(renderItem('1セットあたり'))}
                 </div>
               </>
             )}
