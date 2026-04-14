@@ -5404,7 +5404,7 @@ function HelpClockInForm({ storeId, helpStoreId, setHelpStoreId, helpCastName, s
   // ヘルプ元店舗のキャスト一覧取得
   const { data: helpCasts = [] } = useQuery({
     queryKey: ['casts', helpStoreId],
-    queryFn: () => apiClient.get('/api/casts', { params: { store_id: helpStoreId } }).then(r => r.data),
+    queryFn: () => apiClient.get(`/api/casts/${helpStoreId}`).then(r => r.data),
     enabled: helpStoreId !== '',
   })
   const activeCasts = (helpCasts as any[]).filter((c: any) => !c.is_retired && c.is_active)
