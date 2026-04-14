@@ -5946,6 +5946,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
       setHelpStoreId('')
       setClockInTab('normal')
     },
+    onError: (e: any) => alert(`ヘルプ出勤に失敗しました: ${e?.response?.data?.detail ?? e?.message ?? '不明なエラー'}`),
   })
 
   const taikenClockInMutation = useMutation({
