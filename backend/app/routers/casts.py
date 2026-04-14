@@ -94,13 +94,21 @@ class CastResponse(BaseModel):
     is_retired: bool = False
     retired_at: Optional[date] = None
     taiken_status: Optional[str] = None
+    help_from_store_name: Optional[str] = None
 
     class Config:
         from_attributes = True
 
     @classmethod
-    def from_orm_cast(cls, cast: models.Cast):
+    def from_orm_cast(cls, cast: models.Cast, store_name_map: dict = None):
         photo_url = f"/uploads/casts/{cast.photo_path}" if cast.photo_path else None
+        # ヘルプキャストの所属店舗名を解決
+        help_store_name = None
+        if cast.stage_name and cast.stage_name.startswith("[ヘルプ]") and cast.notes:
+            import re
+            m = re.search(r"from store (\d+)", cast.notes)
+            if m and store_name_map:
+                help_store_name = store_name_map.get(int(m.group(1)))
         return cls(
             id=cast.id,
             store_id=cast.store_id,
@@ -121,6 +129,7 @@ class CastResponse(BaseModel):
             is_active=cast.is_active,
             is_retired=bool(getattr(cast, 'is_retired', False)),
             retired_at=getattr(cast, 'retired_at', None),
+            help_from_store_name=help_store_name,
         )
 
 
@@ -135,7 +144,9 @@ def get_casts(
     if not include_retired:
         q = q.filter(models.Cast.is_retired == False)
     casts = q.all()
-    return [CastResponse.from_orm_cast(c) for c in casts]
+    # ヘルプキャストの所属店舗名解決用マップ
+    store_map = {s.id: s.name for s in db.query(models.Store).all()}
+    return [CastResponse.from_orm_cast(c, store_map) for c in casts]
 
 
 @router.get("/{store_id}/{cast_id}", response_model=CastResponse)

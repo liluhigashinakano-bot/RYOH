@@ -226,12 +226,18 @@ export default function CastList() {
             >
               {/* 在籍/退店ボタン（右上） */}
               {!cast.is_retired ? (
+                cast.help_from_store_name ? (
+                  <span className="absolute top-2 right-2 text-xs text-blue-400 bg-blue-900/30 px-2 py-0.5 rounded">
+                    {cast.help_from_store_name}
+                  </span>
+                ) : (
                 <button
                   onClick={e => { e.stopPropagation(); setRetireTarget(cast) }}
                   className="absolute top-2 right-2 text-xs text-gray-600 hover:text-red-400 px-2 py-0.5 rounded hover:bg-red-900/20 transition-colors"
                 >
                   在籍
                 </button>
+                )
               ) : (
                 <button
                   onClick={e => { e.stopPropagation(); setReinstateTarget(cast) }}
