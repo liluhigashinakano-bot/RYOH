@@ -53,7 +53,7 @@ function StoreSettings({ store }: { store: any }) {
 
       <div className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
         <div>
-          <div className="text-white text-sm">付け回しAIアドバイス</div>
+          <div className="text-white text-sm">AI付け回しエージェント</div>
           <div className="text-gray-500 text-xs">OFFにするとボタンがグレーアウト</div>
         </div>
         <Toggle enabled={aiEnabled} onToggle={() => mutation.mutate({ ai_advisor_enabled: !aiEnabled })} disabled={mutation.isPending} />

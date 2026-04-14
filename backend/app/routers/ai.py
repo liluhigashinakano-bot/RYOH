@@ -464,7 +464,7 @@ def rotation_history(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """付け回しAIアドバイスの履歴（直近20件）"""
+    """AI付け回しエージェントの履歴（直近20件）"""
     rows = db.query(models.AIAdvice).filter(
         models.AIAdvice.store_id == store_id,
         models.AIAdvice.advice_type == models.AIAdviceType.rotation,

@@ -450,7 +450,7 @@ export default function POS() {
               disabled={(storeInfo as any)?.ai_advisor_enabled === false}
               className={`text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap shrink-0 border ${(storeInfo as any)?.ai_advisor_enabled === false ? 'bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed' : 'bg-pink-800 hover:bg-pink-700 text-white border-pink-500/50'}`}
             >
-              🤖 付け回しAIアドバイス
+              🤖 AI付け回しエージェント
             </button>
           )}
           {/* 右: 売上サマリ + 営業ボタン */}
@@ -662,7 +662,7 @@ export default function POS() {
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowAIAdvisor(false)}>
           <div className="bg-night-900 border border-pink-500/30 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-              <h3 className="text-white font-bold text-sm">🤖 付け回しAIアドバイス</h3>
+              <h3 className="text-white font-bold text-sm">🤖 AI付け回しエージェント</h3>
               <div className="flex items-center gap-2">
                 <div className="flex bg-gray-800 rounded p-0.5 gap-0.5">
                   <button onClick={() => setAIAdvisorTab('current')} className={`text-[10px] px-2 py-0.5 rounded ${aiAdvisorTab === 'current' ? 'bg-pink-700 text-white' : 'text-gray-400'}`}>最新</button>
@@ -4002,7 +4002,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <button onClick={aiOff ? undefined : fetchAI} disabled={loadingAI || aiOff}
                       className={`flex items-center gap-1.5 text-xs font-medium disabled:opacity-50 ${aiOff ? 'text-gray-600 cursor-not-allowed' : 'text-primary-400'}`}>
                       <Bot className="w-3.5 h-3.5" />
-                      {loadingAI ? 'AI分析中...' : '付け回しAIアドバイス'}
+                      {loadingAI ? 'AI分析中...' : 'AI付け回しエージェント'}
                     </button>
                   )
                 })()}
