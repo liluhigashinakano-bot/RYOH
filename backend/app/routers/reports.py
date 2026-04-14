@@ -452,12 +452,12 @@ def update_tissue_count(
     if not snap:
         raise HTTPException(status_code=404, detail="スナップショットが見つかりません")
     payload = snap.payload or {}
-    casts = payload.get("cast_performance", [])
+    casts = payload.get("cast_attendance", [])
     if data.cast_index < 0 or data.cast_index >= len(casts):
         raise HTTPException(status_code=400, detail="キャストインデックスが不正です")
     old_count = casts[data.cast_index].get("tissue_count", 0)
     casts[data.cast_index]["tissue_count"] = data.tissue_count
-    payload["cast_performance"] = casts
+    payload["cast_attendance"] = casts
     snap.payload = payload
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(snap, "payload")
