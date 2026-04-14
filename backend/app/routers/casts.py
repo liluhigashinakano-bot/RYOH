@@ -807,15 +807,15 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
     if already:
         return {"shift_id": already.id, "message": "既に出勤中です"}
 
-    # 本日のシフトを探す
-    shift = db.query(models.ConfirmedShift).filter(
-        models.ConfirmedShift.cast_id == data.cast_id,
-        models.ConfirmedShift.store_id == data.store_id,
-        models.ConfirmedShift.date == today,
-    ).first()
-
+    # 本日のシフトを探す（退勤済みシフトは上書きしない）
     if data.is_absent:
         # 当欠: actual_start なし、is_absent=True
+        shift = db.query(models.ConfirmedShift).filter(
+            models.ConfirmedShift.cast_id == data.cast_id,
+            models.ConfirmedShift.store_id == data.store_id,
+            models.ConfirmedShift.date == today,
+            models.ConfirmedShift.actual_start.is_(None),
+        ).first()
         if shift:
             shift.is_absent = True
             shift.actual_start = None
@@ -832,11 +832,19 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
         db.refresh(shift)
         return {"shift_id": shift.id, "message": "当欠で登録しました"}
 
-    if shift:
-        shift.actual_start = now
-        shift.actual_end = None
-        shift.is_late = data.is_late
-        shift.is_absent = False
+    # 未打刻シフト（予定のみ or 欠勤）があれば流用、なければ新規行
+    empty_shift = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.cast_id == data.cast_id,
+        models.ConfirmedShift.store_id == data.store_id,
+        models.ConfirmedShift.date == today,
+        models.ConfirmedShift.actual_start.is_(None),
+    ).first()
+    if empty_shift:
+        empty_shift.actual_start = now
+        empty_shift.actual_end = None
+        empty_shift.is_late = data.is_late
+        empty_shift.is_absent = False
+        shift = empty_shift
     else:
         shift = models.ConfirmedShift(
             cast_id=data.cast_id,
@@ -885,8 +893,42 @@ def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Sess
         changed_by=current_user.id,
     )
     db.add(log)
+    db.flush()
+    # 同日・同キャスト・同店舗の退勤済みシフトで重なり/隣接するものをマージ
+    _merge_overlapping_shifts(db, shift.cast_id, shift.store_id, shift.date)
     db.commit()
     return {"message": "退勤しました"}
+
+
+def _merge_overlapping_shifts(db: Session, cast_id: Optional[int], store_id: int, target_date: date):
+    """同日・同キャスト・同店舗の退勤済みシフトを重なり/隣接判定でマージする。
+    - min(actual_start), max(actual_end) で統合
+    - 統合対象の他シフトは削除"""
+    if cast_id is None:
+        return
+    shifts = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.cast_id == cast_id,
+        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.date == target_date,
+        models.ConfirmedShift.actual_start.isnot(None),
+        models.ConfirmedShift.actual_end.isnot(None),
+        models.ConfirmedShift.is_absent == False,
+    ).order_by(models.ConfirmedShift.actual_start.asc()).all()
+    if len(shifts) < 2:
+        return
+    current = shifts[0]
+    for s in shifts[1:]:
+        # 重なりまたは隣接（s.start <= current.end）ならマージ
+        if s.actual_start <= current.actual_end:
+            if s.actual_start < current.actual_start:
+                current.actual_start = s.actual_start
+                if s.is_late and not current.is_late:
+                    current.is_late = True
+            if s.actual_end > current.actual_end:
+                current.actual_end = s.actual_end
+            db.delete(s)
+        else:
+            current = s
 
 
 @router.patch("/attendance/{shift_id}/time")
