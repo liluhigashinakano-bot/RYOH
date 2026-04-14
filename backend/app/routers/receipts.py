@@ -38,6 +38,22 @@ def _item_display_name(item) -> str:
     return ITEM_TYPE_LABELS.get(raw, raw)
 
 
+def _group_order_items(order_items) -> list:
+    """同名・同単価のアイテムを合算して (name, qty, unit_price, amount) のリストを返す"""
+    groups: dict = {}
+    for item in order_items:
+        if item.canceled_at:
+            continue
+        name = _item_display_name(item)
+        unit = item.unit_price or 0
+        key = (name, unit)
+        if key not in groups:
+            groups[key] = {"qty": 0, "amount": 0}
+        groups[key]["qty"] += item.quantity or 1
+        groups[key]["amount"] += item.amount or 0
+    return [(name, g["qty"], unit, g["amount"]) for (name, unit), g in groups.items()]
+
+
 # ─────────────────────────────────────────
 # 共通ヘルパー
 # ─────────────────────────────────────────
@@ -337,14 +353,11 @@ def _generate_estimate_80mm(ticket: models.Ticket, store: models.Store, amounts:
         y -= 5 * mm
 
         c.setFont(JP_FONT, 8)
-        for item in (ticket.order_items or []):
-            if item.canceled_at:
-                continue
-            name = _item_display_name(item)[:18]
-            qty = item.quantity or 1
-            amt = item.amount or 0
+        grouped = _group_order_items(ticket.order_items or [])
+        for name, qty, unit, amt in grouped:
+            name = name[:18]
             c.drawString(margin, y, name)
-            c.drawRightString(width - margin, y, f"{qty}  ¥{amt:,}")
+            c.drawRightString(width - margin, y, f"{qty}  ¥{unit:,}  ¥{amt:,}")
             y -= 4 * mm
 
         y -= 2 * mm
@@ -433,13 +446,9 @@ def _generate_estimate_a4(ticket: models.Ticket, store: models.Store, amounts: d
     c.line(margin, y, width - margin, y)
     y -= 5 * mm
 
-    for item in (ticket.order_items or []):
-        if item.canceled_at:
-            continue
-        name = _item_display_name(item)[:30]
-        qty = item.quantity or 1
-        amt = item.amount or 0
-        unit = item.unit_price or 0
+    grouped = _group_order_items(ticket.order_items or [])
+    for name, qty, unit, amt in grouped:
+        name = name[:30]
         c.drawString(margin, y, name)
         c.drawString(margin + 100 * mm, y, str(qty))
         c.drawRightString(width - margin - 30 * mm, y, f"¥{unit:,}")
