@@ -610,6 +610,12 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             "drink_s_per_set": None,
             "drink_l_per_set": None,
             "drink_mg_per_set": None,
+            "shot_cast_total": 0,
+            "shot_cast_per_set": None,
+            "champagne_count_per_set": None,
+            "champagne_amount_per_set": None,
+            "tissue_total": 0,
+            "motivation_tissue": 0,
         }
 
     motivation = defaultdict(int)
@@ -786,6 +792,10 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
             daily_profit_rates.append(pr)
     monthly_profit_rate = round(monthly_total_cost / sums["total_amount"] * 100, 1) if sums["total_amount"] > 0 else None
 
+    # キャスト累積から派生する月次合計
+    shot_cast_total = sum(int(c.get("shot_cast") or 0) for c in cast_summary)
+    tissue_total = sum(int(c.get("tissue_count") or 0) for c in cast_summary)
+
     return {
         **sums,
         "motivation": dict(motivation),
@@ -799,6 +809,12 @@ def _aggregate_monthly(payloads: list[dict]) -> dict:
         "drink_s_per_set": round(sums["drink_s_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_l_per_set": round(sums["drink_l_total"] / sums["set_count"], 2) if sums["set_count"] else None,
         "drink_mg_per_set": round(sums["drink_mg_total"] / sums["set_count"], 2) if sums["set_count"] else None,
+        "shot_cast_total": shot_cast_total,
+        "shot_cast_per_set": round(shot_cast_total / sums["set_count"], 2) if sums["set_count"] else None,
+        "champagne_count_per_set": round(sums["champagne_count"] / sums["set_count"], 2) if sums["set_count"] else None,
+        "champagne_amount_per_set": round(sums["champagne_amount"] / sums["set_count"]) if sums["set_count"] else None,
+        "tissue_total": tissue_total,
+        "motivation_tissue": int((motivation or {}).get("ティッシュ", 0)),
         "cast_summary": cast_summary,
         "staff_summary": staff_summary,
         "custom_drinks_total": dict(custom_drinks_total),
@@ -863,3 +879,81 @@ def get_monthly(
             for d in sorted(by_date.keys())
         ],
     }
+
+
+# ─────────────────────────────────────────
+# 月次ランキング（各指標の1位店舗）
+# ─────────────────────────────────────────
+_RANKING_METRICS = [
+    ("total_amount", "売上", "yen"),
+    ("guest_count", "客数", "num"),
+    ("avg_per_guest", "客単価", "yen"),
+    ("drink_l_total", "L数合計", "num"),
+    ("drink_l_per_set", "1セットあたりL数", "num"),
+    ("drink_mg_total", "MG数合計", "num"),
+    ("drink_mg_per_set", "1セットあたりMG数", "num"),
+    ("shot_cast_total", "ショット数合計", "num"),
+    ("shot_cast_per_set", "1セットあたりショット数", "num"),
+    ("champagne_count", "シャンパン本数合計", "num"),
+    ("champagne_count_per_set", "1セットあたりシャンパン本数", "num"),
+    ("champagne_amount", "シャンパン合計額", "yen"),
+    ("champagne_amount_per_set", "1セットあたりシャンパン金額", "yen"),
+    ("extension_count", "合計延長数", "num"),
+    ("motivation_tissue", "来店動機ティッシュ数", "num"),
+    ("tissue_total", "合計ティッシュ配布枚数", "num"),
+    ("cast_rotation_total", "合計キャスト交代数", "num"),
+]
+
+
+@router.get("/monthly-rankings")
+def get_monthly_rankings(
+    year: int = Query(...),
+    month: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """指定月の各指標について1位の店舗を返す"""
+    if not (1 <= month <= 12):
+        raise HTTPException(status_code=400, detail="month は 1-12")
+    stores = db.query(models.Store).filter(models.Store.is_active == True).all()
+    start = date_cls(year, month, 1)
+    if month == 12:
+        end = date_cls(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end = date_cls(year, month + 1, 1) - timedelta(days=1)
+
+    per_store: list[dict] = []
+    for store in stores:
+        rows = db.query(models.DailyReportSnapshot).filter(
+            models.DailyReportSnapshot.store_id == store.id,
+            models.DailyReportSnapshot.business_date >= start,
+            models.DailyReportSnapshot.business_date <= end,
+        ).order_by(
+            models.DailyReportSnapshot.business_date.asc(),
+            models.DailyReportSnapshot.version.desc(),
+        ).all()
+        by_date: dict = {}
+        for r in rows:
+            if r.business_date in by_date:
+                continue
+            by_date[r.business_date] = r
+        payloads = [_enrich_legacy_payload(db, r.payload) for r in by_date.values() if r.payload]
+        summary = _aggregate_monthly(payloads)
+        per_store.append({
+            "store_id": store.id,
+            "store_name": store.name,
+            "summary": summary,
+        })
+
+    rankings: dict = {}
+    for key, label, fmt in _RANKING_METRICS:
+        best = None
+        for s in per_store:
+            v = s["summary"].get(key)
+            if v is None:
+                continue
+            if best is None or (v or 0) > (best["value"] or 0):
+                best = {"store_id": s["store_id"], "store_name": s["store_name"], "value": v}
+        rankings[key] = {"label": label, "format": fmt, "top": best}
+
+    return {"year": year, "month": month, "rankings": rankings}
