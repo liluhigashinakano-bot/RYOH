@@ -3047,6 +3047,10 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
         </div>
         {isChampagne ? (
           <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
+            <button onClick={() => onSubmit([])}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors border border-dashed border-gray-600">
+              選択なし（キャスト指定なしで追加）
+            </button>
             {casts.map((c: any) => (
               <div key={c.id} className="flex items-center gap-2">
                 <button onClick={() => toggleCast(c.id)}
@@ -4219,6 +4223,14 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
                   qc.invalidateQueries({ queryKey: ['tickets', storeId] })
                 })
+            } else if (isChampagne && selections.length === 0) {
+              // キャスト指定なしでシャンパン追加
+              addOrderMutation.mutate({
+                item_type: 'champagne',
+                item_name: castSelectItem.label,
+                unit_price: castSelectItem.price,
+                quantity: 1,
+              })
             } else if (!isChampagne && selections.length > 0) {
               const { castId, castName } = selections[0]
               const itemName = `${castSelectItem.label}［${castName}］`
