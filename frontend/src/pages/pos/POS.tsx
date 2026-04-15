@@ -390,6 +390,24 @@ export default function POS() {
     staleTime: 60000,
   })
 
+  // ヘッダー表示用: ティッシュ配り中一覧
+  const { data: headerActiveTissue = [] } = useQuery({
+    queryKey: ['tissue-active', selectedStoreId],
+    queryFn: () => apiClient.get('/api/tissue/active', { params: { store_id: selectedStoreId } }).then(r => r.data),
+    enabled: !!selectedStoreId,
+    refetchInterval: 15000,
+  })
+  const headerNow = useNow()
+  const headerFmtMin = (startIso: string | null | undefined): string => {
+    const sec = calcElapsed(startIso, headerNow)
+    const h = Math.floor(sec / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    const s = sec % 60
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    if (h > 0) return `${h}:${pad(m)}:${pad(s)}`
+    return `${pad(m)}:${pad(s)}`
+  }
+
   const createMutation = useMutation({
     mutationFn: (data: { store_id: number; table_no?: string; guest_count: number; plan_type: string; visit_type: string; visit_motivation?: string; motivation_cast_id?: number | null; motivation_cast_ids?: number[]; motivation_note?: string }) =>
       apiClient.post('/api/tickets', data).then(r => r.data),
@@ -452,6 +470,20 @@ export default function POS() {
             >
               🤖 AI付け回しエージェント
             </button>
+          )}
+          {/* 中央: ティッシュ配り中キャスト */}
+          {(headerActiveTissue as any[]).length > 0 && (
+            <div className="hidden lg:flex items-center gap-2 text-xs text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-2 py-1 min-w-0">
+              <span className="text-amber-400 shrink-0">🧻 ティッシュ配り中</span>
+              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                {(headerActiveTissue as any[]).map((t: any) => (
+                  <span key={t.id} className="whitespace-nowrap">
+                    <span className="text-white font-medium">{t.cast_name}</span>
+                    <span className="text-amber-300 ml-1">{headerFmtMin(t.started_at)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
           )}
           {/* 右: 売上サマリ + 営業ボタン */}
           <div className="flex items-center gap-2 ml-auto shrink-0">
