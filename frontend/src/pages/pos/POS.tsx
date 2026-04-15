@@ -5127,6 +5127,17 @@ function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
     queryFn: () => apiClient.get('/api/staff').then(r => r.data),
   })
 
+  // 店舗所属社員→店舗所属アルバイト→他店舗社員→他店舗アルバイト の順に並べ替え
+  const sortedStaff = [...(staffList as any[])].sort((a, b) => {
+    const aIn = (a.store_ids || []).includes(storeId) ? 0 : 1
+    const bIn = (b.store_ids || []).includes(storeId) ? 0 : 1
+    if (aIn !== bIn) return aIn - bIn
+    const aType = a.employee_type === 'staff' ? 0 : 1
+    const bType = b.employee_type === 'staff' ? 0 : 1
+    if (aType !== bType) return aType - bType
+    return (a.name || '').localeCompare(b.name || '', 'ja')
+  })
+
   const amount = parseInt(input, 10) || 0
   const reason = reasonType === 'その他' ? (customReason.trim() || 'その他') : '端数カット'
   const canSubmit = amount > 0 && operator.trim()
@@ -5217,9 +5228,15 @@ function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
           <select value={operator} onChange={e => setOperator(e.target.value)}
             className="input-field w-full">
             <option value="">選択してください</option>
-            {(staffList as any[]).map((m: any) => (
-              <option key={m.id} value={m.name}>{m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}）</option>
-            ))}
+            {sortedStaff.map((m: any) => {
+              const isOther = !(m.store_ids || []).includes(storeId)
+              const typeLabel = m.employee_type === 'staff' ? '社員' : 'アルバイト'
+              return (
+                <option key={m.id} value={m.name}>
+                  {m.name}（{typeLabel}{isOther ? '・他店舗' : ''}）
+                </option>
+              )
+            })}
           </select>
         </div>
 
