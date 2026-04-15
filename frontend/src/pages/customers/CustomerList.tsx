@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, X, User, Upload, Cake, RefreshCw } from 'lucide-react'
+import { Search, Plus, X, User, Upload, Cake, RefreshCw, Store as StoreIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
@@ -55,7 +55,14 @@ function formatInTime(t: number): string {
 }
 
 export default function CustomerList() {
-  const { stores } = useAuthStore()
+  const { stores: authStores } = useAuthStore()
+  const { data: allStoresData = [] } = useQuery({
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
+    staleTime: 1000 * 60 * 10,
+  })
+  const stores = (allStoresData as any[]).length ? (allStoresData as any[]) : authStores
+  const storeNameMap = new Map(stores.map((s: any) => [s.id, s.name]))
   const [q, setQ] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('来店回数')
   const [sortAsc, setSortAsc] = useState(false)
@@ -217,12 +224,19 @@ export default function CustomerList() {
                 }
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="font-medium text-white">{c.name}</p>
-                  {c.alias && <span className="text-gray-400 text-sm">{c.alias}</span>}
-                  {c.age_group && <span className="text-gray-500 text-xs">{c.age_group}</span>}
-                  {c.features && <span className="text-gray-500 text-xs truncate max-w-[160px]">{c.features}</span>}
-                  {c.is_blacklisted && <span className="badge bg-red-900/40 text-red-400 text-xs">BL</span>}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <p className="font-medium text-white">{c.name}</p>
+                    {c.alias && <span className="text-gray-400 text-sm">{c.alias}</span>}
+                    {c.age_group && <span className="text-gray-500 text-xs">{c.age_group}</span>}
+                    {c.features && <span className="text-gray-500 text-xs truncate max-w-[160px]">{c.features}</span>}
+                    {c.is_blacklisted && <span className="badge bg-red-900/40 text-red-400 text-xs">BL</span>}
+                  </div>
+                  {storeNameMap.get(c.store_id) && (
+                    <span className="flex items-center gap-1 text-[10px] bg-night-700 text-gray-300 border border-night-600 px-2 py-0.5 rounded-full shrink-0">
+                      <StoreIcon className="w-3 h-3" />{storeNameMap.get(c.store_id)}
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
                   <span>来店<span className="text-white ml-0.5">{c.total_visits}回</span></span>
