@@ -125,19 +125,19 @@ def get_dashboard(
     ).all()
 
     def grand_total(t):
-        # 先会計・分割清算・値引き は order_items に負の amount で記録されているため
-        # total_amount から控除済み。サービス料10% + 消費税10% = 1.21倍を上乗せした
-        # 「税サ込み合計」を返す（先会計分は税サ対象外なので戻して計算）。
-        senkaikei = sum(
-            abs(i.amount or 0) for i in (t.order_items or [])
+        # 先会計/分割清算/値引き(負) と 加算(正) は調整項目として税サ対象外。
+        # 一旦 total_amount から除き、税サ計算後に足し戻す。
+        adj = sum(
+            (i.amount or 0) for i in (t.order_items or [])
             if i.canceled_at is None and (
                 (i.item_name or '').startswith('先会計')
                 or (i.item_name or '').startswith('分割清算')
                 or (i.item_name or '').startswith('値引き')
+                or (i.item_name or '').startswith('加算')
             )
         )
-        subtotal = (t.total_amount or 0) + senkaikei
-        gross = round(subtotal * 1.21) - senkaikei
+        subtotal = (t.total_amount or 0) - adj
+        gross = round(subtotal * 1.21) + adj
         return max(0, gross - (t.discount_amount or 0))
 
     closed_sales = sum(grand_total(t) for t in closed_tickets)
@@ -358,16 +358,17 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
     ).all()
 
     def _grand(t):
-        sk = sum(
-            abs(i.amount) for i in (t.order_items or [])
+        adj = sum(
+            (i.amount or 0) for i in (t.order_items or [])
             if i.item_name and (
                 i.item_name.startswith('先会計') or
                 i.item_name.startswith('分割清算') or
-                i.item_name.startswith('値引き')
+                i.item_name.startswith('値引き') or
+                i.item_name.startswith('加算')
             ) and not i.canceled_at
         )
-        sub = (t.total_amount or 0) + sk
-        return round(sub * 1.21) - sk
+        sub = (t.total_amount or 0) - adj
+        return round(sub * 1.21) + adj
 
     sales = sum(_grand(t) for t in closed_tickets)
 

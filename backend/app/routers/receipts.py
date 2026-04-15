@@ -59,26 +59,26 @@ def _group_order_items(order_items) -> list:
 # ─────────────────────────────────────────
 def _calc_amounts(ticket: models.Ticket) -> dict:
     """ticket から税サ込み合計・サービス料・消費税を算出"""
-    senkaikei = sum(
-        abs(i.amount or 0) for i in (ticket.order_items or [])
+    adj = sum(
+        (i.amount or 0) for i in (ticket.order_items or [])
         if i.canceled_at is None and (
             (i.item_name or '').startswith('先会計')
             or (i.item_name or '').startswith('分割清算')
             or (i.item_name or '').startswith('値引き')
+            or (i.item_name or '').startswith('加算')
         )
     )
-    subtotal = (ticket.total_amount or 0) + senkaikei  # 税サ対象の小計
+    subtotal = (ticket.total_amount or 0) - adj  # 税サ対象の小計（調整項目を除外）
     # サービス料10%, 消費税10% (合計21%)
     service = round(subtotal * 0.10)
     tax_base = subtotal + service
     tax = round(tax_base * 0.10)
-    grand = subtotal + service + tax - senkaikei - (ticket.discount_amount or 0)
+    grand = subtotal + service + tax + adj - (ticket.discount_amount or 0)
     return {
         "subtotal": subtotal,
         "service": service,
         "tax": tax,
         "grand": max(0, grand),
-        "senkaikei": senkaikei,
     }
 
 

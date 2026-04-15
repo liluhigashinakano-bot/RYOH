@@ -933,16 +933,17 @@ def _compute_live_today_stats(db: Session, store_id: int) -> dict:
     all_tickets = closed + opened
 
     def _grand(t):
-        senkaikei = sum(
-            abs(i.amount or 0) for i in (t.order_items or [])
+        adj = sum(
+            (i.amount or 0) for i in (t.order_items or [])
             if i.canceled_at is None and (
                 (i.item_name or '').startswith('先会計')
                 or (i.item_name or '').startswith('分割清算')
                 or (i.item_name or '').startswith('値引き')
+                or (i.item_name or '').startswith('加算')
             )
         )
-        subtotal = (t.total_amount or 0) + senkaikei
-        gross = round(subtotal * 1.21) - senkaikei
+        subtotal = (t.total_amount or 0) - adj
+        gross = round(subtotal * 1.21) + adj
         return max(0, gross - (t.discount_amount or 0))
 
     total_amount = sum(_grand(t) for t in all_tickets)

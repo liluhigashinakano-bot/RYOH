@@ -78,11 +78,12 @@ function useNow() {
 
 // チケットのgrandTotal（税サ込み・先会計前の全額）を計算
 function calcTicketGrandTotal(ticket: any): number {
-  const sk = (ticket.order_items || [])
-    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
-    .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
-  const sub = ticket.total_amount + sk
-  return Math.max(0, Math.round(sub * 1.21) - sk - (ticket.discount_amount || 0))
+  // 値引き/先会計/分割清算(負) と 加算(正) は税サ対象外の調整項目
+  const adj = (ticket.order_items || [])
+    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き') || i.item_name?.startsWith('加算')) && !i.canceled_at)
+    .reduce((s: number, i: any) => s + i.amount, 0)
+  const sub = ticket.total_amount - adj
+  return Math.max(0, Math.round(sub * 1.21) + adj - (ticket.discount_amount || 0))
 }
 
 // 0〜5時 → 24〜29時に変換（バー営業時間表記）
@@ -2291,11 +2292,11 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
 
       {/* 合計 */}
       {(() => {
-        const sk = (ticket.order_items || [])
-          .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
-          .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
-        const sub = ticket.total_amount + sk
-        const grand = Math.round(sub * 1.21) - sk
+        const adj = (ticket.order_items || [])
+          .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き') || i.item_name?.startsWith('加算')) && !i.canceled_at)
+          .reduce((s: number, i: any) => s + i.amount, 0)
+        const sub = ticket.total_amount - adj
+        const grand = Math.round(sub * 1.21) + adj
         return (
           <div className="border-t border-night-600 pt-2 space-y-0.5">
             <p className="text-xs text-gray-400">延長 {(() => {
@@ -2969,11 +2970,12 @@ function ChampagneMenuModal({ onSelect, onClose }: {
 
 // キャスト選択が必要な注文ボタンを押したときのモーダル
 // シャンパンのみ複数キャスト選択可（キャストごとに1件ずつ追加）
-function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
+function CastSelectModal({ itemType, itemLabel, itemPrice, storeId, onSubmit, onClose }: {
   itemType: string
   itemLabel: string
+  itemPrice: number
   storeId: number
-  onSubmit: (selections: { castId: number; castName: string; ratio: number }[]) => void
+  onSubmit: (selections: { castId: number; castName: string; ratio: number }[], discount: number) => void
   onClose: () => void
 }) {
   const { data: castsAll = [] } = useQuery({
@@ -2998,6 +3000,9 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
   // 複数選択＋割合（シャンパン）
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [ratios, setRatios] = useState<Record<number, number>>({}) // castId -> %(10,20,...,100)
+  // 割引（シャンパンのみ）
+  const [discountInput, setDiscountInput] = useState('')
+  const discount = Math.max(0, Math.min(itemPrice, parseInt(discountInput, 10) || 0))
 
   const redistributeRatios = (ids: Set<number>) => {
     const arr = Array.from(ids)
@@ -3031,10 +3036,10 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
       const selections = casts
         .filter((c: any) => selectedIds.has(c.id))
         .map((c: any) => ({ castId: c.id, castName: c.stage_name, ratio: ratios[c.id] || 10 }))
-      onSubmit(selections)
+      onSubmit(selections, discount)
     } else {
       const cast = casts.find((c: any) => c.id === castId)
-      if (cast) onSubmit([{ castId: cast.id, castName: cast.stage_name, ratio: 100 }])
+      if (cast) onSubmit([{ castId: cast.id, castName: cast.stage_name, ratio: 100 }], 0)
     }
   }
 
@@ -3047,7 +3052,7 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
         </div>
         {isChampagne ? (
           <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
-            <button onClick={() => onSubmit([])}
+            <button onClick={() => onSubmit([], discount)}
               className="w-full text-left px-3 py-2 rounded-lg text-sm bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors border border-dashed border-gray-600">
               選択なし（キャスト指定なしで追加）
             </button>
@@ -3082,6 +3087,23 @@ function CastSelectModal({ itemType, itemLabel, storeId, onSubmit, onClose }: {
         {isChampagne && selectedIds.size > 0 && (
           <div className={`text-sm text-center font-bold ${ratioOver ? 'text-red-400' : 'text-gray-400'}`}>
             合計: {totalRatio}% {ratioOver && '（100%を超えています）'}
+          </div>
+        )}
+        {isChampagne && (
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">割引額（任意）</label>
+            <div className="flex items-center gap-2">
+              <span className="text-gray-400">¥</span>
+              <input type="number" min={0} max={itemPrice} value={discountInput}
+                onChange={e => setDiscountInput(e.target.value)}
+                placeholder="0"
+                className="input-field flex-1 text-right" />
+            </div>
+            {discount > 0 && (
+              <p className="text-xs text-gray-500 mt-1 text-right">
+                ¥{itemPrice.toLocaleString()} → <span className="text-orange-400">¥{(itemPrice - discount).toLocaleString()}</span>
+              </p>
+            )}
           </div>
         )}
         <div className="flex gap-3">
@@ -3460,12 +3482,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const startedAtMs = toUtcMs(ticket.started_at)
   const startedAt = startedAtMs ? new Date(startedAtMs) : new Date()
 
-  // 先会計: 小計には含めず、合計（税サ込み）からのみ差し引く
-  const senkaikeiTotal = (ticket.order_items || [])
-    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き')) && !i.canceled_at)
-    .reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
-  const subtotal = ticket.total_amount + senkaikeiTotal
-  const grandTotal = Math.round(subtotal * 1.21) - senkaikeiTotal
+  // 先会計/値引き(負)・加算(正) は税サ対象外の調整項目として扱う
+  const adjTotal = (ticket.order_items || [])
+    .filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算') || i.item_name?.startsWith('値引き') || i.item_name?.startsWith('加算')) && !i.canceled_at)
+    .reduce((s: number, i: any) => s + i.amount, 0)
+  const subtotal = ticket.total_amount - adjTotal
+  const grandTotal = Math.round(subtotal * 1.21) + adjTotal
 
   return (
     <>
@@ -3779,7 +3801,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     for (const item of raw) {
                       if (item.canceled_at) { grouped.push(item); continue }
                       const canMerge = item.item_type !== 'join' && item.item_type !== 'set'
-                        && !item.item_name?.startsWith('先会計') && !item.item_name?.startsWith('分割清算') && !item.item_name?.startsWith('先退店') && !item.item_name?.startsWith('値引き')
+                        && !item.item_name?.startsWith('先会計') && !item.item_name?.startsWith('分割清算') && !item.item_name?.startsWith('先退店') && !item.item_name?.startsWith('値引き') && !item.item_name?.startsWith('加算')
                       if (canMerge) {
                         const key = `${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
                         const existing = grouped.find((g: any) => !g.canceled_at && g._groupKey === key)
@@ -3818,8 +3840,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                           {item.quantity}
                         </td>
                         <td className={`text-right px-2 py-2 ${isCanceled ? 'text-gray-600' : 'text-gray-400'}`}>¥{item.unit_price.toLocaleString()}</td>
-                        <td className={`text-right px-4 py-2 font-medium ${isCanceled ? 'line-through text-gray-600' : (item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算')) ? 'text-blue-400' : item.item_name?.startsWith('値引き') ? 'text-orange-400' : 'text-white'}`}>
-                          {(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算') || item.item_name?.startsWith('値引き')) ? `-¥${Math.abs(item.amount).toLocaleString()}` : `¥${item.amount.toLocaleString()}`}
+                        <td className={`text-right px-4 py-2 font-medium ${isCanceled ? 'line-through text-gray-600' : (item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算')) ? 'text-blue-400' : item.item_name?.startsWith('値引き') ? 'text-orange-400' : item.item_name?.startsWith('加算') ? 'text-green-400' : 'text-white'}`}>
+                          {(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算') || item.item_name?.startsWith('値引き')) ? `-¥${Math.abs(item.amount).toLocaleString()}` : item.item_name?.startsWith('加算') ? `+¥${Math.abs(item.amount).toLocaleString()}` : `¥${item.amount.toLocaleString()}`}
                         </td>
                       </tr>
                     )
@@ -3840,6 +3862,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               {(() => {
                 const senkaikei = (ticket.order_items || []).filter((i: any) => (i.item_name?.startsWith('先会計') || i.item_name?.startsWith('分割清算')) && !i.canceled_at).reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
                 const discount  = (ticket.order_items || []).filter((i: any) => i.item_name?.startsWith('値引き') && !i.canceled_at).reduce((s: number, i: any) => s + Math.abs(i.amount), 0)
+                const kasan     = (ticket.order_items || []).filter((i: any) => i.item_name?.startsWith('加算') && !i.canceled_at).reduce((s: number, i: any) => s + i.amount, 0)
                 return <>
                   {senkaikei > 0 && (
                     <div className="flex justify-between items-center">
@@ -3853,6 +3876,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                       <span className="text-orange-400 text-sm">-¥{discount.toLocaleString()}</span>
                     </div>
                   )}
+                  {kasan > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-green-400 text-xs">加算</span>
+                      <span className="text-green-400 text-sm">+¥{kasan.toLocaleString()}</span>
+                    </div>
+                  )}
                 </>
               })()}
               <div className="flex justify-between items-center">
@@ -3860,7 +3889,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 {!isClosed ? (
                   <button onClick={() => setShowDiscountModal(true)}
                     className="text-primary-400 font-bold text-lg hover:text-primary-300 transition-colors active:scale-95 flex items-center gap-1.5"
-                    title="クリックで値引き（合計修正）">
+                    title="クリックで合計修正（値引き/加算）">
                     <Pencil className="w-3.5 h-3.5 text-gray-400" />
                     ¥{grandTotal.toLocaleString()}
                   </button>
@@ -3899,7 +3928,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 <button
                   onClick={() => setShowPostDiscountModal(true)}
                   className="bg-orange-800 hover:bg-orange-700 text-white text-xs py-2 rounded-lg w-full"
-                >✏️ 値引きで修正</button>
+                >✏️ 合計修正</button>
               </div>
             </div>
           )}
@@ -4202,19 +4231,23 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         <CastSelectModal
           itemType={castSelectItem.type}
           itemLabel={castSelectItem.label}
+          itemPrice={castSelectItem.price}
           storeId={storeId}
-          onSubmit={(selections) => {
+          onSubmit={(selections, discount) => {
             const isChampagne = castSelectItem.type === 'champagne'
+            const basePrice = castSelectItem.price
+            const discountedPrice = Math.max(0, basePrice - (discount || 0))
+            const suffix = discount > 0 ? `（割引-¥${discount.toLocaleString()}）` : ''
             if (isChampagne && selections.length > 0) {
               const castsStr = selections.map(s => `${s.castName} ${s.ratio}%`).join('・')
-              const itemName = `${castSelectItem.label}［${castsStr}］`
+              const itemName = `${castSelectItem.label}${suffix}［${castsStr}］`
               // 構造化された分配情報（cast_id ベース・全行に同じJSONをコピー）
               const castDistribution = selections.map(s => ({ cast_id: s.castId, ratio: s.ratio }))
-              // 最初のキャストに全額、残りは0円マーカー（D時間追跡用）
+              // 最初のキャストに全額（割引後）、残りは0円マーカー（D時間追跡用）
               const orders = selections.map((s, i) => ({
                 item_type: 'champagne',
                 item_name: itemName,
-                unit_price: i === 0 ? castSelectItem.price : 0,
+                unit_price: i === 0 ? discountedPrice : 0,
                 quantity: 1,
                 cast_id: s.castId,
                 cast_distribution: castDistribution,
@@ -4228,8 +4261,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               // キャスト指定なしでシャンパン追加
               addOrderMutation.mutate({
                 item_type: 'champagne',
-                item_name: castSelectItem.label,
-                unit_price: castSelectItem.price,
+                item_name: `${castSelectItem.label}${suffix}`,
+                unit_price: discountedPrice,
                 quantity: 1,
               })
             } else if (!isChampagne && selections.length > 0) {
@@ -4428,16 +4461,18 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         />
       )}
 
-      {/* 値引きモーダル */}
+      {/* 値引き/加算モーダル */}
       {showDiscountModal && (
         <DiscountModal
           storeId={storeId}
-          onSubmit={(amount, reason, operator) => {
+          currentTotal={grandTotal}
+          onSubmit={(signedAmount, reason, operator) => {
             setShowDiscountModal(false)
+            const prefix = signedAmount > 0 ? '加算' : '値引き'
             addOrderMutation.mutate({
               item_type: 'other',
-              item_name: `値引き（${reason}）担当:${operator}`,
-              unit_price: -amount,
+              item_name: `${prefix}（${reason}）担当:${operator}`,
+              unit_price: signedAmount,
               quantity: 1,
             })
           }}
@@ -4467,15 +4502,16 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         </div>
       )}
 
-      {/* 会計済み伝票の合計修正（値引き）モーダル */}
+      {/* 会計済み伝票の合計修正（値引き/加算）モーダル */}
       {showPostDiscountModal && (
         <DiscountModal
           storeId={storeId}
-          onSubmit={async (amount, reason, operator) => {
+          currentTotal={grandTotal}
+          onSubmit={async (signedAmount, reason, operator) => {
             setShowPostDiscountModal(false)
             try {
               await apiClient.post(`/api/tickets/${ticketId}/post_discount`, {
-                amount,
+                amount: signedAmount,
                 reason,
                 operator_name: operator,
               })
@@ -4980,12 +5016,14 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
   )
 }
 
-function DiscountModal({ storeId, onSubmit, onClose }: {
+function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
   storeId: number
-  onSubmit: (amount: number, reason: string, operator: string) => void
+  currentTotal: number
+  onSubmit: (signedAmount: number, reason: string, operator: string) => void
   onClose: () => void
 }) {
   const [input, setInput] = useState('')
+  const [sign, setSign] = useState<'minus' | 'plus'>('minus')
   const [reasonType, setReasonType] = useState<'端数カット' | 'その他'>('端数カット')
   const [customReason, setCustomReason] = useState('')
   const [operator, setOperator] = useState('')
@@ -4999,18 +5037,36 @@ function DiscountModal({ storeId, onSubmit, onClose }: {
   const amount = parseInt(input, 10) || 0
   const reason = reasonType === 'その他' ? (customReason.trim() || 'その他') : '端数カット'
   const canSubmit = amount > 0 && operator.trim()
+  const signedAmount = sign === 'plus' ? amount : -amount
+  const isPlus = sign === 'plus'
+
+  // 100円未満の端数（正の値）
+  const remainder = ((currentTotal % 100) + 100) % 100
+  const hasRemainder = remainder > 0
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4">
       <div className="card w-full max-w-sm space-y-4">
         <div className="flex justify-between items-center">
-          <h3 className="font-bold text-white">値引き</h3>
+          <h3 className="font-bold text-white">合計修正（値引き/加算）</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">値引き金額</label>
+          <label className="text-xs text-gray-400 block mb-1">
+            金額（{isPlus ? '加算' : '値引き'}）
+          </label>
           <div className="flex items-center gap-2">
+            <div className="flex rounded-lg overflow-hidden border border-night-600 shrink-0">
+              <button type="button" onClick={() => setSign('minus')}
+                className={`px-3 py-2 text-sm font-bold transition-colors ${sign === 'minus' ? 'bg-orange-600 text-white' : 'bg-night-700 text-gray-400 hover:bg-night-600'}`}>
+                －
+              </button>
+              <button type="button" onClick={() => setSign('plus')}
+                className={`px-3 py-2 text-sm font-bold transition-colors ${sign === 'plus' ? 'bg-green-600 text-white' : 'bg-night-700 text-gray-400 hover:bg-night-600'}`}>
+                ＋
+              </button>
+            </div>
             <span className="text-gray-400">¥</span>
             <input type="number" min={1} value={input}
               onChange={e => setInput(e.target.value)}
@@ -5018,6 +5074,35 @@ function DiscountModal({ storeId, onSubmit, onClose }: {
               className="input-field flex-1 text-lg text-right"
               autoFocus />
           </div>
+          {currentTotal > 0 && (
+            <div className="flex gap-2 mt-2">
+              <button type="button"
+                disabled={!hasRemainder}
+                onClick={() => {
+                  setSign('minus')
+                  setInput(String(remainder))
+                  setReasonType('端数カット')
+                }}
+                className="flex-1 text-xs py-1.5 rounded-lg bg-orange-700/60 hover:bg-orange-700 text-white disabled:opacity-30 disabled:cursor-not-allowed">
+                100円以下切り捨て{hasRemainder ? `（-¥${remainder}）` : ''}
+              </button>
+              <button type="button"
+                disabled={!hasRemainder}
+                onClick={() => {
+                  setSign('plus')
+                  setInput(String(100 - remainder))
+                  setReasonType('端数カット')
+                }}
+                className="flex-1 text-xs py-1.5 rounded-lg bg-green-700/60 hover:bg-green-700 text-white disabled:opacity-30 disabled:cursor-not-allowed">
+                100円以下繰り上げ{hasRemainder ? `（+¥${100 - remainder}）` : ''}
+              </button>
+            </div>
+          )}
+          {currentTotal > 0 && amount > 0 && (
+            <p className="text-xs text-gray-500 mt-1.5 text-right">
+              合計: ¥{currentTotal.toLocaleString()} → <span className={isPlus ? 'text-green-400' : 'text-orange-400'}>¥{(currentTotal + signedAmount).toLocaleString()}</span>
+            </p>
+          )}
         </div>
 
         <div>
@@ -5048,7 +5133,7 @@ function DiscountModal({ storeId, onSubmit, onClose }: {
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
           <button
-            onClick={() => { if (canSubmit) onSubmit(amount, reason, operator) }}
+            onClick={() => { if (canSubmit) onSubmit(signedAmount, reason, operator) }}
             disabled={!canSubmit}
             className="btn-primary flex-1 disabled:opacity-40">
             実行
@@ -5931,6 +6016,9 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
       setStaffClockOutId(null)
+    },
+    onError: (e: any) => {
+      alert(e?.response?.data?.detail || e?.message || '退勤処理に失敗しました')
     },
   })
 

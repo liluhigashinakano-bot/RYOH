@@ -161,17 +161,18 @@ def _to_ticket_input(
     )
     calc_ext_count = ext_qty // guest
 
-    # 税サ込み合計
-    senkaikei = sum(
-        abs(o.amount or 0) for o in (ticket.order_items or [])
+    # 税サ込み合計（調整項目は税サ対象外）
+    adj = sum(
+        (o.amount or 0) for o in (ticket.order_items or [])
         if not o.canceled_at and (
             (o.item_name or '').startswith('先会計')
             or (o.item_name or '').startswith('分割清算')
             or (o.item_name or '').startswith('値引き')
+            or (o.item_name or '').startswith('加算')
         )
     )
-    subtotal = (ticket.total_amount or 0) + senkaikei
-    grand = round(subtotal * 1.21) - senkaikei - (ticket.discount_amount or 0)
+    subtotal = (ticket.total_amount or 0) - adj
+    grand = round(subtotal * 1.21) + adj - (ticket.discount_amount or 0)
     grand = max(0, grand)
 
     return rc.TicketInput(
@@ -470,7 +471,7 @@ def _extract_expenses(session: models.BusinessSession) -> dict:
             else:
                 other += int(v)
 
-    # 想定される構造2: { "withdrawals": [{"type": "日払い", "name": "あむ", ...}] }
+    # 想定される構造2: { "withdrawals": [{"type": "日払い", "person_name": "あむ", "name": "日払い（あむ）", ...}] }
     for key in ("withdrawals", "出金", "withdraw"):
         v = detail.get(key)
         if isinstance(v, list):
@@ -478,9 +479,18 @@ def _extract_expenses(session: models.BusinessSession) -> dict:
                 if isinstance(it, dict):
                     t = it.get("type") or it.get("category") or ""
                     if "日払い" in str(t):
-                        nm = it.get("name") or ""
+                        nm = it.get("person_name") or it.get("name") or ""
+                        nm = str(nm).strip()
+                        # 「日払い（あむ）」形式の場合は括弧内を抽出
+                        if nm and not it.get("person_name"):
+                            for lp, rp in (("（", "）"), ("(", ")")):
+                                if lp in nm and rp in nm:
+                                    inner = nm.split(lp, 1)[1].rsplit(rp, 1)[0].strip()
+                                    if inner:
+                                        nm = inner
+                                        break
                         if nm:
-                            daily_pay_names.add(str(nm).strip())
+                            daily_pay_names.add(nm)
 
     return {"alcohol": alcohol, "other": other, "daily_pay_names": daily_pay_names}
 

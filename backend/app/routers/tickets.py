@@ -1437,9 +1437,9 @@ def add_post_close_discount(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """会計済み伝票の合計を値引きで修正する"""
-    if data.amount <= 0:
-        raise HTTPException(status_code=400, detail="値引き金額は1以上にしてください")
+    """会計済み伝票の合計を値引き/加算で修正する（amount が負なら値引き、正なら加算）"""
+    if data.amount == 0:
+        raise HTTPException(status_code=400, detail="金額は0以外を指定してください")
     if not (data.operator_name or '').strip():
         raise HTTPException(status_code=400, detail="担当者は必須です")
     ticket = db.query(models.Ticket).filter(
@@ -1450,13 +1450,14 @@ def add_post_close_discount(
     if not ticket:
         raise HTTPException(status_code=404, detail="会計済み伝票が見つかりません")
 
+    prefix = "加算" if data.amount > 0 else "値引き"
     item = models.OrderItem(
         ticket_id=ticket_id,
         item_type="other",
-        item_name=f"値引き（{data.reason}）担当:{data.operator_name}",
+        item_name=f"{prefix}（{data.reason}）担当:{data.operator_name}",
         quantity=1,
-        unit_price=-data.amount,
-        amount=-data.amount,
+        unit_price=data.amount,
+        amount=data.amount,
     )
     db.add(item)
     ticket.total_amount += item.amount
@@ -1700,17 +1701,20 @@ def warikan_ticket(
 
 
 def _calc_grand_total(ticket: models.Ticket) -> int:
-    """チケットのgrandTotal（税サ込み・値引き・先会計反映後）を計算"""
-    sk = sum(
-        abs(i.amount) for i in (ticket.order_items or [])
+    """チケットのgrandTotal（税サ込み・値引き/加算・先会計反映後）を計算"""
+    # 値引き/先会計/分割清算は負、加算は正の amount として保存されている。
+    # これらは税サ対象外として扱うため、一旦 total_amount から除いて税サ計算後に足し戻す。
+    adj = sum(
+        (i.amount or 0) for i in (ticket.order_items or [])
         if i.item_name and (
             i.item_name.startswith('先会計') or
             i.item_name.startswith('分割清算') or
-            i.item_name.startswith('値引き')
+            i.item_name.startswith('値引き') or
+            i.item_name.startswith('加算')
         ) and not i.canceled_at
     )
-    sub = ticket.total_amount + sk
-    return round(sub * 1.21) - sk
+    sub = (ticket.total_amount or 0) - adj
+    return round(sub * 1.21) + adj
 
 
 @router.get("/live/{store_id}")
