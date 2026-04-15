@@ -79,6 +79,7 @@ export default function CastList() {
   const { stores } = useAuthStore()
   const navigate = useNavigate()
   const [storeId, setStoreId] = useState(stores[0]?.id ?? 0)
+  const [staffStoreId, setStaffStoreId] = useState<number | null>(null) // null = 全店舗
   const [employeeTab, setEmployeeTab] = useState<EmployeeTab>('cast')
   const [showAdd, setShowAdd] = useState(false)
   const [showAddStaff, setShowAddStaff] = useState(false)
@@ -138,10 +139,14 @@ export default function CastList() {
     })
   }, [casts, statsMap, sortKey, sortAsc])
 
-  // 社員・アルバイト一覧（店舗フィルタなし=全店舗横断）
+  // 社員・アルバイト一覧（店舗タブで絞り込み、全店舗選択時はフィルタなし）
   const { data: staffList = [] } = useQuery({
-    queryKey: ['staff', employeeTab],
-    queryFn: () => apiClient.get('/api/staff', { params: { employee_type: employeeTab } }).then(r => r.data),
+    queryKey: ['staff', employeeTab, staffStoreId],
+    queryFn: () => apiClient.get('/api/staff', {
+      params: staffStoreId != null
+        ? { employee_type: employeeTab, store_id: staffStoreId }
+        : { employee_type: employeeTab },
+    }).then(r => r.data),
     enabled: employeeTab === 'staff' || employeeTab === 'part_time',
   })
 
@@ -203,6 +208,31 @@ export default function CastList() {
               <span className="ml-2 text-xs opacity-60">
                 {storeId === s.id ? `${casts.length}名` : ''}
               </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 店舗タブ（社員・アルバイト） */}
+      {(employeeTab === 'staff' || employeeTab === 'part_time') && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setStaffStoreId(null)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+              staffStoreId === null ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
+            }`}
+          >
+            全店舗
+          </button>
+          {stores.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setStaffStoreId(s.id)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                staffStoreId === s.id ? 'bg-primary-600 text-white' : 'bg-night-700 text-gray-400 hover:text-white'
+              }`}
+            >
+              {s.name}
             </button>
           ))}
         </div>
