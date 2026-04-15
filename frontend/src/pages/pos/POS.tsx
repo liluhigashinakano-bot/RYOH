@@ -5123,9 +5123,8 @@ function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
   const [operator, setOperator] = useState('')
 
   const { data: staffList = [] } = useQuery({
-    queryKey: ['staff-for-discount', storeId],
-    queryFn: () => apiClient.get('/api/staff', { params: { store_id: storeId } }).then(r => r.data),
-    enabled: !!storeId,
+    queryKey: ['staff-for-discount'],
+    queryFn: () => apiClient.get('/api/staff').then(r => r.data),
   })
 
   const amount = parseInt(input, 10) || 0
