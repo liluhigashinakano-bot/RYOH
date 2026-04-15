@@ -138,10 +138,10 @@ export default function CastList() {
     })
   }, [casts, statsMap, sortKey, sortAsc])
 
-  // 社員・アルバイト一覧
+  // 社員・アルバイト一覧（店舗フィルタなし=全店舗横断）
   const { data: staffList = [] } = useQuery({
-    queryKey: ['staff', employeeTab, storeId],
-    queryFn: () => apiClient.get('/api/staff', { params: { employee_type: employeeTab, store_id: storeId } }).then(r => r.data),
+    queryKey: ['staff', employeeTab],
+    queryFn: () => apiClient.get('/api/staff', { params: { employee_type: employeeTab } }).then(r => r.data),
     enabled: employeeTab === 'staff' || employeeTab === 'part_time',
   })
 
