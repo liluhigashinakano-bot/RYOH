@@ -474,22 +474,28 @@ export default function POS() {
               🤖 AI付け回しエージェント
             </button>
           )}
-          {/* 中央: ティッシュ配り中キャスト */}
-          {(headerActiveTissue as any[]).length > 0 && (
-            <div className="hidden lg:flex items-center gap-2 text-xs text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-2 py-1 min-w-0">
-              <span className="text-amber-400 shrink-0">🧻 ティッシュ配り中</span>
-              <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                {(headerActiveTissue as any[]).map((t: any) => (
-                  <button key={t.id}
-                    onClick={() => { setTissueCompleteRecord(t); setTissueCompleteCount('') }}
-                    className="whitespace-nowrap hover:bg-amber-800/30 px-1.5 py-0.5 rounded transition-colors">
-                    <span className="text-white font-medium underline decoration-dotted">{t.cast_name}</span>
-                    <span className="text-amber-300 ml-1">{headerFmtMin(t.started_at)}</span>
-                  </button>
-                ))}
+          {/* 中央: ティッシュ配り中キャスト（最大9名まで表示） */}
+          {(headerActiveTissue as any[]).length > 0 && (() => {
+            const list = (headerActiveTissue as any[]).slice(0, 9)
+            const n = list.length
+            const cols = n <= 3 ? 1 : n <= 6 ? 2 : 3
+            return (
+              <div className="hidden lg:flex items-center gap-2 text-[11px] text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-2 py-1 min-w-0">
+                <span className="text-amber-400 shrink-0">🧻 ティッシュ配り中</span>
+                <div className="grid gap-x-2 gap-y-0.5 min-w-0"
+                  style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, max-content))` }}>
+                  {list.map((t: any) => (
+                    <button key={t.id}
+                      onClick={() => { setTissueCompleteRecord(t); setTissueCompleteCount('') }}
+                      className="whitespace-nowrap hover:bg-amber-800/30 px-1.5 py-0.5 rounded transition-colors text-left">
+                      <span className="text-white font-medium underline decoration-dotted">{t.cast_name}</span>
+                      <span className="text-amber-300 ml-1">{headerFmtMin(t.started_at)}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
           {/* 右: 売上サマリ + 営業ボタン */}
           <div className="flex items-center gap-2 ml-auto shrink-0">
             <div className="hidden md:flex items-center gap-3 text-xs">
