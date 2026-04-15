@@ -5689,6 +5689,7 @@ function TaikenClockInForm({ taikenName, setTaikenName, onSubmit, onCancel, isPe
 
 function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsModal }: { storeId: number; tickets: any[]; onTicketClick: (id: number) => void; onOpenActiveCastsModal: (ticket: any) => void }) {
   const qc = useQueryClient()
+  const now = useNow()
   // 出勤中キャスト一覧
   const { data: shifts = [] } = useQuery({
     queryKey: ['casts-working', storeId],
@@ -5726,12 +5727,25 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
   // 配り中のキャスト ID 集合（出勤中の表示から除外するため）
   const tissueCastIds = new Set((activeTissue as any[]).map((t: any) => t.cast_id))
 
-  // キャスト別の現在担当卓（current_casts ベース）
+  // キャスト別の現在担当卓（current_casts ベース）と対応開始時刻
   const castToTicket: Record<number, any> = {}
+  const castAssignStartedAt: Record<number, string | null> = {}
   for (const t of tickets) {
     for (const c of (t.current_casts || [])) {
-      if (typeof c.cast_id === 'number') castToTicket[c.cast_id] = t
+      if (typeof c.cast_id === 'number') {
+        castToTicket[c.cast_id] = t
+        castAssignStartedAt[c.cast_id] = c.started_at ?? null
+      }
     }
+  }
+
+  // 経過時間フォーマット: "XX分" or "XX時間YY分"
+  const fmtMin = (startIso: string | null | undefined): string => {
+    const sec = calcElapsed(startIso, now)
+    const m = Math.floor(sec / 60)
+    if (m < 60) return `${m}分`
+    const h = Math.floor(m / 60)
+    return `${h}時間${m % 60}分`
   }
 
   // 出勤中・接客なしのキャスト
@@ -5782,6 +5796,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
             {(activeTissue as any[]).map((t: any) => (
               <div key={t.id} className="flex items-center gap-2 bg-amber-900/20 border border-amber-800/50 rounded-lg px-3 py-2">
                 <span className="text-white text-sm font-medium flex-1">{t.cast_name}</span>
+                <span className="text-[10px] text-amber-400">{fmtMin(t.started_at)}</span>
                 <input
                   type="number" min={0} placeholder="枚数"
                   value={tissueCounts[t.id] ?? ''}
@@ -5809,6 +5824,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
               {busyCasts.map((s: any) => {
                 const t = castToTicket[s.cast_id!]
+                const startedAt = castAssignStartedAt[s.cast_id!]
                 return (
                   <button key={s.shift_id}
                     onClick={(e) => {
@@ -5818,7 +5834,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                     className="text-left bg-pink-900/30 hover:bg-pink-900/50 border border-pink-800/50 rounded-lg p-2 transition-colors"
                   >
                     <div className="text-white text-sm font-medium">{s.cast_name}</div>
-                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 対応中</div>
+                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 対応中 {startedAt && <span className="text-pink-400">（{fmtMin(startedAt)}）</span>}</div>
                   </button>
                 )
               })}
@@ -5837,7 +5853,7 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                   className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
                 >
                   <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">待機中</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">待機中 {s.idle_since && <span className="text-gray-400">（{fmtMin(s.idle_since)}）</span>}</div>
                 </button>
               ))}
               {idleCasts.length === 0 && (

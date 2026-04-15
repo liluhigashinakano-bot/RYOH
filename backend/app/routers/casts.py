@@ -636,6 +636,25 @@ def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: m
         .order_by(models.ConfirmedShift.actual_start.nullslast())
         .all()
     )
+    # キャスト別の最終アクティビティ終了時刻（待機中の「何分待機」計算用）
+    cast_ids = [s.cast_id for s in shifts if s.cast_id is not None]
+    last_activity_end: dict = {}
+    if cast_ids:
+        for cid in cast_ids:
+            # CastAssignment の最終 ended_at
+            last_assign = db.query(models.CastAssignment.ended_at).filter(
+                models.CastAssignment.cast_id == cid,
+                models.CastAssignment.ended_at.isnot(None),
+            ).order_by(models.CastAssignment.ended_at.desc()).first()
+            # TissueDistribution の最終 ended_at
+            last_tissue = db.query(models.TissueDistribution.ended_at).filter(
+                models.TissueDistribution.cast_id == cid,
+                models.TissueDistribution.ended_at.isnot(None),
+            ).order_by(models.TissueDistribution.ended_at.desc()).first()
+            candidates = [x[0] for x in (last_assign, last_tissue) if x and x[0]]
+            if candidates:
+                last_activity_end[cid] = max(candidates)
+
     result = []
     for s in shifts:
         if s.cast_id is not None:
@@ -644,12 +663,19 @@ def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: m
             cast_name = f"[ヘルプ]{s.help_cast_name}"
         else:
             cast_name = "不明"
+        # 待機開始時刻: 最終アクティビティ終了時刻 > actual_start の方を採用
+        idle_since = s.actual_start
+        if s.cast_id and s.cast_id in last_activity_end:
+            ae = last_activity_end[s.cast_id]
+            if s.actual_start is None or ae > s.actual_start:
+                idle_since = ae
         result.append({
             "shift_id": s.id,
             "cast_id": s.cast_id,
             "cast_name": cast_name,
             "actual_start": s.actual_start.isoformat() if s.actual_start else None,
             "actual_end": s.actual_end.isoformat() if s.actual_end else None,
+            "idle_since": idle_since.isoformat() if idle_since else None,
             "is_late": bool(s.is_late),
             "is_absent": bool(s.is_absent),
             "taiken_status": s.cast.taiken_status if s.cast else None,

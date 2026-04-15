@@ -68,7 +68,11 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         sorted_active = sorted(active_assignments, key=lambda a: a.started_at)
         for a in sorted_active:
             if a.cast and a.cast_id is not None:
-                current_casts.append({"cast_id": a.cast_id, "cast_name": a.cast.stage_name})
+                current_casts.append({
+                    "cast_id": a.cast_id,
+                    "cast_name": a.cast.stage_name,
+                    "started_at": a.started_at.isoformat() if a.started_at else None,
+                })
         latest = sorted_active[-1]
         e_started_at = latest.started_at
 
