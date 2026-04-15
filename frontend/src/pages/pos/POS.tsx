@@ -5726,15 +5726,11 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
   // 配り中のキャスト ID 集合（出勤中の表示から除外するため）
   const tissueCastIds = new Set((activeTissue as any[]).map((t: any) => t.cast_id))
 
-  // キャスト別の現在担当卓（current_casts ベース）と対応開始時刻
+  // キャスト別の現在担当卓（current_casts ベース）
   const castToTicket: Record<number, any> = {}
-  const castAssignStartedAt: Record<number, string | null> = {}
   for (const t of tickets) {
     for (const c of (t.current_casts || [])) {
-      if (typeof c.cast_id === 'number') {
-        castToTicket[c.cast_id] = t
-        castAssignStartedAt[c.cast_id] = c.started_at ?? null
-      }
+      if (typeof c.cast_id === 'number') castToTicket[c.cast_id] = t
     }
   }
 
@@ -5752,7 +5748,6 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
   // 出勤中・接客なしのキャスト
   const workingCasts = (shifts as any[]).filter((s: any) => !s.is_absent && s.actual_start && !s.actual_end)
   const idleCasts = workingCasts.filter((s: any) => s.cast_id !== null && !castToTicket[s.cast_id] && !tissueCastIds.has(s.cast_id))
-  const busyCasts = workingCasts.filter((s: any) => s.cast_id !== null && castToTicket[s.cast_id!])
 
   return (
     <div className="flex-1 overflow-y-auto space-y-4 px-1 pb-4">
@@ -5777,7 +5772,13 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
                   <span className="text-gray-500">担当: </span>
                   <span className="text-purple-300 underline decoration-dotted">
                     {(t.current_casts && t.current_casts.length > 0)
-                      ? t.current_casts.map((c: any) => c.cast_name).join('・')
+                      ? t.current_casts.map((c: any, i: number) => (
+                          <span key={c.cast_id ?? i}>
+                            {i > 0 && <span className="text-gray-600">・</span>}
+                            {c.cast_name}
+                            {c.started_at && <span className="text-pink-300 ml-0.5">（{fmtMin(c.started_at)}）</span>}
+                          </span>
+                        ))
                       : '未設定'}
                   </span>
                 </button>
@@ -5814,54 +5815,26 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
         )}
       </div>
 
-      {/* キャストごと */}
+      {/* 待機中キャスト（卓未割り当て） */}
       <div className="card">
-        <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">出勤中キャスト（{workingCasts.length}名）</div>
-        {workingCasts.length === 0 ? (
-          <div className="text-xs text-gray-600 py-4 text-center">出勤中のキャストはいません</div>
+        <div className="text-xs text-gray-400 font-medium border-b border-gray-700 pb-1 mb-2">待機中（{idleCasts.length}名）</div>
+        {idleCasts.length === 0 ? (
+          <div className="text-xs text-gray-600 py-3 text-center">待機中のキャストはいません</div>
         ) : (
-          <>
-            <div className="text-[10px] text-gray-500 mb-1">対応中（{busyCasts.length}名）</div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-3">
-              {busyCasts.map((s: any) => {
-                const t = castToTicket[s.cast_id!]
-                const startedAt = castAssignStartedAt[s.cast_id!]
-                return (
-                  <button key={s.shift_id}
-                    onClick={(e) => {
-                      const rect = (e.target as HTMLElement).getBoundingClientRect()
-                      setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
-                    }}
-                    className="text-left bg-pink-900/30 hover:bg-pink-900/50 border border-pink-800/50 rounded-lg p-2 transition-colors"
-                  >
-                    <div className="text-white text-sm font-medium">{s.cast_name}</div>
-                    <div className="text-[10px] text-pink-300 mt-0.5">{t.table_no} 対応中 {startedAt && <span className="text-pink-400">（{fmtMin(startedAt)}）</span>}</div>
-                  </button>
-                )
-              })}
-              {busyCasts.length === 0 && (
-                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">対応中のキャストはいません</div>
-              )}
-            </div>
-            <div className="text-[10px] text-gray-500 mb-1">待機中（{idleCasts.length}名）</div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {idleCasts.map((s: any) => (
-                <button key={s.shift_id}
-                  onClick={(e) => {
-                    const rect = (e.target as HTMLElement).getBoundingClientRect()
-                    setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
-                  }}
-                  className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
-                >
-                  <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">待機中 {s.idle_since && <span className="text-gray-400">（{fmtMin(s.idle_since)}）</span>}</div>
-                </button>
-              ))}
-              {idleCasts.length === 0 && (
-                <div className="col-span-full text-[10px] text-gray-600 text-center py-2">待機中のキャストはいません</div>
-              )}
-            </div>
-          </>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {idleCasts.map((s: any) => (
+              <button key={s.shift_id}
+                onClick={(e) => {
+                  const rect = (e.target as HTMLElement).getBoundingClientRect()
+                  setCastActionTarget({ cast_id: s.cast_id, cast_name: s.cast_name, x: rect.left, y: rect.bottom + 4 })
+                }}
+                className="text-left bg-night-700 hover:bg-night-600 rounded-lg p-2 transition-colors"
+              >
+                <div className="text-gray-300 text-sm font-medium">{s.cast_name}</div>
+                <div className="text-[10px] text-gray-500 mt-0.5">待機中 {s.idle_since && <span className="text-gray-400">（{fmtMin(s.idle_since)}）</span>}</div>
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
