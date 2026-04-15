@@ -917,7 +917,9 @@ export default function POS() {
                     qc.invalidateQueries({ queryKey: ['casts-working', selectedStoreId] })
                     setTissueCompleteRecord(null)
                   } catch (e: any) {
-                    alert(e?.response?.data?.detail || 'エラー')
+                    const status = e?.response?.status ? `[${e.response.status}] ` : ''
+                    const detail = e?.response?.data?.detail || e?.message || 'unknown'
+                    alert(`ティッシュ配り完了エラー ${status}${detail}`)
                   }
                 }}
                 className="flex-1 bg-amber-700 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg transition-colors">
