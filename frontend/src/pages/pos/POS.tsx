@@ -5739,13 +5739,15 @@ function ActiveCastsView({ storeId, tickets, onTicketClick, onOpenActiveCastsMod
     }
   }
 
-  // 経過時間フォーマット: "XX分" or "XX時間YY分"
+  // 経過時間フォーマット: "MM:SS" or "HH:MM:SS"
   const fmtMin = (startIso: string | null | undefined): string => {
     const sec = calcElapsed(startIso, now)
-    const m = Math.floor(sec / 60)
-    if (m < 60) return `${m}分`
-    const h = Math.floor(m / 60)
-    return `${h}時間${m % 60}分`
+    const h = Math.floor(sec / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    const s = sec % 60
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    if (h > 0) return `${h}:${pad(m)}:${pad(s)}`
+    return `${pad(m)}:${pad(s)}`
   }
 
   // 出勤中・接客なしのキャスト
