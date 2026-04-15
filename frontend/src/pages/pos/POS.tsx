@@ -5084,7 +5084,7 @@ function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
                   setReasonType('端数カット')
                 }}
                 className="flex-1 text-xs py-1.5 rounded-lg bg-orange-700/60 hover:bg-orange-700 text-white disabled:opacity-30 disabled:cursor-not-allowed">
-                100円以下切り捨て{hasRemainder ? `（-¥${remainder}）` : ''}
+                百円未満切り捨て{hasRemainder ? `（-¥${remainder}）` : ''}
               </button>
               <button type="button"
                 disabled={!hasRemainder}
@@ -5094,7 +5094,7 @@ function DiscountModal({ storeId, currentTotal, onSubmit, onClose }: {
                   setReasonType('端数カット')
                 }}
                 className="flex-1 text-xs py-1.5 rounded-lg bg-green-700/60 hover:bg-green-700 text-white disabled:opacity-30 disabled:cursor-not-allowed">
-                100円以下繰り上げ{hasRemainder ? `（+¥${100 - remainder}）` : ''}
+                百円未満繰り上げ{hasRemainder ? `（+¥${100 - remainder}）` : ''}
               </button>
             </div>
           )}
