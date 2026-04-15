@@ -476,6 +476,15 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
 
     for sr in staff_to_clear:
         db.delete(sr)
+
+    # 営業締め時に残っている未終了のティッシュ配りを全て終了
+    stragglers = db.query(models.TissueDistribution).filter(
+        models.TissueDistribution.store_id == session.store_id,
+        models.TissueDistribution.ended_at.is_(None),
+    ).all()
+    now = datetime.utcnow()
+    for td in stragglers:
+        td.ended_at = now
     db.commit()
 
     # 既存: 日報JSONファイルを保存（旧仕組み・並行運用）

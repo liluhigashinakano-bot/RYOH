@@ -57,12 +57,36 @@ def list_active(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """配り中（ended_at IS NULL）の一覧"""
+    """配り中（ended_at IS NULL）の一覧。
+    営業セッションが閉じている or 該当キャストが退勤済みの場合は除外する。"""
+    # 営業セッションが無い or 閉じているなら空
+    open_session = db.query(models.BusinessSession).filter(
+        models.BusinessSession.store_id == store_id,
+        models.BusinessSession.is_closed == False,
+    ).first()
+    if not open_session:
+        return []
     rows = db.query(models.TissueDistribution).filter(
         models.TissueDistribution.store_id == store_id,
         models.TissueDistribution.ended_at.is_(None),
     ).order_by(models.TissueDistribution.started_at.asc()).all()
-    return [_to_dict(r) for r in rows]
+    # セッション開始以降・キャストが勤務中のものに絞る
+    result = []
+    for r in rows:
+        if r.started_at and r.started_at < open_session.opened_at:
+            continue
+        if r.cast_id:
+            # 勤務中（actual_start あり & actual_end なし）のシフトがあるか
+            has_active_shift = db.query(models.ConfirmedShift).filter(
+                models.ConfirmedShift.store_id == store_id,
+                models.ConfirmedShift.cast_id == r.cast_id,
+                models.ConfirmedShift.actual_start.isnot(None),
+                models.ConfirmedShift.actual_end.is_(None),
+            ).first()
+            if not has_active_shift:
+                continue
+        result.append(_to_dict(r))
+    return result
 
 
 class StartRequest(BaseModel):

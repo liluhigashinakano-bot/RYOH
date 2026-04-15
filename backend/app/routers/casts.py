@@ -886,6 +886,9 @@ def clock_out(shift_id: int, data: ClockOutRequest = ClockOutRequest(), db: Sess
         ).all()
         for a in active_assigns:
             a.ended_at = shift.actual_end
+        # 退勤と同時にティッシュ配り中（未終了）も終了
+        from .tissue import end_active_tissue_for_cast
+        end_active_tissue_for_cast(db, shift.cast_id)
     log = models.OrderItemLog(
         store_id=shift.store_id, action='attendance_clock_out',
         item_name=f"退勤: {cast_name} {data.actual_end or '現在時刻'}",
