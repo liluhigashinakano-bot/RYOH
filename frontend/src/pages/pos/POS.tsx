@@ -405,7 +405,6 @@ export default function POS() {
       <div className="shrink-0 pb-2 flex flex-col gap-1.5">
         {/* Row 1: 店舗・新規伝票 + 営業ボタン */}
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-bold text-white shrink-0 hidden md:block">POS・伝票管理</h1>
           <select value={selectedStoreId} onChange={(e) => setSelectedStoreId(Number(e.target.value))} className="input-field text-xs py-1.5 shrink-0">
             {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
