@@ -480,18 +480,25 @@ export default function POS() {
             const n = list.length
             const cols = n <= 3 ? 1 : n <= 6 ? 2 : 3
             return (
-              <div className="hidden lg:flex items-center gap-1.5 text-[10px] text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-1.5 py-0.5 min-w-0">
+              <div className="hidden lg:flex items-center gap-1.5 text-[10px] text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-1.5 py-0.5">
                 <span className="text-amber-400 shrink-0 whitespace-nowrap">🧻配中</span>
-                <div className="grid gap-x-1.5 gap-y-0 min-w-0"
-                  style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, max-content))` }}>
-                  {list.map((t: any) => (
-                    <button key={t.id}
-                      onClick={() => { setTissueCompleteRecord(t); setTissueCompleteCount('') }}
-                      className="whitespace-nowrap hover:bg-amber-800/30 px-1 py-0 rounded transition-colors text-left leading-tight">
-                      <span className="text-white font-medium underline decoration-dotted">{t.cast_name}</span>
-                      <span className="text-amber-300 ml-0.5">{headerFmtMin(t.started_at)}</span>
-                    </button>
-                  ))}
+                <div className="flex gap-x-2">
+                  {Array.from({ length: cols }).map((_, colIdx) => {
+                    const rows = Math.ceil(list.length / cols)
+                    const colItems = list.slice(colIdx * rows, colIdx * rows + rows)
+                    return (
+                      <div key={colIdx} className="flex flex-col gap-y-0">
+                        {colItems.map((t: any) => (
+                          <button key={t.id}
+                            onClick={() => { setTissueCompleteRecord(t); setTissueCompleteCount('') }}
+                            className="whitespace-nowrap hover:bg-amber-800/30 px-1 py-0 rounded transition-colors text-left leading-tight">
+                            <span className="text-white font-medium underline decoration-dotted">{t.cast_name}</span>
+                            <span className="text-amber-300 ml-0.5">{headerFmtMin(t.started_at)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
