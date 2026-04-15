@@ -266,6 +266,9 @@ export default function POS() {
     { id: 1, type: '', name: '', amount: '' },
   ])
   const [closeModalNotes, setCloseModalNotes] = useState('')
+  // ヘッダーのティッシュ配り中キャストをクリックしたときの完了モーダル
+  const [tissueCompleteRecord, setTissueCompleteRecord] = useState<any | null>(null)
+  const [tissueCompleteCount, setTissueCompleteCount] = useState('')
   // カード上の顧客・キャストモーダルをPOSPage レベルで管理（TicketCard内の event propagation 問題を回避）
   const [customerModalTicket, setCustomerModalTicket] = useState<any | null>(null)
   const [castModalTicket, setCastModalTicket] = useState<any | null>(null)
@@ -477,10 +480,12 @@ export default function POS() {
               <span className="text-amber-400 shrink-0">🧻 ティッシュ配り中</span>
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 {(headerActiveTissue as any[]).map((t: any) => (
-                  <span key={t.id} className="whitespace-nowrap">
-                    <span className="text-white font-medium">{t.cast_name}</span>
+                  <button key={t.id}
+                    onClick={() => { setTissueCompleteRecord(t); setTissueCompleteCount('') }}
+                    className="whitespace-nowrap hover:bg-amber-800/30 px-1.5 py-0.5 rounded transition-colors">
+                    <span className="text-white font-medium underline decoration-dotted">{t.cast_name}</span>
                     <span className="text-amber-300 ml-1">{headerFmtMin(t.started_at)}</span>
-                  </span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -852,6 +857,59 @@ export default function POS() {
           <div className="text-3xl font-black text-white tracking-wide">本日もお疲れさまでした</div>
           <div className="text-gray-400 text-sm">営業お疲れ様でした。またお会いしましょう。</div>
           <button onClick={() => setShowSessionThanks(false)} className="mt-4 text-gray-600 text-xs hover:text-gray-400">閉じる</button>
+        </div>
+      )}
+
+      {/* ヘッダーのティッシュ配り中キャストをクリック → 配布枚数入力モーダル */}
+      {tissueCompleteRecord && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4" onClick={() => setTissueCompleteRecord(null)}>
+          <div className="card w-full max-w-xs space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-white">ティッシュ配り — {tissueCompleteRecord.cast_name}</h3>
+              <button onClick={() => setTissueCompleteRecord(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            </div>
+            <div className="text-xs text-gray-400 text-center">
+              配り開始から <span className="text-amber-300 font-medium">{headerFmtMin(tissueCompleteRecord.started_at)}</span>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">配布枚数</label>
+              <input type="number" min={0} placeholder="枚数"
+                value={tissueCompleteCount}
+                onChange={e => setTissueCompleteCount(e.target.value)}
+                className="input-field w-full text-center text-lg"
+                autoFocus />
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!confirm('この配り中を取り消しますか？')) return
+                  try {
+                    await apiClient.delete(`/api/tissue/${tissueCompleteRecord.id}`)
+                    qc.invalidateQueries({ queryKey: ['tissue-active', selectedStoreId] })
+                    setTissueCompleteRecord(null)
+                  } catch (e: any) {
+                    alert(e?.response?.data?.detail || 'エラー')
+                  }
+                }}
+                className="text-xs px-3 py-2 text-red-400 hover:text-red-300">取消</button>
+              <button
+                onClick={async () => {
+                  const v = parseInt(tissueCompleteCount || '0', 10)
+                  if (isNaN(v) || v < 0) { alert('枚数は0以上の数値で入力してください'); return }
+                  try {
+                    await apiClient.post(`/api/tissue/${tissueCompleteRecord.id}/complete`, { count: v })
+                    qc.invalidateQueries({ queryKey: ['tissue-active', selectedStoreId] })
+                    qc.invalidateQueries({ queryKey: ['casts-working', selectedStoreId] })
+                    setTissueCompleteRecord(null)
+                  } catch (e: any) {
+                    alert(e?.response?.data?.detail || 'エラー')
+                  }
+                }}
+                className="flex-1 bg-amber-700 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg transition-colors">
+                完了
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
