@@ -1,13 +1,20 @@
 import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle, Camera, User, Link, Unlink, Search } from 'lucide-react'
+import { Bot, Plus, ArrowLeft, Edit2, Trash2, X, Save, AlertCircle, Camera, User, Link, Unlink, Search, Store as StoreIcon } from 'lucide-react'
 import apiClient from '../../api/client'
+import { useAuthStore } from '../../store/authStore'
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { stores: authStores } = useAuthStore()
+  const { data: allStores = [] } = useQuery({
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
+    staleTime: 1000 * 60 * 10,
+  })
   const [note, setNote] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [showEdit, setShowEdit] = useState(false)
@@ -112,7 +119,16 @@ export default function CustomerDetail() {
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm">
           <ArrowLeft className="w-4 h-4" />戻る
         </button>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {(() => {
+            const storeList = (allStores as any[]).length ? (allStores as any[]) : authStores
+            const storeName = storeList.find((s: any) => s.id === customer.store_id)?.name
+            return storeName ? (
+              <span className="flex items-center gap-1 text-xs bg-night-700 text-gray-300 border border-night-600 px-2.5 py-1.5 rounded-lg">
+                <StoreIcon className="w-3.5 h-3.5" />{storeName}
+              </span>
+            ) : null
+          })()}
           <button onClick={() => setShowEdit(true)} className="btn-secondary flex items-center gap-2 text-sm py-2">
             <Edit2 className="w-4 h-4" />編集
           </button>
