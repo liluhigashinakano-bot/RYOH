@@ -275,7 +275,8 @@ class Ticket(Base):
     motivation_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ティッシュ・LINE用キャスト（後方互換）
     motivation_cast_ids = Column(JSON, nullable=True)  # 複数キャスト [cast_id, ...]
     motivation_note = Column(String(200), nullable=True)   # 紹介用テキスト
-    featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）
+    featured_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # 推しキャスト（担当）※後方互換 先頭1人
+    featured_cast_ids = Column(JSON, nullable=True)  # 推しキャスト複数 [cast_id, ...]
     deleted_at = Column(DateTime, nullable=True)  # 論理削除タイムスタンプ
     deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     display_order = Column(Integer, nullable=True)  # POS画面でのドラッグ並び順

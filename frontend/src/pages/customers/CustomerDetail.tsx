@@ -101,6 +101,7 @@ export default function CustomerDetail() {
     : arrivalSourceRaw
   const dayPrefs: Record<string, number> = prefs.day_prefs || {}
   const assignedCasts: string[] = prefs.assigned_casts || []
+  const featuredCastCounts: Record<string, number> = prefs.featured_cast_counts || {}
 
   const daysSinceLastVisit = customer.last_visit_date
     ? Math.floor((new Date().getTime() - new Date(customer.last_visit_date).getTime()) / (1000 * 60 * 60 * 24))
@@ -357,6 +358,20 @@ export default function CustomerDetail() {
                 {Object.entries(arrivalSourceMap).sort((a, b) => b[1] - a[1]).map(([src, cnt]) => (
                   <span key={src} className="bg-gray-800 text-gray-300 px-3 py-1 rounded-full text-sm">
                     {src} <span className="text-pink-400 font-medium">{cnt}回</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 担当者一覧 */}
+          {Object.keys(featuredCastCounts).length > 0 && (
+            <div className="card space-y-2">
+              <h3 className="font-medium text-white text-sm">担当者一覧</h3>
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(featuredCastCounts).sort((a, b) => b[1] - a[1]).map(([name, cnt]) => (
+                  <span key={name} className="bg-primary-900/40 text-primary-200 px-3 py-1 rounded-full text-sm">
+                    ⭐ {name} <span className="text-pink-300 font-medium">{cnt}回</span>
                   </span>
                 ))}
               </div>

@@ -331,7 +331,40 @@ def get_customer(
     customer = db.query(models.Customer).filter(models.Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="顧客が見つかりません")
-    return CustomerResponse.from_orm_masked(customer)
+    # 担当者（featured_cast）の集計を preferences に注入して返す
+    resp = CustomerResponse.from_orm_masked(customer)
+    featured_counts = _compute_featured_cast_counts(db, customer_id)
+    if featured_counts:
+        prefs = dict(resp.preferences or {})
+        prefs['featured_cast_counts'] = featured_counts
+        resp.preferences = prefs
+    return resp
+
+
+def _compute_featured_cast_counts(db: Session, customer_id: int) -> dict:
+    """顧客のチケットから担当キャスト(featured_cast_ids / featured_cast_id)の出現回数を集計"""
+    from collections import defaultdict
+    tickets = db.query(models.Ticket).filter(
+        models.Ticket.customer_id == customer_id,
+        models.Ticket.deleted_at.is_(None),
+    ).all()
+    counts: dict = defaultdict(int)
+    for t in tickets:
+        ids = list(t.featured_cast_ids or [])
+        if not ids and t.featured_cast_id is not None:
+            ids = [t.featured_cast_id]
+        for cid in ids:
+            counts[int(cid)] += 1
+    if not counts:
+        return {}
+    cast_rows = db.query(models.Cast).filter(models.Cast.id.in_(list(counts.keys()))).all()
+    name_by_id = {c.id: c.stage_name for c in cast_rows}
+    # 名前をキーに再構築（同名が居る想定は稀）
+    result: dict = {}
+    for cid, cnt in counts.items():
+        name = name_by_id.get(cid, f"ID{cid}")
+        result[name] = result.get(name, 0) + cnt
+    return result
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse)

@@ -41,6 +41,8 @@ def _run_migrations(engine):
         "UPDATE casts SET help_hourly_rate = hourly_rate + 100 WHERE hourly_rate IS NOT NULL AND (help_hourly_rate IS NULL OR help_hourly_rate <> hourly_rate + 100)",
         # Ticket: featured_cast_id (推しキャスト)
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS featured_cast_id INTEGER REFERENCES casts(id)",
+        # Ticket: featured_cast_ids (推しキャスト複数)
+        "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS featured_cast_ids JSON",
         # Ticket: 論理削除
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS deleted_by INTEGER REFERENCES users(id)",

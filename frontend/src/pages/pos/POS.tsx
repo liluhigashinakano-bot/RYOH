@@ -681,9 +681,11 @@ export default function POS() {
       {castModalTicket && (
         <CastAssignModal
           storeId={selectedStoreId}
-          currentCastName={castModalTicket.featured_cast_name || null}
-          onSelect={id => {
-            apiClient.post(`/api/tickets/${castModalTicket.id}/set-cast`, { cast_id: id })
+          currentCastIds={(castModalTicket.featured_cast_ids && castModalTicket.featured_cast_ids.length > 0)
+            ? castModalTicket.featured_cast_ids
+            : (castModalTicket.featured_cast_id ? [castModalTicket.featured_cast_id] : [])}
+          onSubmit={ids => {
+            apiClient.post(`/api/tickets/${castModalTicket.id}/set-cast`, { cast_ids: ids })
               .then(() => qc.invalidateQueries({ queryKey: ['tickets', selectedStoreId, 'open'] }))
             setCastModalTicket(null)
           }}
@@ -2271,7 +2273,9 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         </button>
         <button onClick={e => { e.stopPropagation(); onOpenCastModal(ticket) }}
           className="w-fit text-left text-primary-400 hover:text-primary-300 transition-colors underline decoration-dotted">
-          {ticket.featured_cast_name || '担当未設定'}
+          {(ticket.featured_cast_names && ticket.featured_cast_names.length > 0)
+            ? ticket.featured_cast_names.join('・')
+            : (ticket.featured_cast_name || '担当未設定')}
         </button>
         <button onClick={e => { e.stopPropagation(); onOpenActiveCastsModal(ticket) }}
           className="w-fit text-left text-purple-300 hover:text-purple-200 transition-colors underline decoration-dotted text-[10px]">
@@ -2768,14 +2772,15 @@ function CustomerSearchModal({ storeId, currentId, onSelect, onClose }: {
   )
 }
 
-// 担当（推しキャスト）= 1人だけ選択
-function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
+// 担当（推しキャスト）= 複数選択可
+function CastAssignModal({ storeId, currentCastIds = [], onSubmit, onClose }: {
   storeId: number
-  currentCastName: string | null
-  onSelect: (id: number | null) => void
+  currentCastIds?: number[]
+  onSubmit: (ids: number[]) => void
   onClose: () => void
 }) {
   const [q, setQ] = useState('')
+  const [selected, setSelected] = useState<Set<number>>(new Set(currentCastIds))
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
@@ -2783,30 +2788,46 @@ function CastAssignModal({ storeId, currentCastName, onSelect, onClose }: {
   const casts = (castsAll as any[]).filter((c: any) => c.is_active)
   const filtered = casts.filter((c: any) => !q || c.stage_name?.includes(q))
 
+  const toggle = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4" onClick={e => { e.stopPropagation(); onClose() }}>
       <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center">
-          <h3 className="font-bold text-white">担当（推しキャスト）を設定</h3>
+          <h3 className="font-bold text-white">担当（推しキャスト）を設定<span className="text-xs text-gray-400 font-normal ml-1">（複数可）</span></h3>
           <button onClick={e => { e.stopPropagation(); onClose() }}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <input type="text" value={q} onChange={e => setQ(e.target.value)}
           placeholder="キャスト名で検索"
           className="input-field w-full text-sm" autoFocus />
         <div className="space-y-1 max-h-64 overflow-y-auto">
-          {currentCastName && (
-            <button onClick={e => { e.stopPropagation(); onSelect(null); onClose() }}
-              className="w-full text-left px-3 py-2 rounded-lg text-xs text-gray-500 hover:bg-gray-800 transition-colors">
-              担当を外す
-            </button>
-          )}
           {filtered.map((c: any) => (
-            <button key={c.id} onClick={e => { e.stopPropagation(); onSelect(c.id); onClose() }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${c.stage_name === currentCastName ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
+            <button key={c.id} onClick={e => { e.stopPropagation(); toggle(c.id) }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selected.has(c.id) ? 'bg-primary-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200'}`}>
               <span className="font-medium">{c.stage_name}</span>
             </button>
           ))}
           {filtered.length === 0 && <p className="text-center text-gray-500 text-sm py-4">該当なし</p>}
+        </div>
+        <div className="text-xs text-gray-400 text-center">
+          {selected.size > 0 ? `${selected.size}人選択中` : '未選択'}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={e => { e.stopPropagation(); onSubmit([]); onClose() }}
+            className="flex-1 px-3 py-2 text-xs text-gray-400 bg-night-700 hover:bg-night-600 rounded-lg transition-colors">
+            担当を外す
+          </button>
+          <button onClick={e => { e.stopPropagation(); onSubmit(Array.from(selected)); onClose() }}
+            className="flex-1 btn-primary">
+            確定
+          </button>
         </div>
       </div>
     </div>
@@ -3480,8 +3501,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   const setCastMutation = useMutation({
-    mutationFn: (castId: number | null) =>
-      apiClient.post(`/api/tickets/${ticketId}/set-cast`, { cast_id: castId }).then(r => r.data),
+    mutationFn: (castIds: number[]) =>
+      apiClient.post(`/api/tickets/${ticketId}/set-cast`, { cast_ids: castIds }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
@@ -3697,7 +3718,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <span className="text-gray-600">/</span>
                   <button onClick={() => setShowCastSearch(true)}
                     className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
-                    {ticket.featured_cast_name || '担当未設定'}
+                    {(ticket.featured_cast_names && ticket.featured_cast_names.length > 0)
+                      ? ticket.featured_cast_names.join('・')
+                      : (ticket.featured_cast_name || '担当未設定')}
                   </button>
                   <span className="text-gray-600">/</span>
                   <button onClick={() => setShowActiveCastsModal(true)}
@@ -3716,7 +3739,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <span className="text-gray-600">/</span>
                   <button onClick={() => setShowCastSearch(true)}
                     className="text-primary-400 hover:text-primary-300 underline decoration-dotted transition-colors">
-                    {ticket.featured_cast_name || '担当未設定'}
+                    {(ticket.featured_cast_names && ticket.featured_cast_names.length > 0)
+                      ? ticket.featured_cast_names.join('・')
+                      : (ticket.featured_cast_name || '担当未設定')}
                   </button>
                   <span className="text-gray-600">/</span>
                   <span className="text-purple-300">
@@ -4293,8 +4318,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       {showCastSearch && (
         <CastAssignModal
           storeId={storeId}
-          currentCastName={ticket.featured_cast_name || null}
-          onSelect={id => setCastMutation.mutate(id)}
+          currentCastIds={(ticket.featured_cast_ids && ticket.featured_cast_ids.length > 0)
+            ? ticket.featured_cast_ids
+            : (ticket.featured_cast_id ? [ticket.featured_cast_id] : [])}
+          onSubmit={ids => setCastMutation.mutate(ids)}
           onClose={() => setShowCastSearch(false)}
         />
       )}

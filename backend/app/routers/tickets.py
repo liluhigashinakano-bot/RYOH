@@ -76,11 +76,27 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         latest = sorted_active[-1]
         e_started_at = latest.started_at
 
-    # 推しキャスト（担当）= Ticket.featured_cast_id
-    featured_cast_name = None
-    if ticket.featured_cast_id is not None and ticket.featured_cast:
-        featured_cast_name = ticket.featured_cast.stage_name
-    # 後方互換: current_cast_name は推しキャスト名（既存表示用）
+    # 推しキャスト（担当）= Ticket.featured_cast_ids（複数）
+    # 後方互換: featured_cast_id（単一）がセットされていて ids が空なら ids に入れる
+    featured_ids: list = list(ticket.featured_cast_ids or [])
+    if not featured_ids and ticket.featured_cast_id is not None:
+        featured_ids = [ticket.featured_cast_id]
+    featured_names: list = []
+    if featured_ids:
+        from sqlalchemy.orm import object_session
+        session = object_session(ticket)
+        by_id: dict = {}
+        if session is not None:
+            rows = session.query(models.Cast).filter(models.Cast.id.in_(featured_ids)).all()
+            by_id = {c.id: c for c in rows}
+        for cid in featured_ids:
+            c = by_id.get(cid)
+            if c is None and ticket.featured_cast and ticket.featured_cast.id == cid:
+                c = ticket.featured_cast
+            if c is not None:
+                featured_names.append(c.stage_name)
+    featured_cast_name = featured_names[0] if featured_names else None
+    # 後方互換: current_cast_name は推しキャスト先頭名（既存表示用）
     current_cast_name = featured_cast_name
 
     # ドリンクタイマーの最終注文時刻
@@ -165,6 +181,8 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         "current_cast_name": current_cast_name,
         "featured_cast_id": ticket.featured_cast_id,
         "featured_cast_name": featured_cast_name,
+        "featured_cast_ids": featured_ids,
+        "featured_cast_names": featured_names,
         "current_casts": current_casts,
         "e_started_at": e_started_at,
         "last_drink_times": last_drink_times,
@@ -257,6 +275,8 @@ class TicketResponse(BaseModel):
     current_cast_name: Optional[str] = None
     featured_cast_id: Optional[int] = None
     featured_cast_name: Optional[str] = None
+    featured_cast_ids: Optional[List[int]] = None
+    featured_cast_names: Optional[List[str]] = None
     current_casts: Optional[List[dict]] = None
     e_started_at: Optional[datetime] = None
     last_drink_times: Optional[dict] = None
@@ -300,6 +320,8 @@ def _to_response(ticket: models.Ticket) -> dict:
         "current_cast_name": extra["current_cast_name"],
         "featured_cast_id": extra["featured_cast_id"],
         "featured_cast_name": extra["featured_cast_name"],
+        "featured_cast_ids": extra["featured_cast_ids"],
+        "featured_cast_names": extra["featured_cast_names"],
         "current_casts": extra["current_casts"],
         "e_started_at": extra["e_started_at"],
         "last_drink_times": extra["last_drink_times"],
@@ -826,6 +848,7 @@ def set_customer(
 
 class SetCastRequest(BaseModel):
     cast_id: Optional[int] = None
+    cast_ids: Optional[List[int]] = None
     assignment_type: str = "jounai"
 
 
@@ -836,12 +859,19 @@ def set_cast(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """担当（推しキャスト）を1人だけ設定する。
+    """担当（推しキャスト）を設定する。cast_ids を優先（複数可）、無ければ cast_id を使う。
     CastAssignment は触らない（あちらは「接客中」用）。"""
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="伝票が見つかりません")
-    ticket.featured_cast_id = data.cast_id  # None で解除
+    # cast_ids 優先。None/空なら全解除。cast_id は後方互換用
+    ids: List[int] = []
+    if data.cast_ids is not None:
+        ids = [int(i) for i in data.cast_ids if i is not None]
+    elif data.cast_id is not None:
+        ids = [int(data.cast_id)]
+    ticket.featured_cast_ids = ids if ids else None
+    ticket.featured_cast_id = ids[0] if ids else None
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
