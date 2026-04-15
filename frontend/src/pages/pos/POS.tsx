@@ -3135,6 +3135,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showDiscountModal, setShowDiscountModal] = useState(false)
   const [showPostDiscountModal, setShowPostDiscountModal] = useState(false)
+  const [showSetToggleConfirm, setShowSetToggleConfirm] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [showNextVisitModal, setShowNextVisitModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
@@ -3673,7 +3674,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                         </>
                       )
                     })()}
-                    <button onClick={() => setToggleMutation.mutate()} disabled={setToggleMutation.isPending}
+                    <button onClick={() => setShowSetToggleConfirm(true)} disabled={setToggleMutation.isPending}
                       className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors ${
                         ticket.set_is_paused ? 'bg-green-800/50 hover:bg-green-700/50 text-green-300' : 'bg-yellow-800/50 hover:bg-yellow-700/50 text-yellow-300'
                       }`}>
@@ -4442,6 +4443,28 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           }}
           onClose={() => setShowDiscountModal(false)}
         />
+      )}
+
+      {/* セット一時停止/再開 確認モーダル */}
+      {showSetToggleConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[120]" onClick={() => setShowSetToggleConfirm(false)}>
+          <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-72 space-y-4 shadow-xl" onClick={e => e.stopPropagation()}>
+            <p className="text-white font-bold text-center">
+              セットタイマーを{ticket.set_is_paused ? '再開' : '一時停止'}します
+            </p>
+            <p className="text-gray-400 text-sm text-center">実行しますか？</p>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setShowSetToggleConfirm(false)} className="btn-secondary flex-1 text-sm">キャンセル</button>
+              <button onClick={() => { setToggleMutation.mutate(); setShowSetToggleConfirm(false) }}
+                disabled={setToggleMutation.isPending}
+                className={`flex-1 text-sm py-2 rounded-lg font-medium disabled:opacity-40 transition-colors ${
+                  ticket.set_is_paused ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-yellow-700 hover:bg-yellow-600 text-white'
+                }`}>
+                実行
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 会計済み伝票の合計修正（値引き）モーダル */}
