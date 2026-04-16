@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import date
 from ..database import get_db
 from .. import models
@@ -16,7 +16,8 @@ class NextVisitCreate(BaseModel):
     ticket_id: Optional[int] = None
     visit_date: date
     visit_time: Optional[str] = None  # "20:00" or null
-    cast_id: Optional[int] = None
+    cast_id: Optional[int] = None  # 後方互換用。cast_ids があればそちらを優先
+    cast_ids: Optional[List[int]] = None  # 複数キャスト指定可
     note: Optional[str] = None
 
 
@@ -51,11 +52,32 @@ def create_next_visit(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    nv = models.NextVisit(**data.model_dump())
-    db.add(nv)
+    # cast_ids が指定されていればキャスト毎にレコードを作成、なければ単一(cast_id) で作成
+    ids: List[Optional[int]] = []
+    if data.cast_ids:
+        ids = [int(i) for i in data.cast_ids if i is not None]
+    elif data.cast_id is not None:
+        ids = [int(data.cast_id)]
+    else:
+        ids = [None]
+
+    created: List[models.NextVisit] = []
+    for cid in ids:
+        nv = models.NextVisit(
+            store_id=data.store_id,
+            customer_id=data.customer_id,
+            ticket_id=data.ticket_id,
+            visit_date=data.visit_date,
+            visit_time=data.visit_time,
+            cast_id=cid,
+            note=data.note,
+        )
+        db.add(nv)
+        created.append(nv)
     db.commit()
-    db.refresh(nv)
-    return _to_response(nv)
+    for nv in created:
+        db.refresh(nv)
+    return [_to_response(nv) for nv in created]
 
 
 @router.get("")

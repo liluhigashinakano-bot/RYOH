@@ -6887,7 +6887,7 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
   const qc = useQueryClient()
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [visitTime, setVisitTime] = useState('未定')
-  const [castId, setCastId] = useState<number | null>(null)
+  const [castIds, setCastIds] = useState<number[]>([])
   const [viewMonth, setViewMonth] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
@@ -6911,6 +6911,7 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['next-visits'] })
       setSelectedDate(null)
+      setCastIds([])
       onClose()
     },
   })
@@ -6941,14 +6942,23 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
           <div className="text-sm text-gray-300">{customerName} - {selectedDate}</div>
 
           <div className="space-y-2">
-            <label className="text-xs text-gray-400">担当キャスト</label>
-            <select value={castId ?? ''} onChange={e => setCastId(e.target.value ? Number(e.target.value) : null)}
-              className="input-field w-full text-sm py-1.5">
-              <option value="">未定</option>
-              {activeCasts.map((c: any) => (
-                <option key={c.id} value={c.id}>{c.stage_name}</option>
-              ))}
-            </select>
+            <label className="text-xs text-gray-400">担当キャスト<span className="text-gray-500 text-[10px] ml-1">（複数可）</span></label>
+            <div className="max-h-40 overflow-y-auto grid grid-cols-2 gap-1 bg-night-900/40 rounded-lg p-2 border border-night-700">
+              {activeCasts.length === 0 && <span className="text-xs text-gray-500 col-span-2 text-center py-1">在籍キャストなし</span>}
+              {activeCasts.map((c: any) => {
+                const isOn = castIds.includes(c.id)
+                return (
+                  <button key={c.id} type="button"
+                    onClick={() => setCastIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])}
+                    className={`text-xs px-2 py-1 rounded-lg transition-colors text-left ${isOn ? 'bg-primary-700 text-white' : 'bg-night-700 text-gray-300 hover:bg-night-600'}`}>
+                    {c.stage_name}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="text-[10px] text-gray-500">
+              {castIds.length > 0 ? `${castIds.length}人選択中` : '未選択（未定で登録）'}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -6969,7 +6979,7 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
                 ticket_id: ticketId,
                 visit_date: selectedDate,
                 visit_time: visitTime === '未定' ? null : visitTime,
-                cast_id: castId,
+                cast_ids: castIds.length > 0 ? castIds : null,
               })}
               disabled={saveMutation.isPending}
               className="flex-1 px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-lg text-sm font-bold disabled:opacity-50">
@@ -7026,7 +7036,7 @@ function NextVisitModal({ storeId, customerId, customerName, ticketId, onClose }
             return (
               <button key={day}
                 disabled={isPast}
-                onClick={() => { setSelectedDate(dateStr); setVisitTime('未定'); setCastId(null) }}
+                onClick={() => { setSelectedDate(dateStr); setVisitTime('未定'); setCastIds([]) }}
                 className={`py-1.5 rounded text-xs transition-colors
                   ${isPast ? 'text-gray-600 cursor-not-allowed' : 'hover:bg-teal-800/50 cursor-pointer'}
                   ${isToday ? 'bg-teal-900/50 text-teal-300 font-bold' : ''}
