@@ -471,17 +471,29 @@ function ShiftDetailModal({ shift, storeId, castId, onClose }: {
         {dayDetail?.tickets && dayDetail.tickets.length > 0 && (
           <div className="space-y-1">
             <div className="text-xs text-gray-400 font-medium">担当した伝票（{dayDetail.tickets.length}件）</div>
-            {dayDetail.tickets.map((t: any) => (
-              <div key={t.ticket_id} className="bg-night-700 rounded-lg px-3 py-1.5 text-xs flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="text-primary-400 font-medium">{t.table_no || '—'}</span>
-                  <span className="text-gray-400">{t.customer_name || '—'}</span>
+            {dayDetail.tickets.map((t: any) => {
+              const hasBreakdown = (t.drink_s || 0) + (t.drink_l || 0) + (t.drink_mg || 0) + (t.shot_cast || 0) + (t.champagne || 0) > 0
+              return (
+                <div key={t.ticket_id} className="bg-night-700 rounded-lg px-3 py-1.5 text-xs space-y-1">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-primary-400 font-medium">{t.table_no || '—'}</span>
+                      <span className="text-gray-400">{t.customer_name || '—'}</span>
+                    </div>
+                    <span className="text-white">¥{(t.grand_total ?? 0).toLocaleString()}</span>
+                  </div>
+                  {hasBreakdown && (
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-gray-400 pl-1">
+                      {(t.drink_s || 0) > 0 && <span>S <span className="text-green-400">{t.drink_s}</span></span>}
+                      {(t.drink_l || 0) > 0 && <span>L <span className="text-cyan-400">{t.drink_l}</span></span>}
+                      {(t.drink_mg || 0) > 0 && <span>MG <span className="text-purple-400">{t.drink_mg}</span></span>}
+                      {(t.shot_cast || 0) > 0 && <span>SH <span className="text-pink-400">{t.shot_cast}</span></span>}
+                      {(t.champagne || 0) > 0 && <span>🍾 <span className="text-yellow-400">{t.champagne}</span></span>}
+                    </div>
+                  )}
                 </div>
-                <div className="text-right">
-                  <span className="text-white">¥{(t.grand_total ?? 0).toLocaleString()}</span>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

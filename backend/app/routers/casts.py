@@ -626,6 +626,25 @@ def get_cast_shift_detail(
         )
         sub = (t.total_amount or 0) - adj
         grand = round(sub * 1.21) + adj
+        # この伝票内のこのキャストのドリンク/シャンパン内訳
+        t_s = t_l = t_mg = t_shot = 0
+        t_champ = 0
+        for o in (t.order_items or []):
+            if o.canceled_at:
+                continue
+            if o.cast_id == cast_id:
+                if o.item_type == "drink_s": t_s += (o.quantity or 0)
+                elif o.item_type == "drink_l": t_l += (o.quantity or 0)
+                elif o.item_type == "drink_mg": t_mg += (o.quantity or 0)
+                elif o.item_type == "shot_cast": t_shot += (o.quantity or 0)
+            if o.item_type == "champagne":
+                dist = o.cast_distribution or []
+                if not dist:
+                    if o.cast_id == cast_id:
+                        t_champ += (o.quantity or 0)
+                else:
+                    if any(e.get("cast_id") == cast_id for e in dist) and (o.amount or 0) > 0:
+                        t_champ += 1
         tickets_out.append({
             "ticket_id": t.id,
             "table_no": t.table_no,
@@ -633,6 +652,11 @@ def get_cast_shift_detail(
             "grand_total": max(0, grand),
             "started_at": t.started_at.isoformat() if t.started_at else None,
             "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+            "drink_s": t_s,
+            "drink_l": t_l,
+            "drink_mg": t_mg,
+            "shot_cast": t_shot,
+            "champagne": t_champ,
         })
     tickets_out.sort(key=lambda x: x.get("started_at") or "")
 
