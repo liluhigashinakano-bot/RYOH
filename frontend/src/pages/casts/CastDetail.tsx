@@ -50,6 +50,7 @@ export default function CastDetail() {
   const photoInputRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('info')
   const [showEdit, setShowEdit] = useState(false)
+  const [shiftDetail, setShiftDetail] = useState<any | null>(null)
 
   const isManager = user && ['superadmin', 'manager', 'editor'].includes(user.role)
 
@@ -309,7 +310,8 @@ export default function CastDetail() {
             <div className="text-center text-gray-500 py-12">出勤履歴がありません</div>
           )}
           {shifts.map((s: any) => (
-            <div key={s.id} className="card flex items-center gap-3">
+            <button key={s.id} onClick={() => setShiftDetail(s)}
+              className="card flex items-center gap-3 w-full text-left hover:bg-night-700/50 transition-colors">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-white font-medium text-sm">
@@ -333,9 +335,14 @@ export default function CastDetail() {
                   )}
                 </div>
               )}
-            </div>
+            </button>
           ))}
         </div>
+      )}
+
+      {/* 出勤履歴の詳細モーダル */}
+      {shiftDetail && (
+        <ShiftDetailModal shift={shiftDetail} storeId={storeId} castId={id} onClose={() => setShiftDetail(null)} />
       )}
 
       {/* 編集モーダル */}
@@ -348,6 +355,117 @@ export default function CastDetail() {
           isSaving={updateCast.isPending}
         />
       )}
+    </div>
+  )
+}
+
+function ShiftDetailModal({ shift, storeId, castId, onClose }: {
+  shift: any
+  storeId: number
+  castId: string | undefined
+  onClose: () => void
+}) {
+  // 日報スナップショットから当該シフト日のキャストブロックと伝票詳細を取得
+  const { data: dayDetail } = useQuery({
+    queryKey: ['cast-shift-detail', storeId, castId, shift.date],
+    queryFn: () => apiClient.get(`/api/casts/${storeId}/${castId}/shifts/${shift.id}/detail`).then(r => r.data),
+    enabled: !!storeId && !!castId && !!shift?.id,
+  })
+
+  const fmtHHMM = (iso: string | null | undefined) => {
+    if (!iso) return '—'
+    const s = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z'
+    const d = new Date(s)
+    const jstMs = d.getTime() + 9 * 3600 * 1000
+    const jst = new Date(jstMs)
+    const h = jst.getUTCHours()
+    const m = jst.getUTCMinutes()
+    const displayH = h < 12 ? h + 24 : h
+    return `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`
+  }
+
+  const dateLabel = new Date(shift.date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' })
+  const block = dayDetail?.cast_block
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4" onClick={onClose}>
+      <div className="bg-night-800 border border-night-600 rounded-2xl p-5 w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center">
+          <h3 className="text-white font-bold">{dateLabel}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+
+        {/* ステータス */}
+        <div className="flex gap-2 flex-wrap">
+          {shift.is_absent && <span className="badge bg-red-900/40 text-red-400">当欠</span>}
+          {shift.is_late && <span className="badge bg-yellow-900/40 text-yellow-400">遅刻</span>}
+        </div>
+
+        {/* 勤務時間 */}
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-night-700 rounded-lg p-2">
+            <p className="text-[10px] text-gray-500">出勤</p>
+            <p className="text-white font-medium text-sm">{fmtHHMM(shift.actual_start)}</p>
+          </div>
+          <div className="bg-night-700 rounded-lg p-2">
+            <p className="text-[10px] text-gray-500">退勤</p>
+            <p className="text-white font-medium text-sm">{fmtHHMM(shift.actual_end)}</p>
+          </div>
+          <div className="bg-night-700 rounded-lg p-2">
+            <p className="text-[10px] text-gray-500">勤務時間</p>
+            <p className="text-white font-medium text-sm">{shift.actual_hours ? `${shift.actual_hours}h` : '—'}</p>
+          </div>
+        </div>
+
+        {/* 金額内訳 */}
+        {(shift.total_pay != null || block) && (
+          <div className="space-y-1 bg-night-900/60 rounded-lg p-3">
+            <div className="flex justify-between text-sm"><span className="text-gray-400">基本給</span><span className="text-white">¥{(block?.base_pay ?? 0).toLocaleString()}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-400">時給</span><span className="text-white">¥{(block?.applied_hourly_rate ?? 0).toLocaleString()}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-pink-400">インセンティブ</span><span className="text-pink-300">¥{(block?.incentive_total ?? 0).toLocaleString()}</span></div>
+            {block?.champagne_amount > 0 && (
+              <div className="flex justify-between text-sm"><span className="text-yellow-400">シャンパン分</span><span className="text-yellow-300">¥{block.champagne_amount.toLocaleString()}</span></div>
+            )}
+            {block?.daily_pay > 0 && (
+              <div className="flex justify-between text-sm"><span className="text-red-400">日払い</span><span className="text-red-300">-¥{block.daily_pay.toLocaleString()}</span></div>
+            )}
+            {shift.total_pay != null && (
+              <div className="flex justify-between text-base font-bold border-t border-night-600 pt-1 mt-1">
+                <span className="text-gray-300">合計</span>
+                <span className="text-white">¥{shift.total_pay.toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ドリンク件数 */}
+        {block && (
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">S</p><p className="text-white text-sm">{block.drink_s ?? 0}</p></div>
+            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">L</p><p className="text-white text-sm">{block.drink_l ?? 0}</p></div>
+            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">MG</p><p className="text-white text-sm">{block.drink_mg ?? 0}</p></div>
+            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">SHOT</p><p className="text-white text-sm">{block.shot_cast ?? 0}</p></div>
+          </div>
+        )}
+
+        {/* 担当した伝票一覧 */}
+        {dayDetail?.tickets && dayDetail.tickets.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-xs text-gray-400 font-medium">担当した伝票（{dayDetail.tickets.length}件）</div>
+            {dayDetail.tickets.map((t: any) => (
+              <div key={t.ticket_id} className="bg-night-700 rounded-lg px-3 py-1.5 text-xs flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-primary-400 font-medium">{t.table_no || '—'}</span>
+                  <span className="text-gray-400">{t.customer_name || '—'}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-white">¥{(t.grand_total ?? 0).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

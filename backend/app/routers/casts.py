@@ -561,6 +561,81 @@ def get_cast_stats(
     }
 
 
+@router.get("/{store_id}/{cast_id}/shifts/{shift_id}/detail")
+def get_cast_shift_detail(
+    store_id: int,
+    cast_id: int,
+    shift_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """出勤履歴1件の詳細: 日報スナップショットの cast_block と担当伝票一覧"""
+    shift = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.id == shift_id,
+        models.ConfirmedShift.cast_id == cast_id,
+        models.ConfirmedShift.store_id == store_id,
+    ).first()
+    if not shift:
+        raise HTTPException(status_code=404, detail="シフトが見つかりません")
+
+    # スナップショット（最新バージョン）
+    snap = db.query(models.DailyReportSnapshot).filter(
+        models.DailyReportSnapshot.store_id == store_id,
+        models.DailyReportSnapshot.business_date == shift.date,
+    ).order_by(models.DailyReportSnapshot.version.desc()).first()
+
+    cast_block = None
+    if snap and snap.payload:
+        for b in snap.payload.get("cast_attendance", []):
+            if b.get("cast_id") == cast_id:
+                cast_block = b
+                break
+
+    # その日の担当伝票（CastAssignment 経由 or featured_cast / motivation_cast）
+    from datetime import timedelta
+    day_start_utc = datetime(shift.date.year, shift.date.month, shift.date.day, 3, 0, 0) - timedelta(hours=9)
+    day_end_utc = day_start_utc + timedelta(hours=24)
+    # 対応した伝票（CastAssignment のある伝票）
+    assigned_tids = [r[0] for r in db.query(models.CastAssignment.ticket_id).filter(
+        models.CastAssignment.cast_id == cast_id,
+        models.CastAssignment.started_at >= day_start_utc,
+        models.CastAssignment.started_at < day_end_utc,
+    ).distinct().all()]
+
+    tickets_out = []
+    if assigned_tids:
+        rows = db.query(models.Ticket).filter(
+            models.Ticket.id.in_(assigned_tids),
+            models.Ticket.deleted_at.is_(None),
+        ).all()
+        for t in rows:
+            adj = sum(
+                (i.amount or 0) for i in (t.order_items or [])
+                if i.item_name and (
+                    i.item_name.startswith('先会計') or
+                    i.item_name.startswith('分割清算') or
+                    i.item_name.startswith('値引き') or
+                    i.item_name.startswith('加算')
+                ) and not i.canceled_at
+            )
+            sub = (t.total_amount or 0) - adj
+            grand = round(sub * 1.21) + adj
+            tickets_out.append({
+                "ticket_id": t.id,
+                "table_no": t.table_no,
+                "customer_name": t.customer.name if t.customer else None,
+                "grand_total": max(0, grand),
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+            })
+        tickets_out.sort(key=lambda x: x.get("started_at") or "")
+
+    return {
+        "cast_block": cast_block,
+        "tickets": tickets_out,
+    }
+
+
 @router.get("/{store_id}/{cast_id}/shifts")
 def get_cast_shifts(
     store_id: int,
