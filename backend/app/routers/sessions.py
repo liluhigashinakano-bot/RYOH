@@ -421,6 +421,14 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
         )
     ).all()
 
+    # 退勤打刻し忘れを 29:00 (JST翌日5:00 = 営業日UTC 20:00) で強制退勤
+    forced_end_utc = datetime(
+        session_date_jst.year, session_date_jst.month, session_date_jst.day, 20, 0, 0
+    )
+    for shift in shifts_to_clear:
+        if shift.actual_start is not None and shift.actual_end is None and not shift.is_absent:
+            shift.actual_end = forced_end_utc
+
     def _dt_to_bar_hhmm_snap(dt: datetime) -> str:
         jst = dt + timedelta(hours=9)
         h, m = jst.hour, jst.minute
@@ -452,6 +460,10 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
         models.StaffAttendance.store_id == session.store_id,
         models.StaffAttendance.date == session_date_jst,
     ).all()
+    # 退勤打刻し忘れのスタッフも 29:00 で強制退勤
+    for sr in staff_to_clear:
+        if sr.actual_start is not None and sr.actual_end is None and not sr.is_absent:
+            sr.actual_end = forced_end_utc
     staff_snap = [
         {
             "name": sr.name,
