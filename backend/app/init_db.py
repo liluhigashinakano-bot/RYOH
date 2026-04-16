@@ -50,6 +50,8 @@ def _run_migrations(engine):
         "ALTER TABLE tickets ADD COLUMN IF NOT EXISTS display_order INTEGER",
         # OrderItem: 延長の期番号
         "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS period_no INTEGER",
+        # OrderItem: 合算解除用に元伝票IDを保持
+        "ALTER TABLE order_items ADD COLUMN IF NOT EXISTS original_ticket_id INTEGER REFERENCES tickets(id)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS receipt_name VARCHAR(100)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS ai_advisor_enabled BOOLEAN DEFAULT true",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS manual_set_start BOOLEAN DEFAULT true",

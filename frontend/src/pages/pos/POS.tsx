@@ -5123,22 +5123,41 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
   onClose: () => void
   isPending: boolean
 }) {
+  const qc = useQueryClient()
   const { data: tickets = [] } = useQuery({
     queryKey: ['tickets', storeId, 'open'],
     queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
+  })
+
+  const { data: mergeSources = [] } = useQuery({
+    queryKey: ['merge-sources', currentTicketId],
+    queryFn: () => apiClient.get(`/api/tickets/${currentTicketId}/merge-sources`).then(r => r.data),
+  })
+
+  const unmergeMutation = useMutation({
+    mutationFn: (sourceId: number) => apiClient.post(`/api/tickets/${currentTicketId}/unmerge`, { source_ticket_id: sourceId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
+      qc.invalidateQueries({ queryKey: ['ticket', currentTicketId] })
+      qc.invalidateQueries({ queryKey: ['merge-sources', currentTicketId] })
+      onClose()
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.detail || '合算解除に失敗しました')
+    },
   })
 
   const others = (tickets as any[]).filter((t: any) => t.id !== currentTicketId)
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4">
-      <div className="card w-full max-w-sm space-y-3">
+      <div className="card w-full max-w-sm space-y-3 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center">
           <h3 className="font-bold text-white">合算 — 伝票を選択</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <p className="text-xs text-gray-400">選択した伝票の注文をすべてこの伝票に移動し、元の伝票を閉じます。</p>
-        <div className="space-y-1.5 max-h-72 overflow-y-auto">
+        <div className="space-y-1.5 max-h-56 overflow-y-auto">
           {others.map((t: any) => (
             <button key={t.id} onClick={() => onSubmit(t.id)} disabled={isPending}
               className="w-full text-left px-3 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors disabled:opacity-50">
@@ -5157,6 +5176,33 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
             <p className="text-center text-gray-500 text-sm py-6">合算できる伝票がありません</p>
           )}
         </div>
+
+        {(mergeSources as any[]).length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-night-600">
+            <h4 className="text-sm font-bold text-white">合算解除</h4>
+            <p className="text-xs text-gray-400">この伝票に合算された元伝票を元に戻します。</p>
+            <div className="space-y-1.5">
+              {(mergeSources as any[]).map((s: any) => (
+                <div key={s.source_ticket_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 text-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-white shrink-0">{s.table_no || '—'}</span>
+                    <span className="text-gray-400 text-xs shrink-0">{s.guest_count}名</span>
+                    {s.customer_name && <span className="text-gray-400 text-xs truncate">{s.customer_name}</span>}
+                    <span className="text-pink-400 text-xs shrink-0">¥{(s.moved_amount || 0).toLocaleString()}</span>
+                  </div>
+                  <button
+                    onClick={() => { if (confirm(`${s.table_no || '伝票'} の合算を解除しますか？`)) unmergeMutation.mutate(s.source_ticket_id) }}
+                    disabled={unmergeMutation.isPending}
+                    className="shrink-0 text-xs px-2.5 py-1 bg-orange-900/60 hover:bg-orange-800/70 text-orange-300 rounded transition-colors disabled:opacity-50"
+                  >
+                    解除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <button onClick={onClose} className="btn-secondary w-full">キャンセル</button>
       </div>
     </div>

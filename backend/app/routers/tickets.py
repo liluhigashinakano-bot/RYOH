@@ -1758,6 +1758,8 @@ def merge_ticket(
     # source の未キャンセル注文を target へ移す
     active_items = [i for i in (source.order_items or []) if i.canceled_at is None]
     for item in active_items:
+        if item.original_ticket_id is None:
+            item.original_ticket_id = source.id
         item.ticket_id = data.target_ticket_id
         target.total_amount += item.amount
         if item.item_type == "extension":
@@ -1773,6 +1775,110 @@ def merge_ticket(
     source.payment_method = models.PaymentMethod.cash
     source.total_amount = 0
     source.notes = (source.notes or "") + f" [合算→{data.target_ticket_id}]"
+
+    db.commit()
+    db.refresh(target)
+    return _to_response(target)
+
+
+@router.get("/{ticket_id}/merge-sources")
+def list_merge_sources(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """この伝票に合算された元伝票の一覧（合算解除候補）"""
+    source_ids = [
+        r[0] for r in
+        db.query(models.OrderItem.original_ticket_id)
+        .filter(
+            models.OrderItem.ticket_id == ticket_id,
+            models.OrderItem.original_ticket_id.isnot(None),
+            models.OrderItem.canceled_at.is_(None),
+        ).distinct().all()
+    ]
+    if not source_ids:
+        return []
+    sources = db.query(models.Ticket).filter(models.Ticket.id.in_(source_ids)).all()
+    result = []
+    for s in sources:
+        item_count = sum(
+            1 for i in (s.order_items or [])
+            if i.canceled_at is None and i.ticket_id == ticket_id and (i.original_ticket_id == s.id)
+        )
+        # 合算で target に移った金額
+        moved_amount = sum(
+            (i.amount or 0) for i in (s.order_items or [])
+            if i.canceled_at is None and i.ticket_id == ticket_id and (i.original_ticket_id == s.id)
+        )
+        result.append({
+            "source_ticket_id": s.id,
+            "table_no": s.table_no,
+            "customer_name": s.customer.name if s.customer else None,
+            "guest_count": s.guest_count,
+            "n_count": s.n_count,
+            "r_count": s.r_count,
+            "merged_at": s.ended_at.isoformat() if s.ended_at else None,
+            "moved_item_count": item_count,
+            "moved_amount": moved_amount,
+        })
+    return result
+
+
+class UnmergeRequest(BaseModel):
+    source_ticket_id: int
+
+
+@router.post("/{ticket_id}/unmerge", response_model=TicketResponse)
+def unmerge_ticket(
+    ticket_id: int,
+    data: UnmergeRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """target (ticket_id) から source_ticket_id の合算を解除し、元伝票を再オープンする"""
+    target = db.query(models.Ticket).filter(
+        models.Ticket.id == ticket_id,
+        models.Ticket.is_closed == False,
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="合算先伝票が見つかりません（会計済みは解除不可）")
+
+    source = db.query(models.Ticket).filter(models.Ticket.id == data.source_ticket_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="元伝票が見つかりません")
+
+    moved_items = db.query(models.OrderItem).filter(
+        models.OrderItem.ticket_id == ticket_id,
+        models.OrderItem.original_ticket_id == source.id,
+        models.OrderItem.canceled_at.is_(None),
+    ).all()
+    if not moved_items:
+        raise HTTPException(status_code=400, detail="解除対象の注文が見つかりません")
+
+    moved_total = 0
+    moved_extensions = 0
+    for item in moved_items:
+        moved_total += item.amount or 0
+        if item.item_type == "extension":
+            moved_extensions += 1
+        item.ticket_id = source.id
+        item.original_ticket_id = None
+
+    target.total_amount = max(0, (target.total_amount or 0) - moved_total)
+    target.extension_count = max(0, (target.extension_count or 0) - moved_extensions)
+    target.guest_count = max(1, (target.guest_count or 1) - (source.guest_count or 1))
+    target.n_count = max(0, (target.n_count or 0) - (source.n_count or 0))
+    target.r_count = max(0, (target.r_count or 0) - (source.r_count or 0))
+
+    # source を再オープン
+    source.is_closed = False
+    source.ended_at = None
+    source.payment_method = None
+    source.total_amount = moved_total
+    # notes から合算タグを削除
+    if source.notes:
+        source.notes = source.notes.replace(f" [合算→{ticket_id}]", "").strip() or None
 
     db.commit()
     db.refresh(target)

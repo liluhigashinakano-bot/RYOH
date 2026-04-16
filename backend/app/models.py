@@ -315,6 +315,8 @@ class OrderItem(Base):
     incentive_snapshot = Column(JSON, nullable=True)
     # 延長 (extension) の期番号。同じ ticket × period_no は1行のみ存在
     period_no = Column(Integer, nullable=True)
+    # 合算で移動した元伝票のID。合算解除で元に戻すために使う
+    original_ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
 
     ticket = relationship("Ticket", back_populates="order_items")
     cast = relationship("Cast", foreign_keys=[cast_id])
