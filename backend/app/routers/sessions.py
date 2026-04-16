@@ -199,13 +199,21 @@ def get_dashboard(
     from datetime import date as _date
     today_utc = _date.today()
     date_window = [today_utc - timedelta(days=1), today_utc, today_utc + timedelta(days=1)]
-    working_staff = db.query(models.StaffAttendance).filter(
+    working_staff_all = db.query(models.StaffAttendance).filter(
         models.StaffAttendance.store_id == store_id,
         models.StaffAttendance.date.in_(date_window),
         models.StaffAttendance.actual_start.isnot(None),
         models.StaffAttendance.actual_end.is_(None),
         models.StaffAttendance.is_absent == False,
-    ).all()
+    ).order_by(models.StaffAttendance.actual_start.desc()).all()
+    # 同名スタッフが複数日にまたがる場合は最新1件のみ
+    _seen_staff: set = set()
+    working_staff = []
+    for s in working_staff_all:
+        if s.name in _seen_staff:
+            continue
+        _seen_staff.add(s.name)
+        working_staff.append(s)
 
     def bar_hhmm(dt):
         if not dt:
@@ -230,11 +238,16 @@ def get_dashboard(
         models.ConfirmedShift.actual_start.isnot(None),
         models.ConfirmedShift.actual_end.is_(None),
         models.ConfirmedShift.is_absent == False,
-    ).all()
+    ).order_by(models.ConfirmedShift.actual_start.desc()).all()
 
     cast_list = []
+    seen_cast_keys: set = set()
     for shift in working_shifts:
         if shift.cast_id is not None and shift.cast:
+            key = ("cast", shift.cast_id)
+            if key in seen_cast_keys:
+                continue
+            seen_cast_keys.add(key)
             cast = shift.cast
             cast_list.append({
                 "cast_id": cast.id,
@@ -244,6 +257,10 @@ def get_dashboard(
                 "is_late": bool(shift.is_late),
             })
         elif shift.help_cast_name:
+            key = ("help", shift.help_cast_name)
+            if key in seen_cast_keys:
+                continue
+            seen_cast_keys.add(key)
             cast_list.append({
                 "cast_id": None,
                 "stage_name": f"[ヘルプ]{shift.help_cast_name}",
