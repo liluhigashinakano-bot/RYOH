@@ -194,17 +194,14 @@ def get_dashboard(
     custom_drink_columns = [{"label": l, "short": short_map[l]} for l in custom_labels]
 
     # 勤務中社員/アルバイト: 出勤済み(actual_end=None)かつ欠勤でない。
-    # shift.date は date.today() (Railway UTC) で保存されるが、JST営業時間帯と
-    # UTC日付の境界でズレるため、前後1日のウィンドウで許容する。
-    from datetime import date as _date
-    today_utc = _date.today()
-    date_window = [today_utc - timedelta(days=1), today_utc, today_utc + timedelta(days=1)]
+    # actual_start が直近24時間以内のみ採用（退勤打刻し忘れの古いレコードを除外）。
+    start_cutoff = datetime.utcnow() - timedelta(hours=24)
     working_staff_all = db.query(models.StaffAttendance).filter(
         models.StaffAttendance.store_id == store_id,
-        models.StaffAttendance.date.in_(date_window),
         models.StaffAttendance.actual_start.isnot(None),
         models.StaffAttendance.actual_end.is_(None),
         models.StaffAttendance.is_absent == False,
+        models.StaffAttendance.actual_start >= start_cutoff,
     ).order_by(models.StaffAttendance.actual_start.desc()).all()
     # 同名スタッフが複数日にまたがる場合は最新1件のみ
     _seen_staff: set = set()
@@ -231,13 +228,13 @@ def get_dashboard(
         for s in working_staff
     ]
 
-    # 勤務中キャスト: 出勤済み(actual_end=None)かつ欠勤でない。日付ウィンドウで絞る。
+    # 勤務中キャスト: 出勤済み(actual_end=None)かつ欠勤でない。直近24時間以内に出勤したもの。
     working_shifts = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.store_id == store_id,
-        models.ConfirmedShift.date.in_(date_window),
         models.ConfirmedShift.actual_start.isnot(None),
         models.ConfirmedShift.actual_end.is_(None),
         models.ConfirmedShift.is_absent == False,
+        models.ConfirmedShift.actual_start >= start_cutoff,
     ).order_by(models.ConfirmedShift.actual_start.desc()).all()
 
     cast_list = []
