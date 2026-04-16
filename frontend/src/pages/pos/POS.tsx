@@ -2882,7 +2882,7 @@ function TicketDeleteModal({ ticket, onSubmit, onClose }: {
             onClick={() => onSubmit(operator, reason)}
             disabled={!operator.trim()}
             className="text-xs px-4 py-1.5 bg-red-700 hover:bg-red-600 text-white rounded-lg disabled:opacity-40">
-            削除する
+            実行
           </button>
         </div>
       </div>
@@ -5124,6 +5124,8 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
   isPending: boolean
 }) {
   const qc = useQueryClient()
+  const [pendingTarget, setPendingTarget] = useState<any>(null)
+  const [pendingUnmerge, setPendingUnmerge] = useState<any>(null)
   const { data: tickets = [] } = useQuery({
     queryKey: ['tickets', storeId, 'open'],
     queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
@@ -5140,6 +5142,7 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
       qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] })
       qc.invalidateQueries({ queryKey: ['ticket', currentTicketId] })
       qc.invalidateQueries({ queryKey: ['merge-sources', currentTicketId] })
+      setPendingUnmerge(null)
       onClose()
     },
     onError: (err: any) => {
@@ -5156,54 +5159,91 @@ function MergeModal({ storeId, currentTicketId, onSubmit, onClose, isPending }: 
           <h3 className="font-bold text-white">合算 — 伝票を選択</h3>
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
-        <p className="text-xs text-gray-400">選択した伝票の注文をすべてこの伝票に移動し、元の伝票を閉じます。</p>
-        <div className="space-y-1.5 max-h-56 overflow-y-auto">
-          {others.map((t: any) => (
-            <button key={t.id} onClick={() => onSubmit(t.id)} disabled={isPending}
-              className="w-full text-left px-3 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors disabled:opacity-50">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-white">{t.table_no || '—'}</span>
-                  {t.visit_type && <span className={`badge text-xs ${t.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{t.visit_type}</span>}
-                  <span className="text-gray-400 text-xs">{t.guest_count}名</span>
-                  {t.customer_name && <span className="text-gray-400 text-xs truncate">{t.customer_name}</span>}
-                </div>
-                <span className="text-pink-400 font-medium shrink-0">¥{calcTicketGrandTotal(t).toLocaleString()}</span>
-              </div>
-            </button>
-          ))}
-          {others.length === 0 && (
-            <p className="text-center text-gray-500 text-sm py-6">合算できる伝票がありません</p>
-          )}
-        </div>
 
-        {(mergeSources as any[]).length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-night-600">
-            <h4 className="text-sm font-bold text-white">合算解除</h4>
-            <p className="text-xs text-gray-400">この伝票に合算された元伝票を元に戻します。</p>
-            <div className="space-y-1.5">
-              {(mergeSources as any[]).map((s: any) => (
-                <div key={s.source_ticket_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 text-sm">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-white shrink-0">{s.table_no || '—'}</span>
-                    <span className="text-gray-400 text-xs shrink-0">{s.guest_count}名</span>
-                    {s.customer_name && <span className="text-gray-400 text-xs truncate">{s.customer_name}</span>}
-                    <span className="text-pink-400 text-xs shrink-0">¥{(s.moved_amount || 0).toLocaleString()}</span>
-                  </div>
-                  <button
-                    onClick={() => { if (confirm(`${s.table_no || '伝票'} の合算を解除しますか？`)) unmergeMutation.mutate(s.source_ticket_id) }}
-                    disabled={unmergeMutation.isPending}
-                    className="shrink-0 text-xs px-2.5 py-1 bg-orange-900/60 hover:bg-orange-800/70 text-orange-300 rounded transition-colors disabled:opacity-50"
-                  >
-                    解除
-                  </button>
-                </div>
-              ))}
+        {pendingTarget ? (
+          <div className="space-y-3">
+            <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg p-3 space-y-1 text-sm">
+              <p className="text-white"><span className="font-bold">{pendingTarget.table_no || '—'}</span> と合算しますか？</p>
+              <p className="text-xs text-gray-400">この伝票の注文を {pendingTarget.table_no || '—'} に移動し、この伝票を閉じます。</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setPendingTarget(null)} className="btn-secondary flex-1">キャンセル</button>
+              <button
+                onClick={() => onSubmit(pendingTarget.id)}
+                disabled={isPending}
+                className="btn-primary flex-1 disabled:opacity-40">
+                実行
+              </button>
             </div>
           </div>
-        )}
+        ) : pendingUnmerge ? (
+          <div className="space-y-3">
+            <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg p-3 space-y-1 text-sm">
+              <p className="text-white"><span className="font-bold">{pendingUnmerge.table_no || '伝票'}</span> の合算を解除しますか？</p>
+              <p className="text-xs text-gray-400">移動していた注文を元の伝票に戻し、元伝票を再オープンします。</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setPendingUnmerge(null)} className="btn-secondary flex-1">キャンセル</button>
+              <button
+                onClick={() => unmergeMutation.mutate(pendingUnmerge.source_ticket_id)}
+                disabled={unmergeMutation.isPending}
+                className="btn-primary flex-1 disabled:opacity-40">
+                実行
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-gray-400">選択した伝票の注文をすべてこの伝票に移動し、元の伝票を閉じます。</p>
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {others.map((t: any) => (
+                <button key={t.id} onClick={() => setPendingTarget(t)} disabled={isPending}
+                  className="w-full text-left px-3 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors disabled:opacity-50">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white">{t.table_no || '—'}</span>
+                      {t.visit_type && <span className={`badge text-xs ${t.visit_type === 'N' ? 'bg-blue-900/40 text-blue-400' : 'bg-purple-900/40 text-purple-400'}`}>{t.visit_type}</span>}
+                      <span className="text-gray-400 text-xs">{t.guest_count}名</span>
+                      {t.customer_name && <span className="text-gray-400 text-xs truncate">{t.customer_name}</span>}
+                    </div>
+                    <span className="text-pink-400 font-medium shrink-0">¥{calcTicketGrandTotal(t).toLocaleString()}</span>
+                  </div>
+                </button>
+              ))}
+              {others.length === 0 && (
+                <p className="text-center text-gray-500 text-sm py-6">合算できる伝票がありません</p>
+              )}
+            </div>
 
-        <button onClick={onClose} className="btn-secondary w-full">キャンセル</button>
+            {(mergeSources as any[]).length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-night-600">
+                <h4 className="text-sm font-bold text-white">合算解除</h4>
+                <p className="text-xs text-gray-400">この伝票に合算された元伝票を元に戻します。</p>
+                <div className="space-y-1.5">
+                  {(mergeSources as any[]).map((s: any) => (
+                    <div key={s.source_ticket_id} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-white shrink-0">{s.table_no || '—'}</span>
+                        <span className="text-gray-400 text-xs shrink-0">{s.guest_count}名</span>
+                        {s.customer_name && <span className="text-gray-400 text-xs truncate">{s.customer_name}</span>}
+                        <span className="text-pink-400 text-xs shrink-0">¥{(s.moved_amount || 0).toLocaleString()}</span>
+                      </div>
+                      <button
+                        onClick={() => setPendingUnmerge(s)}
+                        disabled={unmergeMutation.isPending}
+                        className="shrink-0 text-xs px-2.5 py-1 bg-orange-900/60 hover:bg-orange-800/70 text-orange-300 rounded transition-colors disabled:opacity-50"
+                      >
+                        解除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button onClick={onClose} className="btn-secondary w-full">キャンセル</button>
+          </>
+        )}
       </div>
     </div>
   )
@@ -5422,7 +5462,7 @@ function SenkaikeiModal({ onSubmit, onClose, isPending }: {
             onClick={() => { if (canSubmit) onSubmit(amount, paymentMethod!) }}
             disabled={!canSubmit}
             className="btn-primary flex-1 disabled:opacity-40">
-            会計実行
+            実行
           </button>
         </div>
       </div>
@@ -5551,7 +5591,7 @@ function WarikanModal({ totalAmount, onSubmit, onClose }: {
             }}
             disabled={Math.round(remaining) !== 0 || amounts.some((v, i) => (parseInt(v, 10) || 0) > 0 && !methods[i])}
             className="btn-primary flex-1 disabled:opacity-40">
-            会計実行
+            実行
           </button>
         </div>
       </div>
