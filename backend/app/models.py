@@ -284,7 +284,7 @@ class Ticket(Base):
 
     store = relationship("Store", back_populates="tickets")
     customer = relationship("Customer", back_populates="tickets")
-    order_items = relationship("OrderItem", back_populates="ticket")
+    order_items = relationship("OrderItem", back_populates="ticket", foreign_keys="OrderItem.ticket_id")
     assignments = relationship("CastAssignment", back_populates="ticket")
     visit_notes = relationship("CustomerVisitNote", back_populates="ticket")
     motivation_cast = relationship("Cast", foreign_keys=[motivation_cast_id])
@@ -318,7 +318,7 @@ class OrderItem(Base):
     # 合算で移動した元伝票のID。合算解除で元に戻すために使う
     original_ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
 
-    ticket = relationship("Ticket", back_populates="order_items")
+    ticket = relationship("Ticket", back_populates="order_items", foreign_keys=[ticket_id])
     cast = relationship("Cast", foreign_keys=[cast_id])
 
 
