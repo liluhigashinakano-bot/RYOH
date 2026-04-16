@@ -12,10 +12,16 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, time
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, time, date
 from typing import Optional, List, Dict, Tuple
 import math
+
+
+# 同一顧客+同一営業日の伝票を1枚にマージするローカルルールの適用開始日。
+# この日以降の営業日分のみマージ対象。以前の集計は従来通り伝票単位。
+MERGE_CUTOFF_DATE = date(2026, 4, 17)
 
 
 # ─────────────────────────────────────────
@@ -67,6 +73,7 @@ class TicketInput:
     card_amount: int
     code_amount: int
     payment_method: Optional[str]
+    customer_id: Optional[int] = None
     orders: List[OrderInput] = field(default_factory=list)
     assignments: List[CastAssignmentInput] = field(default_factory=list)
 
@@ -126,6 +133,45 @@ def jst_bar_hour(dt: datetime) -> int:
     return h + 24 if h < 12 else h
 
 
+def _ticket_business_date(t: TicketInput) -> date:
+    """JST 12時未満は前日扱い（バー営業日）"""
+    dt = t.started_at_jst
+    if dt.hour < 12:
+        return (dt - timedelta(days=1)).date()
+    return dt.date()
+
+
+def _visit_groups(tickets: List[TicketInput]) -> List[List[TicketInput]]:
+    """同一顧客+同一営業日の伝票をグループ化。
+    MERGE_CUTOFF_DATE 以降の営業日かつ customer_id がある伝票のみマージ対象。
+    他の伝票（未登録顧客、cutoff 以前）はそれぞれ単独グループ。"""
+    groups: Dict[Tuple[int, date], List[TicketInput]] = defaultdict(list)
+    standalone: List[List[TicketInput]] = []
+    for t in tickets:
+        bd = _ticket_business_date(t)
+        if t.customer_id and bd >= MERGE_CUTOFF_DATE:
+            groups[(t.customer_id, bd)].append(t)
+        else:
+            standalone.append([t])
+    return standalone + list(groups.values())
+
+
+def _group_guest_count(group: List[TicketInput]) -> int:
+    return max(t.guest_count for t in group)
+
+
+def _group_n_count(group: List[TicketInput]) -> int:
+    return max(t.n_count for t in group)
+
+
+def _group_r_count(group: List[TicketInput]) -> int:
+    return max(t.r_count for t in group)
+
+
+def _group_total(group: List[TicketInput]) -> int:
+    return sum(t.total_amount for t in group)
+
+
 # ─────────────────────────────────────────
 # 売上集計（セクション3）
 # ─────────────────────────────────────────
@@ -141,23 +187,23 @@ def total_extensions(tickets: List[TicketInput]) -> int:
 
 
 def total_n_guests(tickets: List[TicketInput]) -> int:
-    """3.3 N合計数"""
-    return sum(t.n_count for t in tickets)
+    """3.3 N合計数（同一顧客+同一営業日は最大値で1カウント）"""
+    return sum(_group_n_count(g) for g in _visit_groups(tickets))
 
 
 def total_r_guests(tickets: List[TicketInput]) -> int:
-    """3.3 R合計数"""
-    return sum(t.r_count for t in tickets)
+    """3.3 R合計数（同一顧客+同一営業日は最大値で1カウント）"""
+    return sum(_group_r_count(g) for g in _visit_groups(tickets))
 
 
 def total_ticket_count(tickets: List[TicketInput]) -> int:
-    """3.4 合計伝票枚数"""
-    return len(tickets)
+    """3.4 合計伝票枚数（同一顧客+同一営業日は1枚扱い）"""
+    return len(_visit_groups(tickets))
 
 
 def total_guest_count(tickets: List[TicketInput]) -> int:
-    """3.5 合計来店数"""
-    return sum(t.guest_count for t in tickets)
+    """3.5 合計来店数（同一顧客+同一営業日は最大人数で1カウント）"""
+    return sum(_group_guest_count(g) for g in _visit_groups(tickets))
 
 
 def split_nr_sales(t: TicketInput) -> Tuple[int, int]:
@@ -174,6 +220,24 @@ def split_nr_sales(t: TicketInput) -> Tuple[int, int]:
     return (n_share, r_share)
 
 
+def _split_nr_for_group(group: List[TicketInput]) -> Tuple[int, int]:
+    """マージ後の人数(max)・売上(sum)で N/R 按分を算出。"""
+    guests = _group_guest_count(group)
+    n_cnt = _group_n_count(group)
+    r_cnt = _group_r_count(group)
+    total = _group_total(group)
+    if guests <= 0:
+        return (0, 0)
+    if n_cnt == 0 and r_cnt == 0:
+        return (0, 0)
+    n_share = total * n_cnt // guests
+    r_share = total - n_share if r_cnt > 0 else 0
+    if n_cnt == 0:
+        r_share = total
+        n_share = 0
+    return (n_share, r_share)
+
+
 def avg_per_guest(tickets: List[TicketInput]) -> Optional[int]:
     """3.6 客単価（円未満切り捨て）"""
     total = total_sales(tickets)
@@ -184,16 +248,18 @@ def avg_per_guest(tickets: List[TicketInput]) -> Optional[int]:
 
 def avg_per_n(tickets: List[TicketInput]) -> Optional[int]:
     """3.6 N客単価"""
-    n_total = sum(split_nr_sales(t)[0] for t in tickets)
-    n_count = total_n_guests(tickets)
+    groups = _visit_groups(tickets)
+    n_total = sum(_split_nr_for_group(g)[0] for g in groups)
+    n_count = sum(_group_n_count(g) for g in groups)
     res = safe_div(n_total, n_count)
     return int(res) if res is not None else None
 
 
 def avg_per_r(tickets: List[TicketInput]) -> Optional[int]:
     """3.6 R客単価"""
-    r_total = sum(split_nr_sales(t)[1] for t in tickets)
-    r_count = total_r_guests(tickets)
+    groups = _visit_groups(tickets)
+    r_total = sum(_split_nr_for_group(g)[1] for g in groups)
+    r_count = sum(_group_r_count(g) for g in groups)
     res = safe_div(r_total, r_count)
     return int(res) if res is not None else None
 

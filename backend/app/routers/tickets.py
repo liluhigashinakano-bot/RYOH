@@ -1445,10 +1445,9 @@ def close_ticket(
     if ticket.customer_id:
         customer = db.query(models.Customer).filter(models.Customer.id == ticket.customer_id).first()
         if customer:
-            customer.total_visits += 1
             customer.total_spend += ticket.total_amount
             customer.ltv = customer.total_spend
-            from datetime import date, timedelta
+            from datetime import date as _date, timedelta
             # 営業日（バー表記）: JSTで12時未満は前日扱い
             now_jst = datetime.utcnow() + timedelta(hours=9)
             business_date = now_jst.date() - timedelta(days=1) if now_jst.hour < 12 else now_jst.date()
@@ -1456,7 +1455,6 @@ def close_ticket(
             is_first_visit = not customer.first_visit_date
             if is_first_visit:
                 customer.first_visit_date = business_date
-            # 来店履歴（CustomerVisit）に記録
             store = db.query(models.Store).filter(models.Store.id == ticket.store_id).first()
 
             def _hhmm_int(dt):
@@ -1466,26 +1464,57 @@ def close_ticket(
                 h = jst.hour + 24 if jst.hour < 12 else jst.hour  # バー表記
                 return h * 100 + jst.minute
 
-            visit = models.CustomerVisit(
-                customer_id=customer.id,
-                date=business_date,
-                store_name=(store.name if store else None),
-                is_repeat=not is_first_visit,
-                in_time=_hhmm_int(ticket.started_at),
-                out_time=_hhmm_int(ticket.ended_at),
-                total_payment=_calc_grand_total(ticket),
-                raw_data={
-                    "ticket_id": ticket.id,
-                    "table_no": ticket.table_no,
-                    "guest_count": ticket.guest_count or 1,
-                    "n_count": ticket.n_count or 0,
-                    "r_count": ticket.r_count or 0,
-                    "visit_type": ticket.visit_type,
-                    "plan_type": ticket.plan_type,
-                    "visit_motivation": ticket.visit_motivation,
-                },
-            )
-            db.add(visit)
+            # 同一顧客+同一営業日の再来店は既存 CustomerVisit にマージ（2026-04-17 以降）
+            MERGE_CUTOFF = _date(2026, 4, 17)
+            existing_visit = None
+            if business_date >= MERGE_CUTOFF:
+                existing_visit = db.query(models.CustomerVisit).filter(
+                    models.CustomerVisit.customer_id == customer.id,
+                    models.CustomerVisit.date == business_date,
+                ).order_by(models.CustomerVisit.id.asc()).first()
+
+            grand = _calc_grand_total(ticket)
+            out_hhmm = _hhmm_int(ticket.ended_at)
+
+            if existing_visit is not None:
+                existing_visit.total_payment = (existing_visit.total_payment or 0) + grand
+                if out_hhmm is not None:
+                    existing_visit.out_time = out_hhmm
+                rd = existing_visit.raw_data if isinstance(existing_visit.raw_data, dict) else {}
+                merged_ids = rd.get("merged_ticket_ids") or []
+                if rd.get("ticket_id") and rd.get("ticket_id") not in merged_ids:
+                    merged_ids.append(rd.get("ticket_id"))
+                if ticket.id not in merged_ids:
+                    merged_ids.append(ticket.id)
+                rd["merged_ticket_ids"] = merged_ids
+                rd["guest_count"] = max(rd.get("guest_count") or 0, ticket.guest_count or 0)
+                rd["n_count"] = max(rd.get("n_count") or 0, ticket.n_count or 0)
+                rd["r_count"] = max(rd.get("r_count") or 0, ticket.r_count or 0)
+                existing_visit.raw_data = rd
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(existing_visit, "raw_data")
+            else:
+                customer.total_visits += 1
+                visit = models.CustomerVisit(
+                    customer_id=customer.id,
+                    date=business_date,
+                    store_name=(store.name if store else None),
+                    is_repeat=not is_first_visit,
+                    in_time=_hhmm_int(ticket.started_at),
+                    out_time=out_hhmm,
+                    total_payment=grand,
+                    raw_data={
+                        "ticket_id": ticket.id,
+                        "table_no": ticket.table_no,
+                        "guest_count": ticket.guest_count or 1,
+                        "n_count": ticket.n_count or 0,
+                        "r_count": ticket.r_count or 0,
+                        "visit_type": ticket.visit_type,
+                        "plan_type": ticket.plan_type,
+                        "visit_motivation": ticket.visit_motivation,
+                    },
+                )
+                db.add(visit)
 
     db.commit()
     db.refresh(ticket)

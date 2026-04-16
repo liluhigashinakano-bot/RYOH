@@ -188,6 +188,7 @@ def _to_ticket_input(
         visit_motivation=ticket.visit_motivation,
         motivation_cast_id=ticket.motivation_cast_id,
         customer_name=customer_name,
+        customer_id=ticket.customer_id,
         total_amount=grand,
         cash_amount=ticket.cash_amount or 0,
         card_amount=ticket.card_amount or 0,
