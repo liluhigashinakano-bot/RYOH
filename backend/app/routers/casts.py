@@ -573,26 +573,72 @@ def get_cast_shifts(
         models.ConfirmedShift.store_id == store_id,
     ).order_by(models.ConfirmedShift.date.desc()).limit(60).all()
 
+    # 日報スナップショットから cast_id × date での cast_block を事前取得
+    # （営業締めで actual_start/end がクリアされたシフトの実勤務時間復元用）
+    dates = list({s.date for s in shifts})
+    snapshot_blocks: dict = {}  # (cast_id, date) -> cast_block
+    if dates:
+        snaps = db.query(models.DailyReportSnapshot).filter(
+            models.DailyReportSnapshot.store_id == store_id,
+            models.DailyReportSnapshot.business_date.in_(dates),
+        ).all()
+        # 各日付で最新バージョンのみ採用
+        best_by_date: dict = {}
+        for sn in snaps:
+            cur = best_by_date.get(sn.business_date)
+            if cur is None or (sn.version or 0) > (cur.version or 0):
+                best_by_date[sn.business_date] = sn
+        for d, sn in best_by_date.items():
+            payload = sn.payload or {}
+            for b in payload.get("cast_attendance", []):
+                cid = b.get("cast_id")
+                if cid is None:
+                    continue
+                key = (int(cid), d)
+                if key not in snapshot_blocks:
+                    snapshot_blocks[key] = b
+
     result = []
     for s in shifts:
+        snap = snapshot_blocks.get((cast_id, s.date)) if cast_id else None
+        actual_start_iso = s.actual_start.isoformat() if s.actual_start else None
+        actual_end_iso = s.actual_end.isoformat() if s.actual_end else None
+        if actual_start_iso is None and snap:
+            actual_start_iso = snap.get("actual_start")
+        if actual_end_iso is None and snap:
+            actual_end_iso = snap.get("actual_end")
         actual_hours = None
         if s.actual_start and s.actual_end:
             actual_hours = round((s.actual_end - s.actual_start).total_seconds() / 3600, 1)
+        elif snap and snap.get("work_hours") is not None:
+            actual_hours = round(float(snap.get("work_hours") or 0), 1)
         pay = s.daily_pay
+        total_pay = pay.total_pay if pay else None
+        drink_back = pay.drink_back if pay else None
+        champagne_back = pay.champagne_back if pay else None
+        honshimei_back = pay.honshimei_back if pay else None
+        # daily_pay が無い場合は snapshot から補完
+        if total_pay is None and snap:
+            base = int(snap.get("base_pay") or 0)
+            incentive = int(snap.get("incentive_total") or 0)
+            daily_pay_amt = int(snap.get("daily_pay") or 0)
+            total_pay = base + incentive - daily_pay_amt
+            drink_back = drink_back if drink_back is not None else 0
+            champagne_back = champagne_back if champagne_back is not None else int(snap.get("champagne_amount") or 0)
         result.append({
             "id": s.id,
             "date": s.date.isoformat(),
             "planned_start": s.planned_start,
             "planned_end": s.planned_end,
-            "actual_start": s.actual_start.isoformat() if s.actual_start else None,
-            "actual_end": s.actual_end.isoformat() if s.actual_end else None,
+            "actual_start": actual_start_iso,
+            "actual_end": actual_end_iso,
             "actual_hours": actual_hours,
-            "is_late": s.is_late,
-            "is_absent": s.is_absent,
-            "total_pay": pay.total_pay if pay else None,
-            "drink_back": pay.drink_back if pay else None,
-            "champagne_back": pay.champagne_back if pay else None,
-            "honshimei_back": pay.honshimei_back if pay else None,
+            "is_late": bool(s.is_late) or (snap.get("is_late") if snap else False),
+            "is_absent": bool(s.is_absent) or (snap.get("is_absent") if snap else False),
+            "total_pay": total_pay,
+            "drink_back": drink_back,
+            "champagne_back": champagne_back,
+            "honshimei_back": honshimei_back,
         })
     return result
 

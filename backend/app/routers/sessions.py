@@ -452,10 +452,12 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
     db.refresh(session)
 
     # 日報スナップショット生成（勤怠クリア前なので実データが取れる）
+    report_payload = None
     try:
         from ..services.report_builder import build_daily_report_full, save_snapshot
         from datetime import timedelta as _td
         payload, raw_inputs = build_daily_report_full(db, session, generated_by=current_user.id)
+        report_payload = payload
         biz_date = (session.opened_at + _td(hours=9)).date()
         save_snapshot(
             db, session.store_id, biz_date, payload,
@@ -467,7 +469,55 @@ def close_session(session_id: int, data: SessionClose, db: Session = Depends(get
         import traceback
         traceback.print_exc()
 
-    # 勤怠クリア（snapshot 生成後に実行）
+    # CastDailyPay を作成（出勤履歴ページが参照するテーブル）
+    # 同一キャストが複数シフトの場合、インセンティブ等は最初のシフトに集計されているので
+    # シフトIDと payload の cast_attendance を cast_id で突き合わせ、最初だけに計上する
+    if report_payload:
+        try:
+            blocks_by_cast = {}
+            for b in report_payload.get("cast_attendance", []):
+                cid = b.get("cast_id")
+                if cid is not None and cid not in blocks_by_cast:
+                    blocks_by_cast[cid] = b
+            # 既存の daily_pay があれば削除して作り直す
+            shift_ids = [s.id for s in shifts_to_clear]
+            if shift_ids:
+                db.query(models.CastDailyPay).filter(
+                    models.CastDailyPay.shift_id.in_(shift_ids)
+                ).delete(synchronize_session=False)
+            counted: set = set()
+            for shift in shifts_to_clear:
+                cid = shift.cast_id
+                if cid is None:
+                    continue
+                b = blocks_by_cast.get(cid)
+                if not b:
+                    continue
+                is_first = cid not in counted
+                counted.add(cid)
+                base = int(b.get("base_pay") or 0) if is_first else 0
+                incentive = int(b.get("incentive_total") or 0) if is_first else 0
+                champagne = int(b.get("champagne_amount") or 0) if is_first else 0
+                daily_pay = int(b.get("daily_pay") or 0) if is_first else 0
+                total = base + incentive - daily_pay
+                db.add(models.CastDailyPay(
+                    shift_id=shift.id,
+                    base_pay=base,
+                    drink_back=0,  # インセンティブに含まれる
+                    champagne_back=champagne,
+                    honshimei_back=0,
+                    douhan_back=0,
+                    transport_deduction=0,
+                    tax_deduction=0,
+                    total_pay=total,
+                ))
+            db.commit()
+        except Exception as e:
+            print(f"[WARNING] Failed to create CastDailyPay: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # 勤怠クリア（snapshot / daily_pay 生成後に実行）
     for shift in shifts_to_clear:
         shift.actual_start = None
         shift.actual_end = None
