@@ -674,14 +674,28 @@ def get_cast_shifts(
                     snapshot_blocks[key] = b
 
     result = []
+    def _jst_iso_to_utc_iso(iso_str):
+        """JST naive ISO ('2026-04-13T21:00:00') を UTC ISO (+'Z') に変換"""
+        if not iso_str:
+            return None
+        try:
+            from datetime import timedelta as _td
+            # 'Z' や '+' が既に付いている場合はそのまま返す
+            if iso_str.endswith('Z') or '+' in iso_str:
+                return iso_str
+            dt = datetime.fromisoformat(iso_str.split('.')[0]) - _td(hours=9)
+            return dt.isoformat() + 'Z'
+        except Exception:
+            return iso_str
+
     for s in shifts:
         snap = snapshot_blocks.get((cast_id, s.date)) if cast_id else None
         actual_start_iso = s.actual_start.isoformat() if s.actual_start else None
         actual_end_iso = s.actual_end.isoformat() if s.actual_end else None
         if actual_start_iso is None and snap:
-            actual_start_iso = snap.get("actual_start")
+            actual_start_iso = _jst_iso_to_utc_iso(snap.get("actual_start"))
         if actual_end_iso is None and snap:
-            actual_end_iso = snap.get("actual_end")
+            actual_end_iso = _jst_iso_to_utc_iso(snap.get("actual_end"))
         actual_hours = None
         if s.actual_start and s.actual_end:
             actual_hours = round((s.actual_end - s.actual_start).total_seconds() / 3600, 1)
