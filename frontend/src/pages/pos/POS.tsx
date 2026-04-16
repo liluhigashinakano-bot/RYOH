@@ -3284,6 +3284,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showSetToggleConfirm, setShowSetToggleConfirm] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [showNextVisitModal, setShowNextVisitModal] = useState(false)
+  const [showMemoModal, setShowMemoModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
   const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null; motivation_cast_ids: number[] }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null, motivation_cast_ids: [] })
@@ -3698,6 +3699,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     割り勘
                   </button>
                 </>
+              )}
+              {ticket.customer_id && (
+                <button onClick={() => setShowMemoModal(true)}
+                  className="flex items-center gap-1 text-xs text-yellow-300 hover:text-yellow-200 bg-yellow-900/40 hover:bg-yellow-800/50 border border-yellow-700/50 rounded-lg px-2 py-1 transition-colors">
+                  📝 メモ
+                </button>
               )}
               {ticket.customer_id && (
                 <button onClick={() => setShowNextVisitModal(true)}
@@ -4721,6 +4728,16 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           customerName={ticket.customer_name || ''}
           ticketId={ticketId}
           onClose={() => setShowNextVisitModal(false)}
+        />
+      )}
+
+      {/* 接客メモモーダル */}
+      {showMemoModal && ticket?.customer_id && (
+        <MemoModal
+          customerId={ticket.customer_id}
+          customerName={ticket.customer_name || ''}
+          ticketId={ticketId}
+          onClose={() => setShowMemoModal(false)}
         />
       )}
 
@@ -6877,6 +6894,77 @@ function fmtIsoToJstTime(isoStr: string): string {
   const d = new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z')
   const jst = new Date(d.getTime() + 9 * 3600 * 1000)
   return `${jst.getUTCHours().toString().padStart(2,'0')}:${jst.getUTCMinutes().toString().padStart(2,'0')}`
+}
+
+
+// ─── 接客メモモーダル ───
+function MemoModal({ customerId, customerName, ticketId, onClose }: {
+  customerId: number; customerName: string; ticketId: number; onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [note, setNote] = useState('')
+
+  const { data: notes = [] } = useQuery({
+    queryKey: ['customer-notes', customerId],
+    queryFn: () => apiClient.get(`/api/customers/${customerId}/notes`).then(r => r.data),
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: () => apiClient.post(`/api/customers/${customerId}/notes`, { note, ticket_id: ticketId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-notes', customerId] })
+      setNote('')
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (noteId: number) => apiClient.delete(`/api/customers/${customerId}/notes/${noteId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['customer-notes', customerId] }),
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[300] p-4" onClick={onClose}>
+      <div className="bg-night-800 border border-night-600 rounded-xl p-5 w-full max-w-md max-h-[85vh] overflow-y-auto space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-white">📝 接客メモ{customerName ? ` - ${customerName}` : ''}</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="space-y-2">
+          <textarea
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            className="input-field w-full h-24 resize-none"
+            placeholder="今日の接客メモ、好み、話題など..."
+          />
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={!note.trim() || saveMutation.isPending}
+            className="btn-primary w-full text-sm"
+          >
+            {saveMutation.isPending ? '保存中...' : 'メモ保存'}
+          </button>
+        </div>
+        <div className="space-y-2">
+          <h4 className="text-xs text-gray-400">過去のメモ</h4>
+          {(notes as any[]).length === 0 && (
+            <p className="text-gray-500 text-xs text-center py-4">メモはまだありません</p>
+          )}
+          {(notes as any[]).map((n: any) => (
+            <div key={n.id} className="bg-night-700 rounded-lg p-3 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-teal-300 font-medium">{n.visit_date || (n.created_at ? new Date(n.created_at).toLocaleDateString('ja-JP') : '')}</span>
+                <button
+                  onClick={() => { if (confirm('削除しますか？')) deleteMutation.mutate(n.id) }}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >削除</button>
+              </div>
+              <p className="text-sm text-gray-200 whitespace-pre-wrap">{n.note}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 

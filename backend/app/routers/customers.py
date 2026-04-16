@@ -6,7 +6,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import or_
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime, timedelta
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
@@ -416,7 +416,31 @@ def get_notes(
     notes = db.query(models.CustomerVisitNote).filter(
         models.CustomerVisitNote.customer_id == customer_id
     ).order_by(models.CustomerVisitNote.created_at.desc()).all()
-    return [{"id": n.id, "note": n.note, "ai_summary": n.ai_summary, "created_at": n.created_at} for n in notes]
+
+    def _business_date(note: models.CustomerVisitNote):
+        base = None
+        if note.ticket and note.ticket.ended_at:
+            base = note.ticket.ended_at
+        elif note.ticket and note.ticket.started_at:
+            base = note.ticket.started_at
+        elif note.created_at:
+            base = note.created_at
+        if not base:
+            return None
+        jst = base + timedelta(hours=9)
+        return (jst.date() - timedelta(days=1)) if jst.hour < 12 else jst.date()
+
+    return [
+        {
+            "id": n.id,
+            "note": n.note,
+            "ai_summary": n.ai_summary,
+            "created_at": n.created_at,
+            "visit_date": (_business_date(n).isoformat() if _business_date(n) else None),
+            "ticket_id": n.ticket_id,
+        }
+        for n in notes
+    ]
 
 
 @router.delete("/{customer_id}/notes/{note_id}")

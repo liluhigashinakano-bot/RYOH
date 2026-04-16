@@ -401,6 +401,23 @@ export default function CustomerDetail() {
             </div>
           )}
 
+          {/* 来店日別メモ */}
+          {notes.length > 0 && (
+            <div className="card space-y-2">
+              <h3 className="font-medium text-white text-sm">メモ</h3>
+              <div className="space-y-2">
+                {notes.map((n: any) => (
+                  <div key={n.id} className="bg-night-700 rounded-lg p-3 space-y-1">
+                    <span className="text-xs text-teal-300 font-medium">
+                      {n.visit_date || (n.created_at ? new Date(n.created_at).toLocaleDateString('ja-JP') : '')}
+                    </span>
+                    <p className="text-sm text-gray-200 whitespace-pre-wrap">{n.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* AIカルテ */}
           <div className="card space-y-3">
             <div className="flex items-center gap-2">
