@@ -663,12 +663,27 @@ function VisitHistoryTab({ customerId, formatInTime }: { customerId: number; for
             {/* 詳細（全列データ） */}
             {isOpen && rawEntries.length > 0 && (
               <div className="border-t border-gray-700 pt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
-                {rawEntries.map(([key, val]) => (
-                  <div key={key} className="text-xs">
-                    <span className="text-gray-500">{key}: </span>
-                    <span className="text-gray-200">{String(val)}</span>
-                  </div>
-                ))}
+                {rawEntries.map(([key, val]) => {
+                  const labelMap: Record<string, string> = {
+                    ticket_id: '伝票ID',
+                    table_no: '卓番',
+                    guest_count: '人数',
+                    n_count: 'N人数',
+                    r_count: 'R人数',
+                    visit_type: '区分',
+                    plan_type: 'プラン',
+                    visit_motivation: '来店動機',
+                  }
+                  const planMap: Record<string, string> = { standard: 'スタンダード', premium: 'プレミアム' }
+                  let displayVal = String(val)
+                  if (key === 'plan_type' && planMap[displayVal]) displayVal = planMap[displayVal]
+                  return (
+                    <div key={key} className="text-xs">
+                      <span className="text-gray-500">{labelMap[key] || key}: </span>
+                      <span className="text-gray-200">{displayVal}</span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
