@@ -193,11 +193,15 @@ def get_dashboard(
                     champagne_amount += int(it.unit_price * (it.quantity or 0))
     custom_drink_columns = [{"label": l, "short": short_map[l]} for l in custom_labels]
 
-    # 勤務中社員/アルバイト（当日セッション日付のStaffAttendance, actual_end IS NULL, not absent）
-    session_date = (since + timedelta(hours=9)).date()
+    # 勤務中社員/アルバイト: 出勤済み(actual_end=None)かつ欠勤でない。
+    # shift.date は date.today() (Railway UTC) で保存されるが、JST営業時間帯と
+    # UTC日付の境界でズレるため、前後1日のウィンドウで許容する。
+    from datetime import date as _date
+    today_utc = _date.today()
+    date_window = [today_utc - timedelta(days=1), today_utc, today_utc + timedelta(days=1)]
     working_staff = db.query(models.StaffAttendance).filter(
         models.StaffAttendance.store_id == store_id,
-        models.StaffAttendance.date == session_date,
+        models.StaffAttendance.date.in_(date_window),
         models.StaffAttendance.actual_start.isnot(None),
         models.StaffAttendance.actual_end.is_(None),
         models.StaffAttendance.is_absent == False,
@@ -219,10 +223,10 @@ def get_dashboard(
         for s in working_staff
     ]
 
-    # 勤務中キャスト（当日セッション日付のConfirmedShift, actual_end IS NULL, not absent）
+    # 勤務中キャスト: 出勤済み(actual_end=None)かつ欠勤でない。日付ウィンドウで絞る。
     working_shifts = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.store_id == store_id,
-        models.ConfirmedShift.date == session_date,
+        models.ConfirmedShift.date.in_(date_window),
         models.ConfirmedShift.actual_start.isnot(None),
         models.ConfirmedShift.actual_end.is_(None),
         models.ConfirmedShift.is_absent == False,
