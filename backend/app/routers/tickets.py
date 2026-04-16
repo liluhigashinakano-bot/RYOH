@@ -1448,14 +1448,117 @@ def close_ticket(
             customer.total_visits += 1
             customer.total_spend += ticket.total_amount
             customer.ltv = customer.total_spend
-            from datetime import date
-            customer.last_visit_date = date.today()
-            if not customer.first_visit_date:
-                customer.first_visit_date = date.today()
+            from datetime import date, timedelta
+            # 営業日（バー表記）: JSTで12時未満は前日扱い
+            now_jst = datetime.utcnow() + timedelta(hours=9)
+            business_date = now_jst.date() - timedelta(days=1) if now_jst.hour < 12 else now_jst.date()
+            customer.last_visit_date = business_date
+            is_first_visit = not customer.first_visit_date
+            if is_first_visit:
+                customer.first_visit_date = business_date
+            # 来店履歴（CustomerVisit）に記録
+            store = db.query(models.Store).filter(models.Store.id == ticket.store_id).first()
+
+            def _hhmm_int(dt):
+                if not dt:
+                    return None
+                jst = dt + timedelta(hours=9)
+                h = jst.hour + 24 if jst.hour < 12 else jst.hour  # バー表記
+                return h * 100 + jst.minute
+
+            visit = models.CustomerVisit(
+                customer_id=customer.id,
+                date=business_date,
+                store_name=(store.name if store else None),
+                is_repeat=not is_first_visit,
+                in_time=_hhmm_int(ticket.started_at),
+                out_time=_hhmm_int(ticket.ended_at),
+                total_payment=_calc_grand_total(ticket),
+                raw_data={
+                    "ticket_id": ticket.id,
+                    "table_no": ticket.table_no,
+                    "guest_count": ticket.guest_count or 1,
+                    "n_count": ticket.n_count or 0,
+                    "r_count": ticket.r_count or 0,
+                    "visit_type": ticket.visit_type,
+                    "plan_type": ticket.plan_type,
+                    "visit_motivation": ticket.visit_motivation,
+                },
+            )
+            db.add(visit)
 
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
+
+
+@router.post("/backfill-visits")
+def backfill_customer_visits(
+    store_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """過去のクローズ済み伝票から CustomerVisit を遡及作成する（同一ticket_idの重複はスキップ）"""
+    from datetime import timedelta
+    q = db.query(models.Ticket).filter(
+        models.Ticket.is_closed == True,
+        models.Ticket.deleted_at.is_(None),
+        models.Ticket.customer_id.isnot(None),
+    )
+    if store_id:
+        q = q.filter(models.Ticket.store_id == store_id)
+    tickets = q.all()
+    # 既存の CustomerVisit の ticket_id を事前取得（raw_data 内の ticket_id で重複判定）
+    existing_tickets: set = set()
+    for v in db.query(models.CustomerVisit).filter(models.CustomerVisit.raw_data.isnot(None)).all():
+        rd = v.raw_data if isinstance(v.raw_data, dict) else {}
+        tid = rd.get("ticket_id") if rd else None
+        if tid is not None:
+            existing_tickets.add(int(tid))
+    stores_by_id = {s.id: s.name for s in db.query(models.Store).all()}
+    created = 0
+    for t in tickets:
+        if t.id in existing_tickets:
+            continue
+        if not t.ended_at:
+            continue
+        # 営業日（バー表記）
+        jst = t.ended_at + timedelta(hours=9)
+        business_date = jst.date() - timedelta(days=1) if jst.hour < 12 else jst.date()
+        def _hhmm_int(dt):
+            if not dt:
+                return None
+            jj = dt + timedelta(hours=9)
+            h = jj.hour + 24 if jj.hour < 12 else jj.hour
+            return h * 100 + jj.minute
+        # 初回来店判定: この顧客で business_date より前の CustomerVisit が無ければ初回
+        earlier = db.query(models.CustomerVisit).filter(
+            models.CustomerVisit.customer_id == t.customer_id,
+            models.CustomerVisit.date < business_date,
+        ).first()
+        visit = models.CustomerVisit(
+            customer_id=t.customer_id,
+            date=business_date,
+            store_name=stores_by_id.get(t.store_id),
+            is_repeat=bool(earlier),
+            in_time=_hhmm_int(t.started_at),
+            out_time=_hhmm_int(t.ended_at),
+            total_payment=_calc_grand_total(t),
+            raw_data={
+                "ticket_id": t.id,
+                "table_no": t.table_no,
+                "guest_count": t.guest_count or 1,
+                "n_count": t.n_count or 0,
+                "r_count": t.r_count or 0,
+                "visit_type": t.visit_type,
+                "plan_type": t.plan_type,
+                "visit_motivation": t.visit_motivation,
+            },
+        )
+        db.add(visit)
+        created += 1
+    db.commit()
+    return {"created": created, "scanned": len(tickets)}
 
 
 class PostCloseDiscountRequest(BaseModel):
