@@ -643,13 +643,13 @@ def get_cast_shift_detail(
                 if not dist:
                     if o.cast_id == cast_id:
                         t_champ += (o.quantity or 0)
-                        t_champ_amount += (o.amount or 0)
+                        t_champ_amount += (o.incentive_amount or 0)
                 else:
                     if (o.amount or 0) > 0:
                         for e in dist:
                             if e.get("cast_id") == cast_id:
                                 t_champ += 1
-                                t_champ_amount += int((o.amount or 0) * e.get("ratio", 0) / 100)
+                                t_champ_amount += int((o.incentive_amount or 0) * e.get("ratio", 0) / 100)
                                 break
         tickets_out.append({
             "ticket_id": t.id,
