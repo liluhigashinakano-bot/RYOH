@@ -591,48 +591,92 @@ def get_cast_shift_detail(
                 cast_block = b
                 break
 
-    # その日の担当伝票（CastAssignment 経由 or featured_cast / motivation_cast）
+    # その日の担当伝票（CastAssignment 経由）
     from datetime import timedelta
     day_start_utc = datetime(shift.date.year, shift.date.month, shift.date.day, 3, 0, 0) - timedelta(hours=9)
     day_end_utc = day_start_utc + timedelta(hours=24)
+
+    # その日の全伝票（OrderItem 集計用・CastAssignment とは別に、シャンパン分配もカバー）
+    day_tickets = db.query(models.Ticket).filter(
+        models.Ticket.store_id == store_id,
+        models.Ticket.deleted_at.is_(None),
+        models.Ticket.started_at >= day_start_utc,
+        models.Ticket.started_at < day_end_utc,
+    ).all()
+
     # 対応した伝票（CastAssignment のある伝票）
-    assigned_tids = [r[0] for r in db.query(models.CastAssignment.ticket_id).filter(
+    assigned_tids = set(r[0] for r in db.query(models.CastAssignment.ticket_id).filter(
         models.CastAssignment.cast_id == cast_id,
         models.CastAssignment.started_at >= day_start_utc,
         models.CastAssignment.started_at < day_end_utc,
-    ).distinct().all()]
+    ).distinct().all())
 
     tickets_out = []
-    if assigned_tids:
-        rows = db.query(models.Ticket).filter(
-            models.Ticket.id.in_(assigned_tids),
-            models.Ticket.deleted_at.is_(None),
-        ).all()
-        for t in rows:
-            adj = sum(
-                (i.amount or 0) for i in (t.order_items or [])
-                if i.item_name and (
-                    i.item_name.startswith('先会計') or
-                    i.item_name.startswith('分割清算') or
-                    i.item_name.startswith('値引き') or
-                    i.item_name.startswith('加算')
-                ) and not i.canceled_at
-            )
-            sub = (t.total_amount or 0) - adj
-            grand = round(sub * 1.21) + adj
-            tickets_out.append({
-                "ticket_id": t.id,
-                "table_no": t.table_no,
-                "customer_name": t.customer.name if t.customer else None,
-                "grand_total": max(0, grand),
-                "started_at": t.started_at.isoformat() if t.started_at else None,
-                "ended_at": t.ended_at.isoformat() if t.ended_at else None,
-            })
-        tickets_out.sort(key=lambda x: x.get("started_at") or "")
+    for t in day_tickets:
+        if t.id not in assigned_tids:
+            continue
+        adj = sum(
+            (i.amount or 0) for i in (t.order_items or [])
+            if i.item_name and (
+                i.item_name.startswith('先会計') or
+                i.item_name.startswith('分割清算') or
+                i.item_name.startswith('値引き') or
+                i.item_name.startswith('加算')
+            ) and not i.canceled_at
+        )
+        sub = (t.total_amount or 0) - adj
+        grand = round(sub * 1.21) + adj
+        tickets_out.append({
+            "ticket_id": t.id,
+            "table_no": t.table_no,
+            "customer_name": t.customer.name if t.customer else None,
+            "grand_total": max(0, grand),
+            "started_at": t.started_at.isoformat() if t.started_at else None,
+            "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+        })
+    tickets_out.sort(key=lambda x: x.get("started_at") or "")
+
+    # ドリンク件数 & シャンパン集計を DB から直接算出（スナップショット非依存）
+    drink_counts = {"drink_s": 0, "drink_l": 0, "drink_mg": 0, "shot_cast": 0}
+    champagne_count = 0      # 本数
+    champagne_sales = 0      # 売上(非按分)
+    champagne_incentive = 0  # 按分後インセンティブ額
+    for t in day_tickets:
+        for o in (t.order_items or []):
+            if o.canceled_at:
+                continue
+            # 非シャンパンドリンク: cast_id 完全一致で集計
+            if o.cast_id == cast_id and o.item_type in drink_counts:
+                drink_counts[o.item_type] += (o.quantity or 0)
+            # シャンパン: cast_distribution の按分
+            if o.item_type == "champagne":
+                dist = o.cast_distribution or []
+                # ratio 付きマーカー(0円)も含めて1本のシャンパン単位で集計するため
+                # dist を持つ「本体」行のみ採用
+                if not dist:
+                    # cast_id 完全一致(キャスト指定なし×キャスト選択シャンパン)
+                    if o.cast_id == cast_id:
+                        champagne_count += (o.quantity or 0)
+                        champagne_sales += (o.amount or 0)
+                        champagne_incentive += (o.incentive_amount or 0)
+                    continue
+                for entry in dist:
+                    if entry.get("cast_id") == cast_id:
+                        ratio = entry.get("ratio", 0)
+                        # dist は同グループの全注文に同じJSONが入るため、amount>0 の行だけ集計
+                        if (o.amount or 0) > 0:
+                            champagne_count += 1
+                            champagne_sales += int((o.amount or 0) * ratio / 100)
+                            champagne_incentive += int((o.incentive_amount or 0) * ratio / 100)
+                        break
 
     return {
         "cast_block": cast_block,
         "tickets": tickets_out,
+        "drink_counts": drink_counts,
+        "champagne_count": champagne_count,
+        "champagne_sales": champagne_sales,
+        "champagne_incentive": champagne_incentive,
     }
 
 

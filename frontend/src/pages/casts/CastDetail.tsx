@@ -423,10 +423,10 @@ function ShiftDetailModal({ shift, storeId, castId, onClose }: {
             <div className="flex justify-between text-sm"><span className="text-gray-400">基本給</span><span className="text-white">¥{(block?.base_pay ?? 0).toLocaleString()}</span></div>
             <div className="flex justify-between text-sm"><span className="text-gray-400">時給</span><span className="text-white">¥{(block?.applied_hourly_rate ?? 0).toLocaleString()}</span></div>
             <div className="flex justify-between text-sm"><span className="text-pink-400">インセンティブ</span><span className="text-pink-300">¥{(block?.incentive_total ?? 0).toLocaleString()}</span></div>
-            {block?.champagne_amount > 0 && (
-              <div className="flex justify-between text-sm"><span className="text-yellow-400">シャンパン分</span><span className="text-yellow-300">¥{block.champagne_amount.toLocaleString()}</span></div>
+            {(dayDetail?.champagne_incentive ?? 0) > 0 && (
+              <div className="flex justify-between text-sm"><span className="text-yellow-400">シャンパン分（内訳）</span><span className="text-yellow-300">¥{dayDetail.champagne_incentive.toLocaleString()}</span></div>
             )}
-            {block?.daily_pay > 0 && (
+            {(block?.daily_pay ?? 0) > 0 && (
               <div className="flex justify-between text-sm"><span className="text-red-400">日払い</span><span className="text-red-300">-¥{block.daily_pay.toLocaleString()}</span></div>
             )}
             {shift.total_pay != null && (
@@ -438,13 +438,32 @@ function ShiftDetailModal({ shift, storeId, castId, onClose }: {
           </div>
         )}
 
-        {/* ドリンク件数 */}
-        {block && (
-          <div className="grid grid-cols-4 gap-2 text-center">
-            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">S</p><p className="text-white text-sm">{block.drink_s ?? 0}</p></div>
-            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">L</p><p className="text-white text-sm">{block.drink_l ?? 0}</p></div>
-            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">MG</p><p className="text-white text-sm">{block.drink_mg ?? 0}</p></div>
-            <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">SHOT</p><p className="text-white text-sm">{block.shot_cast ?? 0}</p></div>
+        {/* ドリンク件数（DB直接集計） */}
+        {dayDetail && (
+          <div>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">S</p><p className="text-white text-sm">{dayDetail.drink_counts?.drink_s ?? 0}</p></div>
+              <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">L</p><p className="text-white text-sm">{dayDetail.drink_counts?.drink_l ?? 0}</p></div>
+              <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">MG</p><p className="text-white text-sm">{dayDetail.drink_counts?.drink_mg ?? 0}</p></div>
+              <div className="bg-night-700 rounded-lg p-1.5"><p className="text-[10px] text-gray-500">SHOT</p><p className="text-white text-sm">{dayDetail.drink_counts?.shot_cast ?? 0}</p></div>
+            </div>
+            {/* シャンパン集計 */}
+            {(dayDetail.champagne_count ?? 0) > 0 && (
+              <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+                <div className="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-1.5">
+                  <p className="text-[10px] text-yellow-500">シャンパン本数</p>
+                  <p className="text-yellow-200 text-sm">{dayDetail.champagne_count}</p>
+                </div>
+                <div className="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-1.5">
+                  <p className="text-[10px] text-yellow-500">売上（按分後）</p>
+                  <p className="text-yellow-200 text-sm">¥{(dayDetail.champagne_sales ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="bg-yellow-900/20 border border-yellow-800/40 rounded-lg p-1.5">
+                  <p className="text-[10px] text-yellow-500">インセンティブ</p>
+                  <p className="text-yellow-200 text-sm">¥{(dayDetail.champagne_incentive ?? 0).toLocaleString()}</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
