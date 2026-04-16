@@ -488,7 +488,11 @@ function ShiftDetailModal({ shift, storeId, castId, onClose }: {
                       {(t.drink_l || 0) > 0 && <span>L <span className="text-cyan-400">{t.drink_l}</span></span>}
                       {(t.drink_mg || 0) > 0 && <span>MG <span className="text-purple-400">{t.drink_mg}</span></span>}
                       {(t.shot_cast || 0) > 0 && <span>SH <span className="text-pink-400">{t.shot_cast}</span></span>}
-                      {(t.champagne || 0) > 0 && <span>🍾 <span className="text-yellow-400">{t.champagne}</span></span>}
+                      {(t.champagne || 0) > 0 && (
+                        <span>🍾 <span className="text-yellow-400">{t.champagne}</span>
+                          {(t.champagne_amount || 0) > 0 && <span className="text-yellow-300 ml-0.5">(¥{t.champagne_amount.toLocaleString()})</span>}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

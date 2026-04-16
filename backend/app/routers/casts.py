@@ -629,6 +629,7 @@ def get_cast_shift_detail(
         # この伝票内のこのキャストのドリンク/シャンパン内訳
         t_s = t_l = t_mg = t_shot = 0
         t_champ = 0
+        t_champ_amount = 0  # このキャストに按分されたシャンパン売上
         for o in (t.order_items or []):
             if o.canceled_at:
                 continue
@@ -642,9 +643,14 @@ def get_cast_shift_detail(
                 if not dist:
                     if o.cast_id == cast_id:
                         t_champ += (o.quantity or 0)
+                        t_champ_amount += (o.amount or 0)
                 else:
-                    if any(e.get("cast_id") == cast_id for e in dist) and (o.amount or 0) > 0:
-                        t_champ += 1
+                    if (o.amount or 0) > 0:
+                        for e in dist:
+                            if e.get("cast_id") == cast_id:
+                                t_champ += 1
+                                t_champ_amount += int((o.amount or 0) * e.get("ratio", 0) / 100)
+                                break
         tickets_out.append({
             "ticket_id": t.id,
             "table_no": t.table_no,
@@ -657,6 +663,7 @@ def get_cast_shift_detail(
             "drink_mg": t_mg,
             "shot_cast": t_shot,
             "champagne": t_champ,
+            "champagne_amount": t_champ_amount,
         })
     tickets_out.sort(key=lambda x: x.get("started_at") or "")
 
