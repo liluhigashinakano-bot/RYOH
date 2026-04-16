@@ -124,21 +124,7 @@ def get_dashboard(
         models.Ticket.started_at >= since,
     ).all()
 
-    def grand_total(t):
-        # 先会計/分割清算/値引き(負) と 加算(正) は調整項目として税サ対象外。
-        # 一旦 total_amount から除き、税サ計算後に足し戻す。
-        adj = sum(
-            (i.amount or 0) for i in (t.order_items or [])
-            if i.canceled_at is None and (
-                (i.item_name or '').startswith('先会計')
-                or (i.item_name or '').startswith('分割清算')
-                or (i.item_name or '').startswith('値引き')
-                or (i.item_name or '').startswith('加算')
-            )
-        )
-        subtotal = (t.total_amount or 0) - adj
-        gross = round(subtotal * 1.21) + adj
-        return max(0, gross - (t.discount_amount or 0))
+    from .tickets import _calc_grand_total as grand_total
 
     closed_sales = sum(grand_total(t) for t in closed_tickets)
     open_sales = sum(grand_total(t) for t in open_tickets)
