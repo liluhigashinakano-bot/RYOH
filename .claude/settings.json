@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json,os; sys.stdin.reconfigure(encoding='utf-8'); d=json.load(sys.stdin); p=d.get('prompt',''); f=os.path.join(os.environ.get('TEMP','/tmp'),'.claude_edit_allowed'); open(f,'w').close() if '\\u7de8\\u96c6\\u3092\\u8a31\\u53ef\\u3059\\u308b' in p else (os.remove(f) if os.path.exists(f) else None)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import os,json,sys; f=os.path.join(os.environ.get('TEMP','/tmp'),'.claude_edit_allowed'); print(json.dumps({'hookSpecificOutput':{'hookEventName':'PreToolUse','permissionDecision':'deny','permissionDecisionReason':'\\u300c\\u7de8\\u96c6\\u3092\\u8a31\\u53ef\\u3059\\u308b\\u300d\\u3068\\u5165\\u529b\\u3057\\u3066\\u304f\\u3060\\u3055\\u3044'}}) if not os.path.exists(f) else '')\"",
+            "timeout": 5,
+            "statusMessage": "編集許可チェック中..."
+          }
+        ]
+      }
+    ]
+  }
+}

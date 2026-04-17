@@ -331,12 +331,13 @@ function AddCustomerModal({ onClose }: { onClose: () => void }) {
 }
 
 function ImportExcelModal({ onClose }: { onClose: () => void }) {
+  const { stores } = useAuthStore()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const fileRef2 = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<'list' | 'daily'>('daily')
   const [file, setFile] = useState<File | null>(null)
-  const [storeName, setStoreName] = useState('東中野')
+  const [storeName, setStoreName] = useState(stores[0]?.name ?? '東中野')
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -397,9 +398,9 @@ function ImportExcelModal({ onClose }: { onClose: () => void }) {
             <div>
               <label className="text-xs text-gray-500 block mb-1">店舗名</label>
               <select value={storeName} onChange={e => setStoreName(e.target.value)} className="input-field w-full">
-                <option>東中野</option>
-                <option>新中野</option>
-                <option>方南町</option>
+                {stores.map(s => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
               </select>
             </div>
 
