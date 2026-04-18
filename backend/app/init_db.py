@@ -71,6 +71,8 @@ def _run_migrations(engine):
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS nearest_station VARCHAR(50)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS related_lines JSON",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS last_train_routes JSON",
+        # User: email → username リネーム
+        "ALTER TABLE users RENAME COLUMN email TO username",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
     for sql in migrations:
