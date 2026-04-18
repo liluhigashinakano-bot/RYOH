@@ -25,3 +25,26 @@
 
 ### スクリプト追加
 - `backend/scripts/backup_daily.py`: 日次バックアップスクリプト作成（日報/キャスト/社員/アルバイト/顧客）
+
+## 2026-04-19
+
+### DB操作
+- **usersテーブル: emailカラムをusernameにリネーム**
+  - admin@trust.com → admin
+  - lalahounanlala@gmail.com → lalahounanlala
+- 既存2アカウントのusernameをメールのローカル部分に変換
+
+### 機能変更
+- **ログイン方式をメールアドレスからユーザー名に変更**
+  - backend: User model, auth.py, users.py のemail→username置換
+  - frontend: Login.tsx, authStore.ts, AdminPanel.tsx のemail→username置換
+  - init_db.py: 初期adminアカウントのemail→username変更
+
+### スクリプト追加
+- `backend/scripts/backup_full.py`: 完全バックアップスクリプト（DB+コード+ログ）
+- `backend/scripts/generate_manual.py`: POSSYSマニュアルPDF生成スクリプト
+- Windowsタスクスケジューラ「POSSYS_DailyBackup」登録（毎朝7時実行）
+
+### 設定変更
+- `.claude/settings.json`: 編集保護hookを削除（データ消失/課金リスク時のみ確認に変更）
+- ブラウザタブ名をTRUSTからPOSSYSに変更

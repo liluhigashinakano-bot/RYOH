@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 class UserCreate(BaseModel):
-    email: str
+    username: str
     password: str
     name: str
     role: models.UserRole = models.UserRole.staff
@@ -27,7 +27,7 @@ class UserUpdate(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    email: str
+    username: str
     name: str
     role: str
     store_id: Optional[int]
@@ -47,7 +47,7 @@ def get_users(
     return [
         {
             "id": u.id,
-            "email": u.email,
+            "username": u.username,
             "name": u.name,
             "role": u.role.value,
             "store_id": u.store_id,
@@ -64,13 +64,12 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_permission("accounts", "edit")),
 ):
-    if db.query(models.User).filter(models.User.email == data.email).first():
-        raise HTTPException(status_code=400, detail="このメールアドレスは既に登録されています")
-    # administratorロールを作成できるのはadministratorのみ
+    if db.query(models.User).filter(models.User.username == data.username).first():
+        raise HTTPException(status_code=400, detail="このユーザー名は既に登録されています")
     if str(data.role) in ("administrator", "superadmin") and not is_admin(current_user):
         raise HTTPException(status_code=403, detail="administratorロールの作成権限がありません")
     user = models.User(
-        email=data.email,
+        username=data.username,
         password_hash=get_password_hash(data.password),
         name=data.name,
         role=data.role,
@@ -79,7 +78,7 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
+    return {"id": user.id, "username": user.username, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
 
 
 @router.put("/{user_id}")
@@ -99,7 +98,7 @@ def update_user(
         setattr(user, field, value)
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
+    return {"id": user.id, "username": user.username, "name": user.name, "role": user.role.value, "store_id": user.store_id, "is_active": user.is_active, "permissions": user.permissions}
 
 
 @router.delete("/{user_id}")

@@ -16,7 +16,7 @@ export interface Permissions {
 
 interface User {
   id: number
-  email: string
+  username: string
   name: string
   role: string
   store_id: number | null
@@ -37,7 +37,7 @@ interface AuthState {
   stores: Store[]
   isLoggedIn: boolean
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
   logout: () => void
   fetchMe: () => Promise<void>
   hasPermission: (page: PermPage, type: PermType) => boolean
@@ -66,10 +66,10 @@ export const useAuthStore = create<AuthState>()(
         return !!(perms[page] as any)?.[type]
       },
 
-      login: async (email, password) => {
+      login: async (username, password) => {
         set({ isLoading: true })
         try {
-          const { data: tokens } = await apiClient.post('/api/auth/login', { email, password })
+          const { data: tokens } = await apiClient.post('/api/auth/login', { username, password })
           localStorage.setItem('access_token', tokens.access_token)
           localStorage.setItem('refresh_token', tokens.refresh_token)
 

@@ -3,7 +3,7 @@ import { useAuthStore } from '../store/authStore'
 
 export default function Login() {
   const { login, isLoading } = useAuthStore()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
@@ -11,9 +11,9 @@ export default function Login() {
     e.preventDefault()
     setError('')
     try {
-      await login(email, password)
+      await login(username, password)
     } catch {
-      setError('メールアドレスまたはパスワードが正しくありません')
+      setError('ユーザー名またはパスワードが正しくありません')
     }
   }
 
@@ -27,13 +27,13 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-700 rounded-2xl p-6 space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1.5">メールアドレス</label>
+            <label className="block text-sm text-gray-400 mb-1.5">ユーザー名</label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               className="input-field w-full"
-              placeholder="admin@trust.com"
+              placeholder="ユーザー名を入力"
               required
             />
           </div>

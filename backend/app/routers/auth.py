@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    email: str
+    username: str
     password: str
 
 
@@ -24,26 +24,14 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class UserResponse(BaseModel):
-    id: int
-    email: str
-    name: str
-    role: str
-    store_id: int | None
-    permissions: dict | None = None
-
-    class Config:
-        from_attributes = True
-
-
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
-        models.User.email == req.email,
+        models.User.username == req.username,
         models.User.is_active == True
     ).first()
     if not user or not verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが正しくありません")
+        raise HTTPException(status_code=401, detail="ユーザー名またはパスワードが正しくありません")
 
     user.last_login_at = datetime.utcnow()
     db.commit()
@@ -82,7 +70,7 @@ def get_me(current_user: models.User = Depends(get_current_user), db: Session = 
     perms = get_effective_permissions(current_user, db)
     return {
         "id": current_user.id,
-        "email": current_user.email,
+        "username": current_user.username,
         "name": current_user.name,
         "role": current_user.role.value,
         "store_id": current_user.store_id,

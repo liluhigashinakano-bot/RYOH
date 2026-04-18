@@ -343,11 +343,11 @@ def init_db():
 
         # superadminアカウント作成
         existing_admin = db.query(models.User).filter(
-            models.User.email == "admin@trust.com"
+            models.User.username == "admin"
         ).first()
         if not existing_admin:
             admin = models.User(
-                email="admin@trust.com",
+                username="admin",
                 password_hash=get_password_hash("trust1234"),
                 name="管理者",
                 role=models.UserRole.superadmin,

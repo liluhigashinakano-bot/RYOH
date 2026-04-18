@@ -104,8 +104,8 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-night-600 text-gray-400">
-              <th className="text-left py-2 px-3">名前</th>
-              <th className="text-left py-2 px-3">メール</th>
+              <th className="text-left py-2 px-3">ユーザー名</th>
+              <th className="text-left py-2 px-3">表示名</th>
               <th className="text-left py-2 px-3">権限ロール</th>
               <th className="text-left py-2 px-3">店舗</th>
               {canEdit && <th className="py-2 px-3"></th>}
@@ -114,8 +114,8 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
           <tbody>
             {(users as any[]).map((u: any) => (
               <tr key={u.id} className="border-b border-night-700 hover:bg-night-700/50">
-                <td className="py-2.5 px-3 font-medium text-white">{u.name}</td>
-                <td className="py-2.5 px-3 text-gray-400">{u.email}</td>
+                <td className="py-2.5 px-3 font-medium text-white">{u.username}</td>
+                <td className="py-2.5 px-3 text-gray-400">{u.name}</td>
                 <td className="py-2.5 px-3">
                   <span className={`badge ${['administrator','superadmin'].includes(u.role) ? 'bg-primary-900/50 text-primary-400' : 'bg-night-700 text-gray-300'}`}>
                     {ROLE_LABELS[u.role] ?? u.role}
@@ -201,7 +201,7 @@ function AccountPermsTab({ canEdit }: { canEdit: boolean }) {
           <div className="flex items-center justify-between">
             <div>
               <span className="text-white font-medium">{u.name}</span>
-              <span className="text-xs text-gray-500 ml-2">{u.email}</span>
+              <span className="text-xs text-gray-500 ml-2">{u.username}</span>
               <span className="text-xs text-gray-400 ml-2 bg-night-700 px-1.5 py-0.5 rounded">{ROLE_LABELS[u.role] ?? u.role}</span>
               {u.permissions !== null && u.permissions !== undefined && (
                 <span className="text-xs text-yellow-500 ml-2">● カスタム権限</span>
@@ -389,7 +389,7 @@ function PermCell({ value, editable, onChange }: { value: boolean; editable: boo
 // ─── ユーザー追加モーダル ────────────────────────
 function AddUserModal({ stores, onClose }: { stores: any[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ email: '', password: '', name: '', role: 'staff', store_id: '' })
+  const [form, setForm] = useState({ username: '', password: '', name: '', role: 'staff', store_id: '' })
 
   const mutation = useMutation({
     mutationFn: () => apiClient.post('/api/users', { ...form, store_id: form.store_id ? Number(form.store_id) : null }),
@@ -405,8 +405,8 @@ function AddUserModal({ stores, onClose }: { stores: any[]; onClose: () => void 
           <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
         </div>
         <div className="space-y-3">
-          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="名前" />
-          <input value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="input-field w-full" placeholder="メールアドレス" type="email" />
+          <input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} className="input-field w-full" placeholder="ユーザー名 / ID" />
+          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input-field w-full" placeholder="表示名" />
           <input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} className="input-field w-full" placeholder="パスワード" type="password" />
           <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="input-field w-full">
             {ROLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -418,7 +418,7 @@ function AddUserModal({ stores, onClose }: { stores: any[]; onClose: () => void 
         </div>
         <div className="flex gap-3">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
-          <button onClick={() => mutation.mutate()} disabled={!form.name || !form.email || !form.password} className="btn-primary flex-1">追加</button>
+          <button onClick={() => mutation.mutate()} disabled={!form.username || !form.name || !form.password} className="btn-primary flex-1">追加</button>
         </div>
       </div>
     </div>
