@@ -4943,10 +4943,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                           <span>概算合計:</span>
                           <button
                             onClick={() => setShowEstimateDiscountModal(true)}
-                            className="hover:text-yellow-300 transition-colors cursor-pointer"
+                            className="flex items-center gap-1 hover:text-yellow-300 transition-colors cursor-pointer"
                             title="クリックで値引き"
                           >
-                            ¥{estimateGrandTotal.toLocaleString()}
+                            ✏️ ¥{estimateGrandTotal.toLocaleString()}
                           </button>
                         </div>
                       </>
