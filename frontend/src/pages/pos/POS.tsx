@@ -40,6 +40,7 @@ const CHAMPAGNE_MENU = [
 ]
 
 const ITEM_TYPES = [
+  { type: 'extension', label: '延長', defaultPrice: 0 },
   { type: 'drink_s', label: 'Sドリンク', defaultPrice: 900 },
   { type: 'drink_l', label: 'Lドリンク', defaultPrice: 1700 },
   { type: 'drink_mg', label: 'MGドリンク', defaultPrice: 3700 },
