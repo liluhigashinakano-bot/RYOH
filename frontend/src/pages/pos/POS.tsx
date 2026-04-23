@@ -4818,16 +4818,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 {/* 概算合計 */}
                 <div className="flex justify-between items-center bg-gray-800 p-3 rounded-lg mb-3">
                   <span className="text-gray-400">概算合計</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-white text-lg font-bold">¥{grandTotal.toLocaleString()}</span>
-                    <button
-                      onClick={() => setShowEstimateDiscountModal(true)}
-                      className="text-gray-400 hover:text-white transition-colors"
-                      title="値引き"
-                    >
-                      ✏️
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setShowEstimateDiscountModal(true)}
+                    className="text-white text-lg font-bold hover:text-yellow-300 transition-colors cursor-pointer"
+                    title="クリックで値引き"
+                  >
+                    ¥{grandTotal.toLocaleString()}
+                  </button>
                 </div>
 
                 <div className="space-y-3">
