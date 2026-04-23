@@ -1,0 +1,74 @@
+{
+  "generated_at": "2026-04-06T08:50:48.102229",
+  "session": {
+    "id": 9,
+    "store_id": 1,
+    "date": "2026-04-06",
+    "opened_at": "2026-04-06T08:28:51.447344",
+    "closed_at": "2026-04-06T08:50:48.073085",
+    "opening_cash": 104125,
+    "opening_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "100": 1,
+      "500": 8,
+      "1000": 50,
+      "5000": 10
+    },
+    "closing_cash": 90125,
+    "closing_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "100": 1,
+      "1000": 10,
+      "5000": 16
+    },
+    "prev_day_diff": 0,
+    "sales_snapshot": 129700,
+    "operator_name": null,
+    "event_name": null,
+    "is_closed": true,
+    "notes": "なにもない",
+    "cash_diff": null,
+    "expenses_detail": {
+      "liquor": [
+        {
+          "category": "田野屋",
+          "amount": 300
+        }
+      ],
+      "other": [
+        {
+          "category": "食事代",
+          "amount": 5000
+        }
+      ],
+      "withdrawals": [
+        {
+          "type": "日払い",
+          "person_name": "ひな",
+          "name": "日払い（ひな）",
+          "amount": 2000
+        },
+        {
+          "type": "日払い",
+          "person_name": "西山",
+          "name": "日払い（西山）",
+          "amount": 8000
+        },
+        {
+          "type": "日払い",
+          "person_name": "もも",
+          "name": "日払い（もも）",
+          "amount": 3000
+        }
+      ]
+    },
+    "cash_sales": 4000,
+    "card_sales": 85000,
+    "code_sales": 49247,
+    "opened_by_name": "管理者",
+    "closed_by_name": "管理者",
+    "store_name": "東中野"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-04-06T08:17:22.331420",
+  "session": {
+    "id": 8,
+    "store_id": 1,
+    "date": "2026-04-06",
+    "opened_at": "2026-04-06T08:15:41.807592",
+    "closed_at": "2026-04-06T08:17:22.297777",
+    "opening_cash": 104125,
+    "opening_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "100": 1,
+      "500": 8,
+      "1000": 50,
+      "5000": 10
+    },
+    "closing_cash": 104125,
+    "closing_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "50": 2,
+      "100": 10,
+      "500": 16,
+      "1000": 20,
+      "5000": 15
+    },
+    "prev_day_diff": 0,
+    "sales_snapshot": 4200,
+    "operator_name": null,
+    "event_name": null,
+    "is_closed": true,
+    "notes": null,
+    "cash_diff": null,
+    "expenses_detail": {
+      "liquor": [],
+      "other": [],
+      "withdrawals": []
+    },
+    "cash_sales": 0,
+    "card_sales": 0,
+    "code_sales": 5082,
+    "opened_by_name": "管理者",
+    "closed_by_name": "管理者",
+    "store_name": "東中野"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-04-06T08:10:45.440794",
+  "session": {
+    "id": 7,
+    "store_id": 1,
+    "date": "2026-04-06",
+    "opened_at": "2026-04-06T04:36:59.526198",
+    "closed_at": "2026-04-06T08:10:45.427404",
+    "opening_cash": 68325,
+    "opening_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "100": 3,
+      "1000": 8,
+      "10000": 6
+    },
+    "closing_cash": 104125,
+    "closing_cash_detail": {
+      "5": 1,
+      "10": 2,
+      "100": 1,
+      "500": 8,
+      "1000": 50,
+      "5000": 10
+    },
+    "prev_day_diff": 0,
+    "sales_snapshot": 102800,
+    "operator_name": null,
+    "event_name": null,
+    "is_closed": true,
+    "notes": null,
+    "cash_diff": null,
+    "expenses_detail": {
+      "liquor": [],
+      "other": [],
+      "withdrawals": [
+        {
+          "type": "日払い",
+          "person_name": "ゆの",
+          "name": "日払い（ゆの）",
+          "amount": 4000
+        },
+        {
+          "type": "日払い",
+          "person_name": "もも",
+          "name": "日払い（もも）",
+          "amount": 3000
+        }
+      ]
+    },
+    "cash_sales": 102800,
+    "card_sales": 0,
+    "code_sales": 0,
+    "opened_by_name": "管理者",
+    "closed_by_name": "管理者",
+    "store_name": "東中野"
+  }
+}

@@ -6195,8 +6195,9 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     staleTime: 60000,
   })
 
-  // 社員/アルバイト出勤フロー: null=非表示, 'name'=名前入力, 'time'=時刻選択
-  const [staffClockInStep, setStaffClockInStep] = useState<null | 'name' | 'time'>(null)
+  // 社員/アルバイト出勤フロー: null=非表示, 'select'=従業員選択, 'time'=時刻選択
+  const [staffClockInStep, setStaffClockInStep] = useState<null | 'select' | 'time'>(null)
+  const [staffClockInMemberId, setStaffClockInMemberId] = useState<number | null>(null)
   const [staffClockInName, setStaffClockInName] = useState('')
   // 社員退勤/時間修正
   const [staffClockOutId, setStaffClockOutId] = useState<number | null>(null)
@@ -6229,6 +6230,13 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
     enabled: !!storeId,
   })
+
+  const { data: staffMemberList = [] } = useQuery({
+    queryKey: ['staff-members', storeId],
+    queryFn: () => apiClient.get(`/api/staff?store_id=${storeId}`).then(r => r.data),
+    enabled: !!storeId,
+  })
+
   const workingCastIds = new Set((working as any[]).filter((w: any) => !w.actual_end).map((w: any) => w.cast_id))
   const filteredCasts = (castsAll as any[]).filter((c: any) =>
     c.is_active && !workingCastIds.has(c.id) && (!q || c.stage_name?.includes(q))
@@ -6236,9 +6244,10 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
 
   // 社員/アルバイト mutations
   const staffClockInMutation = useMutation({
-    mutationFn: ({ name, time, is_late, is_absent }: { name: string; time: string; is_late?: boolean; is_absent?: boolean }) =>
+    mutationFn: ({ staff_member_id, time, is_late, is_absent }: { staff_member_id: number; time: string; is_late?: boolean; is_absent?: boolean }) =>
       apiClient.post('/api/casts/staff-attendance/clock-in', {
-        store_id: storeId, name,
+        store_id: storeId,
+        staff_member_id,
         actual_start: is_absent ? undefined : (time || undefined),
         is_late: !!is_late,
         is_absent: !!is_absent,
@@ -6246,6 +6255,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['staff-attendance', storeId] })
       setStaffClockInStep(null)
+      setStaffClockInMemberId(null)
       setStaffClockInName('')
     },
   })
@@ -6489,7 +6499,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
         <div className="flex-1 min-w-0 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-white">社員/アルバイト勤怠</h2>
-            <button onClick={() => setStaffClockInStep('name')}
+            <button onClick={() => setStaffClockInStep('select')}
               className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-700 hover:bg-blue-600 text-white text-xs rounded-lg transition-colors">
               <Plus className="w-3.5 h-3.5" />出勤
             </button>
@@ -6672,23 +6682,41 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
           onSelect={time => { setEditEnd(time); setEditTarget(null) }}
           onClose={() => setEditTarget(null)} />
       )}
-      {/* 社員/アルバイト出勤: 名前入力ステップ */}
-      {staffClockInStep === 'name' && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setStaffClockInStep(null); setStaffClockInName('') }}>
+      {/* 社員/アルバイト出勤: 従業員選択ステップ */}
+      {staffClockInStep === 'select' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={() => { setStaffClockInStep(null); setStaffClockInMemberId(null); setStaffClockInName('') }}>
           <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-white">社員/アルバイト 出勤登録</h3>
-              <button onClick={() => { setStaffClockInStep(null); setStaffClockInName('') }}><X className="w-5 h-5 text-gray-400" /></button>
+              <button onClick={() => { setStaffClockInStep(null); setStaffClockInMemberId(null); setStaffClockInName('') }}><X className="w-5 h-5 text-gray-400" /></button>
             </div>
-            <input type="text" value={staffClockInName} onChange={e => setStaffClockInName(e.target.value)}
-              placeholder="従業員名を入力" className="input-field w-full text-sm" autoFocus
-              onKeyDown={e => { if (e.key === 'Enter' && staffClockInName.trim()) setStaffClockInStep('time') }} />
-            <button
-              disabled={!staffClockInName.trim()}
-              onClick={() => { if (staffClockInName.trim()) setStaffClockInStep('time') }}
-              className="w-full btn-primary disabled:opacity-40">
-              次へ（時刻を選択）
-            </button>
+            <select value={staffClockInMemberId || ''} onChange={e => {
+              const id = parseInt(e.target.value);
+              const member = (staffMemberList as any[]).find((m: any) => m.id === id);
+              if (member) {
+                setStaffClockInMemberId(id);
+                setStaffClockInName(member.name);
+                setStaffClockInStep('time');
+              }
+            }} className="input-field w-full text-sm" autoFocus>
+              <option value="">従業員を選択</option>
+              {/* グループ: 社員 */}
+              <optgroup label="社員">
+                {(staffMemberList as any[]).filter((m: any) => m.employee_type === 'staff' && (m.store_ids || []).includes(storeId))
+                  .filter((m: any) => !(staffRecords as any[]).some((r: any) => r.staff_member_id === m.id))
+                  .map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+              </optgroup>
+              {/* グループ: アルバイト */}
+              <optgroup label="アルバイト">
+                {(staffMemberList as any[]).filter((m: any) => m.employee_type === 'part_time' && (m.store_ids || []).includes(storeId))
+                  .filter((m: any) => !(staffRecords as any[]).some((r: any) => r.staff_member_id === m.id))
+                  .map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+              </optgroup>
+            </select>
           </div>
         </div>
       )}
@@ -6698,8 +6726,8 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
           title={`${staffClockInName} の出勤時間`}
           defaultValue={nowHhmm()}
           showStatusTabs={true}
-          onSelect={(time, opts) => staffClockInMutation.mutate({ name: staffClockInName.trim(), time, ...opts })}
-          onClose={() => { setStaffClockInStep(null); setStaffClockInName('') }}
+          onSelect={(time, opts) => staffClockInMutation.mutate({ staff_member_id: staffClockInMemberId!, time, ...opts })}
+          onClose={() => { setStaffClockInStep(null); setStaffClockInMemberId(null); setStaffClockInName('') }}
         />
       )}
       {staffClockOutId !== null && (

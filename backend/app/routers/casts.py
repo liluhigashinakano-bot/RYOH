@@ -1232,7 +1232,8 @@ def delete_attendance(shift_id: int, data: AttendanceRemoveRequest = AttendanceR
 
 class StaffClockInRequest(BaseModel):
     store_id: int
-    name: str
+    name: Optional[str] = None
+    staff_member_id: Optional[int] = None
     actual_start: Optional[str] = None  # "HH:MM" JST
     is_late: bool = False
     is_absent: bool = False
@@ -1276,6 +1277,8 @@ def get_staff_attendance(store_id: int, db: Session = Depends(get_db), current_u
             "actual_end": r.actual_end.isoformat() if r.actual_end else None,
             "is_late": bool(r.is_late),
             "is_absent": bool(r.is_absent),
+            "employee_type": r.employee_type,
+            "staff_member_id": r.staff_member_id,
         }
         for r in records
     ]
@@ -1286,13 +1289,36 @@ def staff_clock_in(data: StaffClockInRequest, db: Session = Depends(get_db), cur
     """社員/アルバイト出勤打刻"""
     today = date.today()
 
+    # StaffMember から name と employee_type を取得（staff_member_id が指定された場合）
+    employee_type = None
+    name = data.name
+    if data.staff_member_id:
+        staff_member = db.query(models.StaffMember).filter(
+            models.StaffMember.id == data.staff_member_id
+        ).first()
+        if not staff_member:
+            raise HTTPException(status_code=404, detail="従業員が見つかりません")
+        name = staff_member.name
+        employee_type = "社員" if staff_member.employee_type == "staff" else "アルバイト"
+
+        # 重複チェック：同じ日付・店舗・従業員での出勤記録
+        dup = db.query(models.StaffAttendance).filter(
+            models.StaffAttendance.date == today,
+            models.StaffAttendance.store_id == data.store_id,
+            models.StaffAttendance.staff_member_id == data.staff_member_id,
+        ).first()
+        if dup:
+            raise HTTPException(status_code=400, detail="この従業員はすでに出勤登録済みです")
+
     if data.is_absent:
         record = models.StaffAttendance(
             store_id=data.store_id,
             date=today,
-            name=data.name,
+            name=name,
             is_absent=True,
             is_late=False,
+            employee_type=employee_type,
+            staff_member_id=data.staff_member_id,
         )
         db.add(record)
         db.commit()
@@ -1303,10 +1329,12 @@ def staff_clock_in(data: StaffClockInRequest, db: Session = Depends(get_db), cur
     record = models.StaffAttendance(
         store_id=data.store_id,
         date=today,
-        name=data.name,
+        name=name,
         actual_start=start_dt,
         is_late=data.is_late,
         is_absent=False,
+        employee_type=employee_type,
+        staff_member_id=data.staff_member_id,
     )
     db.add(record)
     db.commit()

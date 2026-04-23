@@ -476,6 +476,7 @@ class StaffAttendance(Base):
     is_late = Column(Boolean, default=False)
     is_absent = Column(Boolean, default=False)
     employee_type = Column(String(20), nullable=True)  # "社員" | "アルバイト"
+    staff_member_id = Column(Integer, ForeignKey("staff_members.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

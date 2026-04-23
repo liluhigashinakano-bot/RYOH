@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-04-06T02:27:32.541862",
+  "session": {
+    "id": 3,
+    "store_id": 1,
+    "date": "2026-04-05",
+    "opened_at": "2026-04-06T02:26:24.264908",
+    "closed_at": "2026-04-06T02:27:32.523953",
+    "opening_cash": 0,
+    "opening_cash_detail": {},
+    "closing_cash": 0,
+    "closing_cash_detail": {},
+    "prev_day_diff": -6,
+    "sales_snapshot": 0,
+    "operator_name": null,
+    "event_name": null,
+    "is_closed": true,
+    "notes": null,
+    "cash_diff": null,
+    "expenses_detail": {
+      "liquor": [
+        {
+          "category": "田野屋",
+          "amount": 124
+        },
+        {
+          "category": "カクヤス",
+          "amount": 23452
+        },
+        {
+          "category": "その他酒類",
+          "amount": 333
+        }
+      ],
+      "other": [
+        {
+          "category": "ガソリン代",
+          "amount": 2352
+        },
+        {
+          "category": "食事代",
+          "amount": 23413
+        }
+      ],
+      "withdrawals": [
+        {
+          "name": "星",
+          "amount": 8000
+        },
+        {
+          "name": "すずな",
+          "amount": 3000
+        },
+        {
+          "name": "こと",
+          "amount": 12400
+        }
+      ]
+    },
+    "cash_sales": 433946,
+    "card_sales": 258350,
+    "code_sales": 49546,
+    "opened_by_name": "管理者",
+    "closed_by_name": "管理者",
+    "store_name": "東中野"
+  }
+}

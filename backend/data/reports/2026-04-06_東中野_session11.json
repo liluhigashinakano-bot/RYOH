@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-04-06T09:07:31.632803",
+  "session": {
+    "id": 11,
+    "store_id": 1,
+    "date": "2026-04-06",
+    "opened_at": "2026-04-06T09:05:55.940562",
+    "closed_at": "2026-04-06T09:07:31.571146",
+    "opening_cash": 53660,
+    "opening_cash_detail": {
+      "10": 1,
+      "50": 1,
+      "100": 1,
+      "500": 1,
+      "1000": 3,
+      "5000": 10
+    },
+    "closing_cash": 38660,
+    "closing_cash_detail": {
+      "10": 1,
+      "50": 1,
+      "100": 1,
+      "500": 1,
+      "1000": 1,
+      "2000": 1,
+      "5000": 1,
+      "10000": 3
+    },
+    "prev_day_diff": 0,
+    "sales_snapshot": 11200,
+    "operator_name": null,
+    "event_name": null,
+    "is_closed": true,
+    "notes": null,
+    "cash_diff": null,
+    "expenses_detail": {
+      "liquor": [],
+      "other": [
+        {
+          "category": "test",
+          "amount": 4000
+        }
+      ],
+      "withdrawals": [
+        {
+          "type": "日払い",
+          "person_name": "ゆの",
+          "name": "日払い（ゆの）",
+          "amount": 3000
+        },
+        {
+          "type": "日払い",
+          "person_name": "西山",
+          "name": "日払い（西山）",
+          "amount": 8000
+        }
+      ],
+      "_attendance": {
+        "5": {
+          "actual_start": "20:00",
+          "actual_end": "28:00",
+          "is_late": false,
+          "is_absent": false
+        }
+      },
+      "_staff_attendance": [
+        {
+          "name": "西山",
+          "actual_start": "19:00",
+          "actual_end": "28:00",
+          "is_late": false,
+          "is_absent": false
+        }
+      ]
+    },
+    "cash_sales": 0,
+    "card_sales": 11200,
+    "code_sales": 0,
+    "opened_by_name": "管理者",
+    "closed_by_name": "管理者",
+    "store_name": "東中野"
+  }
+}
