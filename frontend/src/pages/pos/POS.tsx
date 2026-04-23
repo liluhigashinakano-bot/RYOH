@@ -4778,6 +4778,22 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     <X className="w-5 h-5" />
                   </button>
                 </div>
+
+                {/* 概算合計 */}
+                <div className="flex justify-between items-center bg-gray-800 p-3 rounded-lg mb-3">
+                  <span className="text-gray-400">概算合計</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-white text-lg font-bold">¥{grandTotal.toLocaleString()}</span>
+                    <button
+                      onClick={() => setShowEstimateDiscountModal(true)}
+                      className="text-gray-400 hover:text-white transition-colors"
+                      title="値引き"
+                    >
+                      ✏️
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-3">
                   <button
                     onClick={async () => {
@@ -4790,12 +4806,6 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     className="w-full btn-primary py-3 text-lg"
                   >
                     🖨️ 現在の金額で発行
-                  </button>
-                  <button
-                    onClick={() => setShowEstimateDiscountModal(true)}
-                    className="w-full bg-yellow-700 hover:bg-yellow-600 text-white py-3 rounded-lg text-lg transition-colors"
-                  >
-                    💴 値引きして発行
                   </button>
                   <button
                     onClick={() => setEstimateMode('add')}
