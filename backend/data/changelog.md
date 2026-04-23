@@ -113,3 +113,9 @@
    - または Railway のビルド設定で `npm ci --legacy-peer-deps` を強制
 2. デプロイ完了後、本番環境（Railway）で「💴 値引きして発行」ボタンが表示されることを確認
 3. 値引き額を入力 → API に adjustment パラメータで渡される → 値引き適用された概算 PDF が発行される流れをテスト
+
+### バグ修正（続き）
+- **概算伝票モーダル: price → defaultPrice 参照修正**
+  - `frontend/src/pages/pos/POS.tsx` の追加注文を仮定した金額画面（4851行目）
+  - ITEM_TYPES.map() で destructure は `defaultPrice` だが、`price` を参照していた問題を修正
+  - コミット: `7c90667d`
