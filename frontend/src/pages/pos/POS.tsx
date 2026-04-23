@@ -6235,6 +6235,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
     queryKey: ['staff-members', storeId],
     queryFn: () => apiClient.get(`/api/staff?store_id=${storeId}`).then(r => r.data),
     enabled: !!storeId,
+    refetchInterval: 30000,
   })
 
   const workingCastIds = new Set((working as any[]).filter((w: any) => !w.actual_end).map((w: any) => w.cast_id))
