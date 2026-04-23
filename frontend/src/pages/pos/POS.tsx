@@ -4848,7 +4848,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                             className="btn-secondary text-xs py-1 leading-tight"
                           >
                             {label}
-                            {price > 0 && <span className="block text-[9px] text-gray-400">¥{price.toLocaleString()}</span>}
+                            {defaultPrice > 0 && <span className="block text-[9px] text-gray-400">¥{defaultPrice.toLocaleString()}</span>}
                           </button>
                         )
                       })}
