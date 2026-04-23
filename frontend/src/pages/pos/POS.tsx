@@ -3914,15 +3914,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                       {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{i.toString().padStart(2,'0')}</option>)}
                     </select>
                   </div>
-                  <select value={timeChangeOperator} onChange={e => setTimeChangeOperator(e.target.value)}
-                    className="input-field w-full text-xs py-0.5">
-                    <option value="">担当者を選択</option>
-                    {staffMembers.map((m: any) => (
-                      <option key={m.id} value={m.name}>
-                        {m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}{!(m.store_ids || []).includes(storeId) ? '・他店舗' : ''}）
-                      </option>
-                    ))}
-                  </select>
+                  <input type="text" placeholder="担当者名（必須）" value={timeChangeOperator}
+                    onChange={e => setTimeChangeOperator(e.target.value)}
+                    className="input-field w-full text-xs py-0.5" />
                   <input type="text" placeholder="理由（任意）" value={timeChangeReason}
                     onChange={e => setTimeChangeReason(e.target.value)}
                     className="input-field w-full text-xs py-0.5" />
@@ -5142,15 +5136,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     </div>
                   )
                 })()}
-                <select value={operatorName} onChange={e => setOperatorName(e.target.value)}
-                  className="input-field w-full text-xs py-1" autoFocus>
-                  <option value="">担当者を選択</option>
-                  {staffMembers.map((m: any) => (
-                    <option key={m.id} value={m.name}>
-                      {m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}{!(m.store_ids || []).includes(storeId) ? '・他店舗' : ''}）
-                    </option>
-                  ))}
-                </select>
+                <input type="text" placeholder="担当者名（必須）" value={operatorName}
+                  onChange={e => setOperatorName(e.target.value)}
+                  className="input-field w-full text-xs py-1" autoFocus />
                 <input type="text" placeholder="理由（任意）" value={operatorReason}
                   onChange={e => setOperatorReason(e.target.value)}
                   className="input-field w-full text-xs py-1" />
