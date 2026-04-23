@@ -2846,13 +2846,31 @@ function CastAssignModal({ storeId, currentCastIds = [], onSubmit, onClose }: {
 }
 
 // 伝票削除確認モーダル
-function TicketDeleteModal({ ticket, onSubmit, onClose }: {
+function TicketDeleteModal({ ticket, storeId, onSubmit, onClose }: {
   ticket: any
+  storeId: number
   onSubmit: (operator: string, reason: string) => void
   onClose: () => void
 }) {
   const [operator, setOperator] = useState('')
   const [reason, setReason] = useState('')
+
+  const { data: staffList = [] } = useQuery({
+    queryKey: ['staff-for-delete', storeId],
+    queryFn: () => apiClient.get('/api/staff').then(r => r.data),
+  })
+
+  // 店舗所属社員→店舗所属アルバイト→他店舗社員→他店舗アルバイト の順に並べ替え
+  const sortedStaff = [...(staffList as any[])].sort((a, b) => {
+    const aIn = (a.store_ids || []).includes(storeId) ? 0 : 1
+    const bIn = (b.store_ids || []).includes(storeId) ? 0 : 1
+    if (aIn !== bIn) return aIn - bIn
+    const aType = a.employee_type === 'staff' ? 0 : 1
+    const bType = b.employee_type === 'staff' ? 0 : 1
+    if (aType !== bType) return aType - bType
+    return (a.name || '').localeCompare(b.name || '', 'ja')
+  })
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[80] p-4" onClick={onClose}>
       <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
@@ -2865,11 +2883,22 @@ function TicketDeleteModal({ ticket, onSubmit, onClose }: {
           <div>合計: <span className="text-white font-medium">¥{(ticket?.total_amount || 0).toLocaleString()}</span></div>
           <div className="text-[10px] text-red-400">※削除すると売上集計・日報から除外されます</div>
         </div>
-        <input
-          type="text" placeholder="担当者名（必須）"
-          value={operator} onChange={e => setOperator(e.target.value)}
-          className="input-field w-full text-sm" autoFocus
-        />
+        <div>
+          <label className="text-xs text-gray-400 block mb-1">担当者（必須）</label>
+          <select value={operator} onChange={e => setOperator(e.target.value)}
+            className="input-field w-full text-sm" autoFocus>
+            <option value="">選択してください</option>
+            {sortedStaff.map((m: any) => {
+              const isOther = !(m.store_ids || []).includes(storeId)
+              const typeLabel = m.employee_type === 'staff' ? '社員' : 'アルバイト'
+              return (
+                <option key={m.id} value={m.name}>
+                  {m.name}（{typeLabel}{isOther ? '・他店舗' : ''}）
+                </option>
+              )
+            })}
+          </select>
+        </div>
         <input
           type="text" placeholder="理由（任意）"
           value={reason} onChange={e => setReason(e.target.value)}
@@ -3885,9 +3914,15 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                       {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{i.toString().padStart(2,'0')}</option>)}
                     </select>
                   </div>
-                  <input type="text" placeholder="担当者名（必須）" value={timeChangeOperator}
-                    onChange={e => setTimeChangeOperator(e.target.value)}
-                    className="input-field w-full text-xs py-0.5" />
+                  <select value={timeChangeOperator} onChange={e => setTimeChangeOperator(e.target.value)}
+                    className="input-field w-full text-xs py-0.5">
+                    <option value="">担当者を選択</option>
+                    {staffMembers.map((m: any) => (
+                      <option key={m.id} value={m.name}>
+                        {m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}{!(m.store_ids || []).includes(storeId) ? '・他店舗' : ''}）
+                      </option>
+                    ))}
+                  </select>
                   <input type="text" placeholder="理由（任意）" value={timeChangeReason}
                     onChange={e => setTimeChangeReason(e.target.value)}
                     className="input-field w-full text-xs py-0.5" />
@@ -4563,6 +4598,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       {showDeleteModal && (
         <TicketDeleteModal
           ticket={ticket}
+          storeId={storeId}
           onSubmit={(operator, reason) => {
             apiClient.post(`/api/tickets/${ticketId}/delete`, {
               operator_name: operator,
@@ -5109,9 +5145,15 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     </div>
                   )
                 })()}
-                <input type="text" placeholder="担当者名（必須）" value={operatorName}
-                  onChange={e => setOperatorName(e.target.value)}
-                  className="input-field w-full text-xs py-1" autoFocus />
+                <select value={operatorName} onChange={e => setOperatorName(e.target.value)}
+                  className="input-field w-full text-xs py-1" autoFocus>
+                  <option value="">担当者を選択</option>
+                  {staffMembers.map((m: any) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name}（{m.employee_type === 'staff' ? '社員' : 'アルバイト'}{!(m.store_ids || []).includes(storeId) ? '・他店舗' : ''}）
+                    </option>
+                  ))}
+                </select>
                 <input type="text" placeholder="理由（任意）" value={operatorReason}
                   onChange={e => setOperatorReason(e.target.value)}
                   className="input-field w-full text-xs py-1" />
