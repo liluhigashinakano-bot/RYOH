@@ -79,3 +79,37 @@
 
 #### 後方互換性
 - 従来のテキスト入力（`name` のみ）も引き続きサポート（`staff_member_id=None`）
+
+### 概算伝票: 値引き機能追加（実装完了、デプロイ保留中）
+
+#### 実装内容
+- **Backend修正** (`backend/app/routers/receipts.py`):
+  - `GET /api/receipts/estimate/{ticket_id}` に `adjustment: int = Query(0)` パラメータを追加
+  - `_calc_amounts()` 呼び出し後に `amounts["grand"] = max(0, amounts["grand"] + adjustment)` で値引き適用
+  - DBへの書き込みなし（概算表示のみ）
+
+- **Frontend修正** (`frontend/src/pages/pos/POS.tsx`):
+  - State追加: `showEstimateDiscountModal: boolean`
+  - 概算伝票モーダルの選択画面に「💴 値引きして発行」ボタンを追加（黄色）
+  - 既存の `DiscountModal` コンポーネントを流用
+  - onSubmit で `?adjustment={signedAmount}` をクエリパラメータで APIに渡す
+
+#### Git コミット
+- `7ad4b1fa`: feat: 概算伝票に値引き機能を追加
+- `cccbbaa0`: trigger railway deploy（webhook トリガー用 empty commit）
+- `ccc3aad1`: fix: npm legacy-peer-deps setting + trigger railway deploy v2
+
+#### 現在の状況 ⚠️
+- **コード実装は完全に完了**
+- **Backend は問題なし（修正内容は simple）**
+- **Railway ビルドで npm install の ERESOLVE エラーが発生**
+  - package-lock.json の依存関係競合
+  - .npmrc で `legacy-peer-deps=true` を設定したが、Railway に反映されない可能性
+  - ローカル frontend でも npm install でエラー
+
+#### 課題・次のステップ
+1. Railway の npm install エラーを根本的に解決
+   - package-lock.json を再生成（`npm install --legacy-peer-deps` で新しい lock ファイルを作成して git に commit）
+   - または Railway のビルド設定で `npm ci --legacy-peer-deps` を強制
+2. デプロイ完了後、本番環境（Railway）で「💴 値引きして発行」ボタンが表示されることを確認
+3. 値引き額を入力 → API に adjustment パラメータで渡される → 値引き適用された概算 PDF が発行される流れをテスト
