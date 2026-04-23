@@ -40,7 +40,8 @@ const CHAMPAGNE_MENU = [
 ]
 
 const ITEM_TYPES = [
-  { type: 'extension', label: '延長', defaultPrice: 0 },
+  { type: 'extension', label: '延長スタンダード', defaultPrice: 3000 },
+  { type: 'extension_prem', label: '延長プレミアム', defaultPrice: 4000 },
   { type: 'drink_s', label: 'Sドリンク', defaultPrice: 900 },
   { type: 'drink_l', label: 'Lドリンク', defaultPrice: 1700 },
   { type: 'drink_mg', label: 'MGドリンク', defaultPrice: 3700 },
@@ -3289,6 +3290,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showEstimateModal, setShowEstimateModal] = useState(false)
   const [estimateMode, setEstimateMode] = useState<'select' | 'add' | null>(null)
   const [estimateExtras, setEstimateExtras] = useState<{type: string; label: string; price: number; qty: number}[]>([])
+  const [showEstimateDiscountModal, setShowEstimateDiscountModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
   const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null; motivation_cast_ids: number[] }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null, motivation_cast_ids: [] })
@@ -4076,17 +4078,18 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
               <p className="text-xs text-gray-500 px-1">注文追加</p>
               <div className="grid grid-cols-2 gap-1">
-                {ITEM_TYPES.map(({ type, label, defaultPrice }) => {
-                  const price = type === 'extension'
-                    ? (ticket.plan_type === 'premium' ? 4000 : 3000)
-                    : defaultPrice
+                {ITEM_TYPES.filter(item => {
+                  if (item.type === 'extension') return ticket?.plan_type !== 'premium'
+                  if (item.type === 'extension_prem') return ticket?.plan_type === 'premium'
+                  return true
+                }).map(({ type, label, defaultPrice }) => {
                   return (
                     <button key={type}
-                      onClick={() => handleItemClick(type, label, price)}
+                      onClick={() => handleItemClick(type, label, defaultPrice)}
                       className={`btn-secondary text-xs py-1.5 leading-tight ${CAST_SELECT_TYPES.has(type) ? 'border-primary-700/50' : ''}`}
                     >
                       {label}
-                      {price > 0 && <span className="block text-[10px] text-gray-500">¥{price.toLocaleString()}</span>}
+                      {defaultPrice > 0 && <span className="block text-[10px] text-gray-500">¥{defaultPrice.toLocaleString()}</span>}
                       {CAST_SELECT_TYPES.has(type) && <span className="block text-[10px] text-primary-500">キャスト選択</span>}
                     </button>
                   )
@@ -4661,6 +4664,28 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         />
       )}
 
+      {/* 概算伝票の値引き/加算モーダル */}
+      {showEstimateDiscountModal && (
+        <DiscountModal
+          storeId={storeId}
+          currentTotal={grandTotal}
+          onSubmit={async (signedAmount, reason, operator) => {
+            setShowEstimateDiscountModal(false)
+            setShowEstimateModal(false)
+            try {
+              const r = await apiClient.get(
+                `/api/receipts/estimate/${ticketId}?size=80mm&adjustment=${signedAmount}`,
+                { responseType: 'blob' }
+              )
+              window.open(URL.createObjectURL(r.data), '_blank')
+            } catch {
+              alert('概算伝票の生成に失敗しました')
+            }
+          }}
+          onClose={() => setShowEstimateDiscountModal(false)}
+        />
+      )}
+
       {/* 先会計モーダル */}
       {showSenkaikeiModal && (
         <SenkaikeiModal
@@ -4767,6 +4792,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     🖨️ 現在の金額で発行
                   </button>
                   <button
+                    onClick={() => setShowEstimateDiscountModal(true)}
+                    className="w-full bg-yellow-700 hover:bg-yellow-600 text-white py-3 rounded-lg text-lg transition-colors"
+                  >
+                    💴 値引きして発行
+                  </button>
+                  <button
                     onClick={() => setEstimateMode('add')}
                     className="w-full bg-orange-700 hover:bg-orange-600 text-white py-3 rounded-lg text-lg transition-colors"
                   >
@@ -4798,10 +4829,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <div>
                     <p className="text-xs text-gray-500 mb-2">注文を追加:</p>
                     <div className="grid grid-cols-3 gap-1">
-                      {ITEM_TYPES.filter(t => t.type !== 'champagne').map(({ type, label, defaultPrice }) => {
-                        const price = type === 'extension'
-                          ? (ticket?.plan_type === 'premium' ? 4000 : 3000)
-                          : defaultPrice
+                      {ITEM_TYPES.filter(t => {
+                        if (t.type === 'champagne') return false
+                        if (t.type === 'extension') return ticket?.plan_type !== 'premium'
+                        if (t.type === 'extension_prem') return ticket?.plan_type === 'premium'
+                        return true
+                      }).map(({ type, label, defaultPrice }) => {
                         return (
                           <button
                             key={type}
@@ -4809,7 +4842,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                               setEstimateExtras(prev => {
                                 const existing = prev.find(e => e.type === type && e.label === label)
                                 if (existing) return prev.map(e => e === existing ? {...e, qty: e.qty + 1} : e)
-                                return [...prev, {type, label, price, qty: 1}]
+                                return [...prev, {type, label, price: defaultPrice, qty: 1}]
                               })
                             }}
                             className="btn-secondary text-xs py-1 leading-tight"

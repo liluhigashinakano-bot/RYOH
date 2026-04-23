@@ -499,6 +499,7 @@ class IssueRequest(BaseModel):
 def get_estimate_pdf(
     ticket_id: int,
     size: str = Query("80mm"),
+    adjustment: int = Query(0),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -510,6 +511,8 @@ def get_estimate_pdf(
         raise HTTPException(status_code=404, detail="店舗が見つかりません")
 
     amounts = _calc_amounts(ticket)
+    if adjustment != 0:
+        amounts["grand"] = max(0, amounts["grand"] + adjustment)
     issued_at = datetime.utcnow()
 
     if size == "a4":
