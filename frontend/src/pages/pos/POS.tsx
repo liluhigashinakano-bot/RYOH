@@ -3285,6 +3285,9 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showLog, setShowLog] = useState(false)
   const [showNextVisitModal, setShowNextVisitModal] = useState(false)
   const [showMemoModal, setShowMemoModal] = useState(false)
+  const [showEstimateModal, setShowEstimateModal] = useState(false)
+  const [estimateMode, setEstimateMode] = useState<'select' | 'add' | null>(null)
+  const [estimateExtras, setEstimateExtras] = useState<{type: string; label: string; price: number; qty: number}[]>([])
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [showHeaderEdit, setShowHeaderEdit] = useState(false)
   const [headerEditForm, setHeaderEditForm] = useState<{ table_no: string; guest_count: number; visit_type: string; plan_type: string; visit_motivation: string; motivation_cast_id: number | null; motivation_cast_ids: number[] }>({ table_no: '', guest_count: 1, visit_type: '', plan_type: 'standard', visit_motivation: '', motivation_cast_id: null, motivation_cast_ids: [] })
@@ -4041,11 +4044,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               <div className="p-3 space-y-2">
                 <p className="text-xs text-gray-500">印刷</p>
                 <button
-                  onClick={async () => {
-                    try {
-                      const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
-                      window.open(URL.createObjectURL(r.data), '_blank')
-                    } catch { alert('概算伝票の生成に失敗しました') }
+                  onClick={() => {
+                    setShowEstimateModal(true)
+                    setEstimateMode('select')
+                    setEstimateExtras([])
                   }}
                   className="bg-blue-800 hover:bg-blue-700 text-white text-xs py-2 rounded-lg w-full"
                 >🖨️ 概算伝票</button>
@@ -4138,14 +4140,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
               <div className="border-t border-night-700 pt-1.5 grid grid-cols-2 gap-2">
                 <button
-                  onClick={async () => {
-                    try {
-                      const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
-                      const url = URL.createObjectURL(r.data)
-                      window.open(url, '_blank')
-                    } catch (e: any) {
-                      alert('概算伝票の生成に失敗しました')
-                    }
+                  onClick={() => {
+                    setShowEstimateModal(true)
+                    setEstimateMode('select')
+                    setEstimateExtras([])
                   }}
                   className="bg-blue-800 hover:bg-blue-700 text-white text-xs py-1.5 rounded-lg"
                 >
@@ -4739,6 +4737,165 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
           ticketId={ticketId}
           onClose={() => setShowMemoModal(false)}
         />
+      )}
+
+      {/* 概算伝票モーダル */}
+      {showEstimateModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-2xl max-h-[80vh] overflow-y-auto space-y-4">
+            {/* ① 選択画面 */}
+            {estimateMode === 'select' && (
+              <>
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-white text-lg">概算伝票</h3>
+                  <button onClick={() => { setShowEstimateModal(false); setEstimateMode(null); setEstimateExtras([]) }} className="text-gray-400 hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
+                        window.open(URL.createObjectURL(r.data), '_blank')
+                        setShowEstimateModal(false)
+                      } catch { alert('概算伝票の生成に失敗しました') }
+                    }}
+                    className="w-full btn-primary py-3 text-lg"
+                  >
+                    🖨️ 現在の金額で発行
+                  </button>
+                  <button
+                    onClick={() => setEstimateMode('add')}
+                    className="w-full bg-orange-700 hover:bg-orange-600 text-white py-3 rounded-lg text-lg transition-colors"
+                  >
+                    ➕ 条件を追加した金額
+                  </button>
+                  <button
+                    onClick={() => { setShowEstimateModal(false); setEstimateMode(null); setEstimateExtras([]) }}
+                    className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ② 追加条件画面 */}
+            {estimateMode === 'add' && (() => {
+              const extraTotal = estimateExtras.reduce((s, e) => s + e.price * e.qty, 0)
+              const extraWithTax = Math.round(extraTotal * 1.21)
+              const estimateGrandTotal = grandTotal + extraWithTax
+              return (
+                <>
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-white text-lg">追加注文を仮定した金額</h3>
+                    <button onClick={() => setEstimateMode('select')} className="text-gray-400 hover:text-white text-sm">← 戻る</button>
+                  </div>
+
+                  {/* メニュー */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">注文を追加:</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {ITEM_TYPES.filter(t => t.type !== 'champagne').map(({ type, label, defaultPrice }) => {
+                        const price = type === 'extension'
+                          ? (ticket?.plan_type === 'premium' ? 4000 : 3000)
+                          : defaultPrice
+                        return (
+                          <button
+                            key={type}
+                            onClick={() => {
+                              setEstimateExtras(prev => {
+                                const existing = prev.find(e => e.type === type && e.label === label)
+                                if (existing) return prev.map(e => e === existing ? {...e, qty: e.qty + 1} : e)
+                                return [...prev, {type, label, price, qty: 1}]
+                              })
+                            }}
+                            className="btn-secondary text-xs py-1 leading-tight"
+                          >
+                            {label}
+                            {price > 0 && <span className="block text-[9px] text-gray-400">¥{price.toLocaleString()}</span>}
+                          </button>
+                        )
+                      })}
+                      {(activeMenuItems as any[]).map((m: any) => (
+                        <button
+                          key={`menu-${m.id}`}
+                          onClick={() => {
+                            setEstimateExtras(prev => {
+                              const key = `menu-${m.id}`
+                              const existing = prev.find(e => e.type === key && e.label === m.label)
+                              if (existing) return prev.map(e => e === existing ? {...e, qty: e.qty + 1} : e)
+                              return [...prev, {type: key, label: m.label, price: m.price, qty: 1}]
+                            })
+                          }}
+                          className="btn-secondary text-xs py-1 leading-tight"
+                        >
+                          {m.label}
+                          {m.price > 0 && <span className="block text-[9px] text-gray-400">¥{m.price.toLocaleString()}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 追加済みアイテム */}
+                  {estimateExtras.length > 0 && (
+                    <div className="bg-night-700 p-2 rounded space-y-1">
+                      <p className="text-xs text-gray-400">追加アイテム:</p>
+                      {estimateExtras.map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-sm text-white">
+                          <span>{item.label} × {item.qty} = ¥{(item.price * item.qty).toLocaleString()}</span>
+                          <button
+                            onClick={() => setEstimateExtras(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-300 text-xs"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 金額表示 */}
+                  <div className="bg-night-800 p-3 rounded space-y-2 text-sm">
+                    <div className="flex justify-between text-gray-300">
+                      <span>現在の金額:</span>
+                      <span>¥{grandTotal.toLocaleString()}</span>
+                    </div>
+                    {estimateExtras.length > 0 && (
+                      <>
+                        <div className="flex justify-between text-orange-400">
+                          <span>追加分（税サ込み）:</span>
+                          <span>¥{extraWithTax.toLocaleString()}</span>
+                        </div>
+                        <div className="border-t border-night-600 pt-2 flex justify-between text-white font-bold text-base">
+                          <span>概算合計:</span>
+                          <span>¥{estimateGrandTotal.toLocaleString()}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* ボタン */}
+                  <button
+                    onClick={async () => {
+                      try {
+                        const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm`, { responseType: 'blob' })
+                        window.open(URL.createObjectURL(r.data), '_blank')
+                        setShowEstimateModal(false)
+                        setEstimateMode(null)
+                        setEstimateExtras([])
+                      } catch { alert('概算伝票の生成に失敗しました') }
+                    }}
+                    className="w-full btn-primary py-2"
+                  >
+                    🖨️ この金額で発行（※追加分は概算表示です）
+                  </button>
+                </>
+              )
+            })()}
+          </div>
+        </div>
       )}
 
       {/* 注文アクションパネル（selected行の直下にfixedオーバーレイ） */}
