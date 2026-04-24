@@ -3511,6 +3511,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       setOperatorName('')
       setOperatorReason('')
     },
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail || e?.message || '変更に失敗しました'
+      alert(`数量変更エラー: ${detail}`)
+    },
   })
 
   const updateChampagneMutation = useMutation({
@@ -3561,7 +3565,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     mutationFn: ({ item, targetQty, operator, reason }: { item: any; targetQty: number; operator: string; reason: string }) =>
       apiClient.post(`/api/tickets/${ticketId}/reduce-group`, {
         item_type: item.item_type,
-        item_name: item.item_name ?? null,
+        item_name: item.item_name || null,
         unit_price: item.unit_price,
         target_quantity: targetQty,
         operator_name: operator || null,
@@ -3577,6 +3581,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       setActionMode('add')
       setOperatorName('')
       setOperatorReason('')
+    },
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail || e?.message || '変更に失敗しました'
+      alert(`数量変更エラー: ${detail}`)
     },
   })
 
