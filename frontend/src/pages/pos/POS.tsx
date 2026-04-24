@@ -4980,10 +4980,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   <button
                     onClick={async () => {
                       try {
-                        // 追加アイテムの合計（税込み）を計算して、adjustment として渡す
-                        const extraTotal = estimateExtras.reduce((s, e) => s + e.price * e.qty, 0)
-                        const extraWithTax = Math.round(extraTotal * 1.21)
-                        const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm&adjustment=${extraWithTax}`, { responseType: 'blob' })
+                        // モーダル内で計算した estimateGrandTotal を使用
+                        // adjustment = estimateGrandTotal - grandTotal
+                        const adjustment = estimateGrandTotal - grandTotal
+                        const r = await apiClient.get(`/api/receipts/estimate/${ticketId}?size=80mm&adjustment=${adjustment}`, { responseType: 'blob' })
                         window.open(URL.createObjectURL(r.data), '_blank')
                         setShowEstimateModal(false)
                         setEstimateMode(null)
