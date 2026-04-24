@@ -3555,8 +3555,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
 
   const closeMutation = useMutation({
     mutationFn: (data: any) => apiClient.post(`/api/tickets/${ticketId}/close`, data).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
       onClose()
     },
@@ -4644,8 +4644,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             apiClient.post(`/api/tickets/${ticketId}/delete`, {
               operator_name: operator,
               reason: reason || null,
-            }).then(() => {
-              qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+            }).then(async () => {
+              await qc.refetchQueries({ queryKey: ['tickets', storeId] })
               qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
               setShowDeleteModal(false)
               onClose()
