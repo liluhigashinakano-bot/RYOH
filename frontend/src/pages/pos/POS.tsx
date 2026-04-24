@@ -3490,6 +3490,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setSelectedOrderId(null)
+      setActionPos(null)
+      setActionMode('add')
       setOperatorName('')
       setOperatorReason('')
     },
@@ -3504,6 +3506,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
       setSelectedOrderId(null)
+      setActionPos(null)
+      setActionMode('add')
       setOperatorName('')
       setOperatorReason('')
     },
@@ -3569,6 +3573,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
       setSelectedOrderId(null)
+      setActionPos(null)
+      setActionMode('add')
       setOperatorName('')
       setOperatorReason('')
     },
