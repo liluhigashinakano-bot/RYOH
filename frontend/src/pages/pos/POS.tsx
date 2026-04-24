@@ -3320,6 +3320,23 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const [showActiveCastsModal, setShowActiveCastsModal] = useState(false)
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
+
+  const { data: modalStaffMembers = [] } = useQuery({
+    queryKey: ['staff-members-modal', storeId],
+    queryFn: () => apiClient.get('/api/staff').then(r => r.data),
+    staleTime: 60000,
+    enabled: !!storeId,
+  })
+
+  const sortedStaffMembers = [...(modalStaffMembers as any[])].sort((a, b) => {
+    const aIn = (a.store_ids || []).includes(storeId) ? 0 : 1
+    const bIn = (b.store_ids || []).includes(storeId) ? 0 : 1
+    if (aIn !== bIn) return aIn - bIn
+    const aType = a.employee_type === 'staff' ? 0 : 1
+    const bType = b.employee_type === 'staff' ? 0 : 1
+    if (aType !== bType) return aType - bType
+    return (a.name || '').localeCompare(b.name || '', 'ja')
+  })
   const [receiptHistory, setReceiptHistory] = useState<any[]>([])
   const [receiptRecipient, setReceiptRecipient] = useState('')
   const [receiptNote, setReceiptNote] = useState('ご飲食代として')
@@ -3938,7 +3955,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     className="input-field w-full text-xs py-0.5">
                     <option value="">担当者を選択</option>
                     {sortedStaffMembers.map((m: any) => {
-                      const isOther = !(m.store_ids || []).includes(selectedStoreId)
+                      const isOther = !(m.store_ids || []).includes(storeId)
                       const typeLabel = m.employee_type === 'staff' ? '社員' : 'アルバイト'
                       return (
                         <option key={m.id} value={m.name}>
@@ -5179,7 +5196,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                   className="input-field w-full text-xs py-1">
                   <option value="">担当者を選択</option>
                   {sortedStaffMembers.map((m: any) => {
-                    const isOther = !(m.store_ids || []).includes(selectedStoreId)
+                    const isOther = !(m.store_ids || []).includes(storeId)
                     const typeLabel = m.employee_type === 'staff' ? '社員' : 'アルバイト'
                     return (
                       <option key={m.id} value={m.name}>
