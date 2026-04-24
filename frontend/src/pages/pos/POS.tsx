@@ -3485,8 +3485,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const cancelOrderMutation = useMutation({
     mutationFn: ({ itemId, operator, reason }: { itemId: number; operator: string; reason: string }) =>
       apiClient.post(`/api/tickets/orders/${itemId}/cancel`, { operator_name: operator || null, reason: reason || null }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setSelectedOrderId(null)
@@ -3500,8 +3500,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const updateOrderMutation = useMutation({
     mutationFn: ({ itemId, quantity, operator, reason }: { itemId: number; quantity: number; operator: string; reason: string }) =>
       apiClient.patch(`/api/tickets/orders/${itemId}`, { quantity, operator_name: operator || null, reason: reason || null }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
@@ -3571,8 +3571,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         operator_name: operator || null,
         reason: reason || null,
       }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
@@ -4047,15 +4047,16 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 </thead>
                 <tbody>
                   {(() => {
-                    // 同一品目（同item_type・同item_name・同unit_price）の未キャンセル行をまとめて表示
                     const raw = (ticket.order_items || []).filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0))
                     const grouped: any[] = []
+                    let canceledCount = 0
+                    let canceledAmount = 0
                     for (const item of raw) {
+                      if (item.canceled_at) { canceledCount += item.quantity; canceledAmount += item.amount; continue }
                       const canMerge = item.item_type !== 'join' && item.item_type !== 'set'
                         && !item.item_name?.startsWith('先会計') && !item.item_name?.startsWith('分割清算') && !item.item_name?.startsWith('先退店') && !item.item_name?.startsWith('値引き') && !item.item_name?.startsWith('加算')
                       if (canMerge) {
-                        const canceled = !!item.canceled_at
-                        const key = `${canceled ? 'c|' : ''}${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
+                        const key = `${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
                         const existing = grouped.find((g: any) => g._groupKey === key)
                         if (existing) { existing.quantity += item.quantity; existing.amount += item.amount; continue }
                         grouped.push({ ...item, _groupKey: key })
@@ -4063,41 +4064,47 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                         grouped.push(item)
                       }
                     }
-                    return grouped
-                  })().map((item: any) => {
-                    const isCanceled = !!item.canceled_at
-                    const isSelected = selectedOrderId === item.id
-                    const isEditing = editingOrderId === item.id
-                    return (
-                      <tr key={item.id}
-                        className={`border-b border-night-700/50 ${!isCanceled ? 'cursor-pointer hover:bg-night-700/30' : ''} ${isSelected ? 'bg-night-700/50' : ''}`}
-                        onClick={e => {
-                          if (isCanceled) return
-                          if (isEditing) return
-                          if (isSelected) {
-                            setSelectedOrderId(null)
-                            setEditingOrderId(null)
-                            setActionPos(null)
-                          } else {
-                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                            setActionPos({ top: rect.bottom, left: rect.left, width: rect.width })
-                            setSelectedOrderId(item.id)
-                            setEditingOrderId(null)
-                            setActionMode('add')
-                            setOperatorName('')
-                          }
-                        }}>
-                        <td className={`px-4 py-2 ${isCanceled ? 'line-through text-gray-500' : 'text-gray-200'}`}>{displayItemName(item, castMap)}</td>
-                        <td className={`text-center px-2 py-2 ${isCanceled ? 'line-through text-gray-600' : 'text-gray-400'}`}>
-                          {item.quantity}
-                        </td>
-                        <td className={`text-right px-2 py-2 ${isCanceled ? 'text-gray-600' : 'text-gray-400'}`}>¥{item.unit_price.toLocaleString()}</td>
-                        <td className={`text-right px-4 py-2 font-medium ${isCanceled ? 'line-through text-gray-600' : (item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算')) ? 'text-blue-400' : item.item_name?.startsWith('値引き') ? 'text-orange-400' : item.item_name?.startsWith('加算') ? 'text-green-400' : 'text-white'}`}>
-                          {(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算') || item.item_name?.startsWith('値引き')) ? `-¥${Math.abs(item.amount).toLocaleString()}` : item.item_name?.startsWith('加算') ? `+¥${Math.abs(item.amount).toLocaleString()}` : `¥${item.amount.toLocaleString()}`}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                    const rows = grouped.map((item: any) => {
+                      const isSelected = selectedOrderId === item.id
+                      const isEditing = editingOrderId === item.id
+                      return (
+                        <tr key={item.id}
+                          className={`border-b border-night-700/50 cursor-pointer hover:bg-night-700/30 ${isSelected ? 'bg-night-700/50' : ''}`}
+                          onClick={e => {
+                            if (isEditing) return
+                            if (isSelected) {
+                              setSelectedOrderId(null)
+                              setEditingOrderId(null)
+                              setActionPos(null)
+                            } else {
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                              setActionPos({ top: rect.bottom, left: rect.left, width: rect.width })
+                              setSelectedOrderId(item.id)
+                              setEditingOrderId(null)
+                              setActionMode('add')
+                              setOperatorName('')
+                            }
+                          }}>
+                          <td className="px-4 py-2 text-gray-200">{displayItemName(item, castMap)}</td>
+                          <td className="text-center px-2 py-2 text-gray-400">{item.quantity}</td>
+                          <td className="text-right px-2 py-2 text-gray-400">¥{item.unit_price.toLocaleString()}</td>
+                          <td className={`text-right px-4 py-2 font-medium ${(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算')) ? 'text-blue-400' : item.item_name?.startsWith('値引き') ? 'text-orange-400' : item.item_name?.startsWith('加算') ? 'text-green-400' : 'text-white'}`}>
+                            {(item.item_name?.startsWith('先会計') || item.item_name?.startsWith('分割清算') || item.item_name?.startsWith('値引き')) ? `-¥${Math.abs(item.amount).toLocaleString()}` : item.item_name?.startsWith('加算') ? `+¥${Math.abs(item.amount).toLocaleString()}` : `¥${item.amount.toLocaleString()}`}
+                          </td>
+                        </tr>
+                      )
+                    })
+                    if (canceledCount > 0) {
+                      rows.push(
+                        <tr key="canceled-summary" className="border-b border-night-700/50">
+                          <td colSpan={4} className="px-4 py-1.5 text-gray-600 text-xs">
+                            取消済み {canceledCount}件
+                          </td>
+                        </tr>
+                      )
+                    }
+                    return rows
+                  })()}
                   {(!ticket.order_items || ticket.order_items.filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0) && !i.canceled_at).length === 0) && (
                     <tr><td colSpan={4} className="text-center text-gray-600 py-8 text-sm">注文なし</td></tr>
                   )}
