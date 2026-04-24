@@ -3542,8 +3542,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         operator_name: operator || null,
         reason: reason || null,
       }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
