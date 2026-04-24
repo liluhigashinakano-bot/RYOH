@@ -156,7 +156,7 @@ def _to_ticket_input(
     guest = max(1, ticket.guest_count or 1)
     ext_qty = sum(
         (o.quantity or 0) for o in (ticket.order_items or [])
-        if o.item_type == 'extension' and not o.canceled_at
+        if o.item_type in ('extension', 'extension_prem') and not o.canceled_at
         and not (o.item_name or '').startswith('合流')
     )
     calc_ext_count = ext_qty // guest

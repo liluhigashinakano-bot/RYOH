@@ -30,7 +30,7 @@ def main():
         fixed = 0
         for t in tickets:
             ext_items = [i for i in (t.order_items or [])
-                         if i.item_type == "extension" and i.canceled_at is None]
+                         if i.item_type in ("extension", "extension_prem") and i.canceled_at is None]
             actual_count = sum((i.quantity or 0) for i in ext_items)
             if actual_count != (t.extension_count or 0):
                 print(f"  ticket_id={t.id} table={t.table_no}: {t.extension_count} → {actual_count}")

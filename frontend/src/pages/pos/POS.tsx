@@ -6,7 +6,7 @@ import apiClient from '../../api/client'
 import DailyReportPanel from './DailyReportPanel'
 
 const ITEM_TYPE_LABELS: Record<string, string> = {
-  extension: '延長', drink_s: 'Sドリンク', drink_l: 'Lドリンク',
+  extension: '延長', extension_prem: '延長プレミアム', drink_s: 'Sドリンク', drink_l: 'Lドリンク',
   drink_mg: 'MGドリンク', shot_cast: 'キャストショット', shot_guest: 'ゲストショット',
   champagne: 'シャンパン', set: 'セット料金', other: 'その他', custom_menu: 'カスタムメニュー',
 }
@@ -159,12 +159,13 @@ function AutoExtender({ ticket, storeId, extensionPrice: _ }: { ticket: any; sto
     if (periodCount <= dbPeriod) return
 
     // 不足期を順に period_no 指定で追加（重複は backend が弾く）
+    const extType = ticket.plan_type === 'premium' ? 'extension_prem' : 'extension'
     const extPrice = ticket.plan_type === 'premium' ? 4000 : 3000
     for (let p = dbPeriod + 1; p <= periodCount; p++) {
       if (inflightRef.current.has(p)) continue
       inflightRef.current.add(p)
       apiClient.post(`/api/tickets/${ticket.id}/orders`, {
-        item_type: 'extension',
+        item_type: extType,
         unit_price: extPrice,
         quantity: 1,
         period_no: p,
@@ -2168,7 +2169,7 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
                     {(() => {
                       const guest = Math.max(1, ticket.guest_count || 1)
                       const totalQty = (ticket.order_items || [])
-                        .filter((i: any) => i.item_type === 'extension' && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
+                        .filter((i: any) => (i.item_type === 'extension' || i.item_type === 'extension_prem') && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
                         .reduce((s: number, i: any) => s + (i.quantity || 0), 0)
                       const periods = Math.floor(totalQty / guest)
                       return periods > 0 ? <span className="ml-2">延長{periods}回</span> : null
@@ -2431,7 +2432,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
             <p className="text-xs text-gray-400">延長 {(() => {
               const guest = Math.max(1, ticket.guest_count || 1)
               const totalQty = (ticket.order_items || [])
-                .filter((i: any) => i.item_type === 'extension' && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
+                .filter((i: any) => (i.item_type === 'extension' || i.item_type === 'extension_prem') && !i.canceled_at && !(i.item_name || '').startsWith('合流'))
                 .reduce((s: number, i: any) => s + (i.quantity || 0), 0)
               return Math.floor(totalQty / guest)
             })()}回</p>

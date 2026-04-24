@@ -568,7 +568,7 @@ def add_order(
 
     # 通常延長 (合流ではない) は period_no で重複防止
     is_normal_ext = (
-        data.item_type == "extension"
+        data.item_type in ("extension", "extension_prem")
         and data.cast_id is None
         and not (data.item_name or '').startswith('合流')
     )
@@ -577,7 +577,7 @@ def add_order(
         # 手動で削除した延長をAutoExtenderが再追加しないようにするため）
         existing = db.query(models.OrderItem).filter(
             models.OrderItem.ticket_id == ticket_id,
-            models.OrderItem.item_type == "extension",
+            models.OrderItem.item_type == data.item_type,
             models.OrderItem.cast_id.is_(None),
             models.OrderItem.period_no == data.period_no,
         ).first()
@@ -592,7 +592,7 @@ def add_order(
         guest = max(1, ticket.guest_count or 1)
         new_item = models.OrderItem(
             ticket_id=ticket_id,
-            item_type="extension",
+            item_type=data.item_type,
             item_name=data.item_name,
             quantity=guest,
             unit_price=data.unit_price,
@@ -664,7 +664,7 @@ def add_order(
 
     ticket.total_amount += amount
 
-    if data.item_type == "extension":
+    if data.item_type in ("extension", "extension_prem"):
         ticket.extension_count += 1
 
     db.commit()
@@ -781,7 +781,7 @@ def _do_cancel(item_id: int, operator_name: Optional[str], reason: Optional[str]
     item.canceled_at = datetime.utcnow()
     item.canceled_by = current_user.id
     ticket.total_amount -= item.amount
-    if item.item_type == "extension" and ticket.extension_count > 0:
+    if item.item_type in ("extension", "extension_prem") and ticket.extension_count > 0:
         ticket.extension_count -= 1
     # 履歴記録
     log = models.OrderItemLog(
@@ -1049,7 +1049,7 @@ def reduce_group(
             item.canceled_at = now
             item.canceled_by = current_user.id
             ticket.total_amount -= item.amount
-            if item.item_type == "extension" and ticket.extension_count > 0:
+            if item.item_type in ("extension", "extension_prem") and ticket.extension_count > 0:
                 ticket.extension_count -= item.quantity
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
@@ -1075,7 +1075,7 @@ def reduce_group(
             item.quantity -= to_cancel
             item.amount = item.unit_price * item.quantity
             ticket.total_amount -= (old_amt - item.amount)
-            if item.item_type == "extension":
+            if item.item_type in ("extension", "extension_prem"):
                 ticket.extension_count = max(0, ticket.extension_count - to_cancel)
             log = models.OrderItemLog(
                 ticket_id=ticket_id,
@@ -1283,6 +1283,7 @@ def patch_ticket(
         now_utc = datetime.utcnow()
         elapsed_seconds = max(0, (now_utc - new_started_at).total_seconds())
         guest_count = ticket.guest_count or 1
+        ext_type = 'extension_prem' if ticket.plan_type == 'premium' else 'extension'
         ext_price = 4000 if ticket.plan_type == 'premium' else 3000
         new_period_count = int(elapsed_seconds // (40 * 60))
         old_period_count = ticket.extension_count or 0
@@ -1293,7 +1294,7 @@ def patch_ticket(
             for _ in range(diff):
                 item = models.OrderItem(
                     ticket_id=ticket_id,
-                    item_type='extension',
+                    item_type=ext_type,
                     unit_price=ext_price,
                     quantity=guest_count,
                     amount=ext_price * guest_count,
@@ -1305,7 +1306,7 @@ def patch_ticket(
             # 超過期分をキャンセル（新しい順に）
             ext_items = [
                 i for i in (ticket.order_items or [])
-                if i.item_type == 'extension' and i.canceled_at is None
+                if i.item_type in ('extension', 'extension_prem') and i.canceled_at is None
             ]
             cancel_count = min(abs(diff), len(ext_items))
             for item in ext_items[-cancel_count:]:
@@ -1762,7 +1763,7 @@ def merge_ticket(
             item.original_ticket_id = source.id
         item.ticket_id = data.target_ticket_id
         target.total_amount += item.amount
-        if item.item_type == "extension":
+        if item.item_type in ("extension", "extension_prem"):
             target.extension_count += 1
 
     target.guest_count = (target.guest_count or 1) + (source.guest_count or 1)
@@ -1860,7 +1861,7 @@ def unmerge_ticket(
     moved_extensions = 0
     for item in moved_items:
         moved_total += item.amount or 0
-        if item.item_type == "extension":
+        if item.item_type in ("extension", "extension_prem"):
             moved_extensions += 1
         item.ticket_id = source.id
         item.original_ticket_id = None

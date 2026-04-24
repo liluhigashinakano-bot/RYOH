@@ -191,7 +191,7 @@ def _merge_split_extensions():
     db = SessionLocal()
     try:
         rows = db.query(models.OrderItem).filter(
-            models.OrderItem.item_type == "extension",
+            models.OrderItem.item_type.in_(["extension", "extension_prem"]),
             models.OrderItem.canceled_at.is_(None),
             models.OrderItem.cast_id.is_(None),
         ).order_by(models.OrderItem.ticket_id, models.OrderItem.id).all()
@@ -233,7 +233,7 @@ def _normalize_extension_count():
         fixed_tickets = 0
         for t in tickets:
             ext_items = [i for i in (t.order_items or [])
-                         if i.item_type == "extension" and i.canceled_at is None
+                         if i.item_type in ("extension", "extension_prem") and i.canceled_at is None
                          and not (i.item_name or '').startswith('合流')]
             if not ext_items:
                 if t.extension_count and t.extension_count > 0:
