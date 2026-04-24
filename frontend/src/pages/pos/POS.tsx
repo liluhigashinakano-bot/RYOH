@@ -4043,12 +4043,12 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                     const raw = (ticket.order_items || []).filter((i: any) => !(i.item_type === 'champagne' && i.unit_price === 0))
                     const grouped: any[] = []
                     for (const item of raw) {
-                      if (item.canceled_at) { grouped.push(item); continue }
                       const canMerge = item.item_type !== 'join' && item.item_type !== 'set'
                         && !item.item_name?.startsWith('先会計') && !item.item_name?.startsWith('分割清算') && !item.item_name?.startsWith('先退店') && !item.item_name?.startsWith('値引き') && !item.item_name?.startsWith('加算')
                       if (canMerge) {
-                        const key = `${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
-                        const existing = grouped.find((g: any) => !g.canceled_at && g._groupKey === key)
+                        const canceled = !!item.canceled_at
+                        const key = `${canceled ? 'c|' : ''}${item.item_type}|${item.item_name ?? ''}|${item.unit_price}`
+                        const existing = grouped.find((g: any) => g._groupKey === key)
                         if (existing) { existing.quantity += item.quantity; existing.amount += item.amount; continue }
                         grouped.push({ ...item, _groupKey: key })
                       } else {
