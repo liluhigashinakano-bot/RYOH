@@ -2028,29 +2028,50 @@ function OrderLogsView({ storeId }: { storeId: number }) {
           <p className="text-center text-gray-500 py-16">履歴はありません</p>
         )}
         <div className="space-y-1">
-          {logs.map((log: any) => (
-            <div key={log.id}
-              onClick={() => setSelectedLog(log)}
-              className="flex items-center gap-3 px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-sm cursor-pointer hover:border-gray-600 hover:bg-gray-800/60 transition-colors">
-              <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${actionColor(log.action)}`}>
-                {ACTION_LABELS[log.action] ?? log.action}
-              </span>
-              <span className="text-gray-400 text-xs shrink-0">{log.table_no ?? '—'}</span>
-              <span className="text-white truncate max-w-[200px]">{log.item_name}</span>
-              {log.action === 'cancel' ? (
-                <span className="text-red-400 text-xs shrink-0">¥{(log.old_amount ?? 0).toLocaleString()}</span>
-              ) : log.action === 'change_start_time' ? (
-                <span className="text-blue-400 text-xs shrink-0">—</span>
-              ) : (
-                <span className="text-yellow-400 text-xs shrink-0">{log.old_quantity}→{log.new_quantity}</span>
-              )}
-              <span className="text-gray-600 text-xs shrink-0">{log.operator_name || log.changed_by_name || '—'}</span>
-              {log.reason && <span className="text-gray-500 text-xs italic truncate max-w-[160px]">「{log.reason}」</span>}
-              <span className="text-gray-600 text-xs shrink-0 ml-auto">
-                {log.changed_at ? new Date(log.changed_at + 'Z').toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
-              </span>
-            </div>
-          ))}
+          {(() => {
+            const grouped: { key: string; logs: any[]; totalOldAmount: number; totalOldQty: number; count: number }[] = []
+            for (const log of logs) {
+              const ts = log.changed_at ? log.changed_at.slice(0, 16) : ''
+              const key = `${log.action}|${log.ticket_id}|${log.item_name}|${log.operator_name || ''}|${ts}`
+              const last = grouped[grouped.length - 1]
+              if (last && last.key === key) {
+                last.logs.push(log)
+                last.totalOldAmount += log.old_amount ?? 0
+                last.totalOldQty += log.old_quantity ?? 0
+                last.count++
+              } else {
+                grouped.push({ key, logs: [log], totalOldAmount: log.old_amount ?? 0, totalOldQty: log.old_quantity ?? 0, count: 1 })
+              }
+            }
+            return grouped.map(g => {
+              const log = g.logs[0]
+              return (
+                <div key={g.logs.map((l: any) => l.id).join('-')}
+                  onClick={() => setSelectedLog(log)}
+                  className="flex items-center gap-3 px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-sm cursor-pointer hover:border-gray-600 hover:bg-gray-800/60 transition-colors">
+                  <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${actionColor(log.action)}`}>
+                    {ACTION_LABELS[log.action] ?? log.action}
+                  </span>
+                  <span className="text-gray-400 text-xs shrink-0">{log.table_no ?? '—'}</span>
+                  <span className="text-white truncate max-w-[200px]">
+                    {log.item_name}{g.count > 1 ? ` ×${g.totalOldQty}` : ''}
+                  </span>
+                  {log.action === 'cancel' ? (
+                    <span className="text-red-400 text-xs shrink-0">¥{g.totalOldAmount.toLocaleString()}</span>
+                  ) : log.action === 'change_start_time' ? (
+                    <span className="text-blue-400 text-xs shrink-0">—</span>
+                  ) : (
+                    <span className="text-yellow-400 text-xs shrink-0">{log.old_quantity}→{log.new_quantity}</span>
+                  )}
+                  <span className="text-gray-600 text-xs shrink-0">{log.operator_name || log.changed_by_name || '—'}</span>
+                  {log.reason && <span className="text-gray-500 text-xs italic truncate max-w-[160px]">「{log.reason}」</span>}
+                  <span className="text-gray-600 text-xs shrink-0 ml-auto">
+                    {log.changed_at ? new Date(log.changed_at + 'Z').toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                  </span>
+                </div>
+              )
+            })
+          })()}
         </div>
       </div>
 
