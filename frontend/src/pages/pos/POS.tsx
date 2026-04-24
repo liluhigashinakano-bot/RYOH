@@ -3464,8 +3464,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const cancelOrderMutation = useMutation({
     mutationFn: ({ itemId, operator, reason }: { itemId: number; operator: string; reason: string }) =>
       apiClient.post(`/api/tickets/orders/${itemId}/cancel`, { operator_name: operator || null, reason: reason || null }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setSelectedOrderId(null)
@@ -3477,8 +3477,8 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   const updateOrderMutation = useMutation({
     mutationFn: ({ itemId, quantity, operator, reason }: { itemId: number; quantity: number; operator: string; reason: string }) =>
       apiClient.patch(`/api/tickets/orders/${itemId}`, { quantity, operator_name: operator || null, reason: reason || null }).then(r => r.data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ticket', ticketId] })
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
       qc.invalidateQueries({ queryKey: ['tickets', storeId] })
       qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
       setEditingOrderId(null)
