@@ -611,7 +611,14 @@ function EditCastModal({
         <div className="flex gap-3 p-4 border-t border-night-600">
           <button onClick={onClose} className="btn-secondary flex-1">キャンセル</button>
           <button
-            onClick={() => onSave(form)}
+            onClick={() => {
+              const payload: Record<string, unknown> = { ...form }
+              for (const key of ['birthday', 'employment_start_date', 'last_rate_change_date', 'main_time_slot', 'nearest_station', 'notes']) {
+                if (payload[key] === '') payload[key] = null
+              }
+              if (payload.hourly_rate != null) payload.hourly_rate = Number(payload.hourly_rate)
+              onSave(payload)
+            }}
             disabled={!form.stage_name || isSaving}
             className="btn-primary flex-1"
           >
