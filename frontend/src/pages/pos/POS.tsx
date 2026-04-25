@@ -4646,7 +4646,11 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
               operator_name: operator,
               reason: reason || null,
             }).then(async () => {
-              await qc.refetchQueries({ queryKey: ['tickets', storeId] })
+              qc.setQueryData(['tickets', storeId, 'open'], (old: any) =>
+                Array.isArray(old) ? old.filter((t: any) => t.id !== ticketId) : [])
+              await qc.refetchQueries({ queryKey: ['tickets', storeId, 'open'] })
+              qc.invalidateQueries({ queryKey: ['tickets', storeId] })
+              qc.invalidateQueries({ queryKey: ['live', storeId] })
               qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
               setShowDeleteModal(false)
               onClose()
