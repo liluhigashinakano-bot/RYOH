@@ -5135,10 +5135,10 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                 {editingOrderId && item.item_type !== 'champagne' && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400 shrink-0">数量</span>
-                    <input type="number" min={1} max={editingGroupMaxQty} value={editingQty}
-                      onChange={e => setEditingQty(Math.min(editingGroupMaxQty, Math.max(1, Number(e.target.value))))}
+                    <input type="number" min={1} value={editingQty}
+                      onChange={e => setEditingQty(Math.max(1, Number(e.target.value)))}
                       className="input-field w-20 text-center text-sm py-1" />
-                    <span className="text-xs text-gray-500">/ {editingGroupMaxQty}</span>
+                    <span className="text-xs text-gray-500">現在 {editingGroupMaxQty}</span>
                   </div>
                 )}
                 {/* シャンパン: キャスト配分率編集（追加・削除可） */}
@@ -5234,6 +5234,28 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                           const newItemName = `${baseName}${useBracket}${castsStr}${closeBracket}`
                           const distribution = champEditCasts.map(c => ({ cast_id: c.castId as number, ratio: c.ratio }))
                           updateChampagneMutation.mutate({ oldName: item.item_name, newName: newItemName, operator: operatorName, reason: operatorReason, distribution })
+                        } else if (editingQty === editingGroupMaxQty) {
+                          closePanel()
+                        } else if (editingQty > editingGroupMaxQty) {
+                          const diff = editingQty - editingGroupMaxQty
+                          if (editingGroupItemIds.length <= 1) {
+                            updateOrderMutation.mutate({ itemId: editingOrderId!, quantity: editingQty, operator: operatorName, reason: operatorReason })
+                          } else {
+                            addOrderMutation.mutateAsync({
+                              item_type: item.item_type,
+                              item_name: item.item_name || undefined,
+                              unit_price: item.unit_price,
+                              quantity: diff,
+                              cast_id: item.cast_id ?? undefined,
+                            }).then(async () => {
+                              await qc.refetchQueries({ queryKey: ['ticket', ticketId] })
+                              qc.invalidateQueries({ queryKey: ['order-logs', storeId] })
+                              setEditingOrderId(null)
+                              setSelectedOrderId(null)
+                              setOperatorName('')
+                              setOperatorReason('')
+                            })
+                          }
                         } else if (editingGroupItemIds.length > 1) {
                           groupReduceMutation.mutate({ item, targetQty: editingQty, operator: operatorName, reason: operatorReason })
                         } else {
@@ -5244,6 +5266,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
                         !operatorName.trim() ||
                         updateOrderMutation.isPending ||
                         groupReduceMutation.isPending ||
+                        addOrderMutation.isPending ||
                         updateChampagneMutation.isPending ||
                         (item.item_type === 'champagne' && champEditCasts.reduce((s, c) => s + c.ratio, 0) !== 100)
                       }
