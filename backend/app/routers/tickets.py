@@ -16,7 +16,8 @@ router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 
 _ITEM_TYPE_LABELS = {
-    "extension": "延長", "drink_s": "Sドリンク", "drink_l": "Lドリンク",
+    "extension": "延長", "extension_prem": "延長プレミアム",
+    "drink_s": "Sドリンク", "drink_l": "Lドリンク",
     "drink_mg": "MGドリンク", "shot_cast": "キャストショット", "shot_guest": "ゲストショット",
     "champagne": "シャンパン", "set": "セット料金", "other": "その他",
 }
@@ -747,6 +748,7 @@ def update_order(
     )
     db.add(log)
     db.commit()
+    db.refresh(ticket)
     return {"ok": True, "total_amount": ticket.total_amount}
 
 
@@ -1040,59 +1042,41 @@ def reduce_group(
         raise HTTPException(status_code=400, detail="現在の数量以上には増やせません")
 
     now = datetime.utcnow()
-    canceled_count = 0
+    first_item = group_items[0]
     for item in group_items:
         if to_cancel <= 0:
             break
         if item.quantity <= to_cancel:
-            # まるごとキャンセル
             item.canceled_at = now
             item.canceled_by = current_user.id
             ticket.total_amount -= item.amount
             if item.item_type in ("extension", "extension_prem") and ticket.extension_count > 0:
                 ticket.extension_count -= item.quantity
-            log = models.OrderItemLog(
-                ticket_id=ticket_id,
-                order_item_id=item.id,
-                action='cancel',
-                item_type=item.item_type,
-                item_name=item.item_name,
-                old_quantity=item.quantity,
-                new_quantity=0,
-                old_amount=item.amount,
-                new_amount=0,
-                changed_by=current_user.id,
-                operator_name=data.operator_name,
-                reason=data.reason,
-            )
-            db.add(log)
             to_cancel -= item.quantity
-            canceled_count += item.quantity
         else:
-            # 一部削減
-            old_qty = item.quantity
             old_amt = item.amount
             item.quantity -= to_cancel
             item.amount = item.unit_price * item.quantity
             ticket.total_amount -= (old_amt - item.amount)
             if item.item_type in ("extension", "extension_prem"):
                 ticket.extension_count = max(0, ticket.extension_count - to_cancel)
-            log = models.OrderItemLog(
-                ticket_id=ticket_id,
-                order_item_id=item.id,
-                action='update_quantity',
-                item_type=item.item_type,
-                item_name=item.item_name,
-                old_quantity=old_qty,
-                new_quantity=item.quantity,
-                old_amount=old_amt,
-                new_amount=item.amount,
-                changed_by=current_user.id,
-                operator_name=data.operator_name,
-                reason=data.reason,
-            )
-            db.add(log)
             to_cancel = 0
+
+    log = models.OrderItemLog(
+        ticket_id=ticket_id,
+        order_item_id=first_item.id,
+        action='update_quantity',
+        item_type=data.item_type,
+        item_name=data.item_name,
+        old_quantity=current_total,
+        new_quantity=data.target_quantity,
+        old_amount=current_total * first_item.unit_price,
+        new_amount=data.target_quantity * first_item.unit_price,
+        changed_by=current_user.id,
+        operator_name=data.operator_name,
+        reason=data.reason,
+    )
+    db.add(log)
 
     db.commit()
     db.refresh(ticket)
