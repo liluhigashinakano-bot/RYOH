@@ -1992,11 +1992,13 @@ def get_live_summary(
     day_start_utc = datetime(business_date.year, business_date.month, business_date.day, 3, 0, 0)
     day_end_utc = day_start_utc + timedelta(hours=24)
 
-    # セッション開始時刻が指定されている場合はそれ以降に絞る（同日複数セッション対策）
+    # セッション開始時刻が指定されている場合はセッション境界を使う
+    use_session = False
     if session_opened_at:
         try:
             since = datetime.fromisoformat(session_opened_at.replace('Z', '+00:00')).replace(tzinfo=None)
-            day_start_utc = max(day_start_utc, since)
+            day_start_utc = since
+            use_session = True
         except Exception:
             pass
 
@@ -2007,13 +2009,15 @@ def get_live_summary(
         models.Ticket.started_at >= day_start_utc,
     ).all()
 
-    closed_today = db.query(models.Ticket).filter(
+    closed_q = db.query(models.Ticket).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.is_closed == True,
         models.Ticket.deleted_at.is_(None),
         models.Ticket.ended_at >= day_start_utc,
-        models.Ticket.ended_at < day_end_utc,
-    ).all()
+    )
+    if not use_session:
+        closed_q = closed_q.filter(models.Ticket.ended_at < day_end_utc)
+    closed_today = closed_q.all()
 
     closed_grand = sum(_calc_grand_total(t) for t in closed_today)
     open_grand = sum(_calc_grand_total(t) for t in open_tickets)
