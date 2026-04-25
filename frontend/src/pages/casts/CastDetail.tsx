@@ -52,7 +52,7 @@ export default function CastDetail() {
   const [showEdit, setShowEdit] = useState(false)
   const [shiftDetail, setShiftDetail] = useState<any | null>(null)
 
-  const isManager = user && ['superadmin', 'manager', 'editor'].includes(user.role)
+  const isManager = user && ['administrator', 'superadmin', 'manager', 'editor'].includes(user.role)
 
   // storeId はキャストの store_id から取得するため、まずどの店舗か検索
   const storeIds = stores.map(s => s.id)
