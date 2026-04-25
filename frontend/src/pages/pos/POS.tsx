@@ -2562,7 +2562,7 @@ function NewTicketModal({ storeId, onSubmit, onClose }: {
 }) {
   const [tableNo, setTableNo] = useState(TABLE_NOS[0])
   const [guestCount, setGuestCount] = useState(1)
-  const [planType, setPlanType] = useState('premium')
+  const [planType, setPlanType] = useState('standard')
   const [visitType, setVisitType] = useState('N')
   const [motivation, setMotivation] = useState('')
   const [motivationCastIds, setMotivationCastIds] = useState<number[]>([])
