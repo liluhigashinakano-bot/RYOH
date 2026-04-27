@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, List
@@ -25,6 +26,26 @@ _ITEM_TYPE_LABELS = {
 def _item_label(item_name: Optional[str], item_type: Optional[str]) -> str:
     raw = item_name or item_type or ""
     return _ITEM_TYPE_LABELS.get(raw, raw)
+
+
+def _sync_ticket_totals(ticket: models.Ticket, db: Session) -> None:
+    """order_items の実合計から total_amount と extension_count を再計算する。
+    増分更新のドリフトを防止するため、変更操作の commit 前に呼ぶ。"""
+    db.flush()
+    active_sum = db.query(
+        sa_func.coalesce(sa_func.sum(models.OrderItem.amount), 0)
+    ).filter(
+        models.OrderItem.ticket_id == ticket.id,
+        models.OrderItem.canceled_at.is_(None),
+    ).scalar()
+    discount = ticket.discount_amount or 0
+    ticket.total_amount = max(0, active_sum - discount)
+
+    ticket.extension_count = db.query(models.OrderItem).filter(
+        models.OrderItem.ticket_id == ticket.id,
+        models.OrderItem.item_type.in_(['extension', 'extension_prem']),
+        models.OrderItem.canceled_at.is_(None),
+    ).count()
 
 
 def _resolve_motivation_cast_names(ticket: models.Ticket) -> list[str]:
@@ -602,8 +623,7 @@ def add_order(
             period_no=data.period_no,
         )
         db.add(new_item)
-        ticket.total_amount += data.unit_price * guest
-        ticket.extension_count = (ticket.extension_count or 0) + 1  # 期数のみ
+        _sync_ticket_totals(ticket, db)
         db.commit()
         return {"message": "延長を追加しました", "id": new_item.id, "total_amount": ticket.total_amount}
 
@@ -663,10 +683,7 @@ def add_order(
     db.add(item)
     item_id = None
 
-    ticket.total_amount += amount
-
-    if data.item_type in ("extension", "extension_prem"):
-        ticket.extension_count += 1
+    _sync_ticket_totals(ticket, db)
 
     db.commit()
     return {"message": "注文を追加しました", "id": item_id, "total_amount": ticket.total_amount}
@@ -703,7 +720,6 @@ def update_order(
     old_amount = item.amount
     item.quantity = data.quantity
     item.amount = item.unit_price * data.quantity
-    ticket.total_amount += item.amount - old_amount
 
     # キャスト選択ありドリンクの数量増加 = 追加注文相当 → タイマーをリセット
     if (
@@ -747,6 +763,7 @@ def update_order(
         reason=data.reason,
     )
     db.add(log)
+    _sync_ticket_totals(ticket, db)
     db.commit()
     db.refresh(ticket)
     return {"ok": True, "total_amount": ticket.total_amount}
@@ -782,9 +799,6 @@ def _do_cancel(item_id: int, operator_name: Optional[str], reason: Optional[str]
     ticket = db.query(models.Ticket).filter(models.Ticket.id == item.ticket_id).first()
     item.canceled_at = datetime.utcnow()
     item.canceled_by = current_user.id
-    ticket.total_amount -= item.amount
-    if item.item_type in ("extension", "extension_prem") and ticket.extension_count > 0:
-        ticket.extension_count -= 1
     # 履歴記録
     log = models.OrderItemLog(
         ticket_id=item.ticket_id,
@@ -801,6 +815,7 @@ def _do_cancel(item_id: int, operator_name: Optional[str], reason: Optional[str]
         reason=reason,
     )
     db.add(log)
+    _sync_ticket_totals(ticket, db)
     db.commit()
     return {"message": "注文をキャンセルしました"}
 
@@ -1049,17 +1064,10 @@ def reduce_group(
         if item.quantity <= to_cancel:
             item.canceled_at = now
             item.canceled_by = current_user.id
-            ticket.total_amount -= item.amount
-            if item.item_type in ("extension", "extension_prem") and ticket.extension_count > 0:
-                ticket.extension_count -= item.quantity
             to_cancel -= item.quantity
         else:
-            old_amt = item.amount
             item.quantity -= to_cancel
             item.amount = item.unit_price * item.quantity
-            ticket.total_amount -= (old_amt - item.amount)
-            if item.item_type in ("extension", "extension_prem"):
-                ticket.extension_count = max(0, ticket.extension_count - to_cancel)
             to_cancel = 0
 
     log = models.OrderItemLog(
@@ -1078,6 +1086,7 @@ def reduce_group(
     )
     db.add(log)
 
+    _sync_ticket_totals(ticket, db)
     db.commit()
     db.refresh(ticket)
     resp = _to_response(ticket)
@@ -1284,8 +1293,6 @@ def patch_ticket(
                     amount=ext_price * guest_count,
                 )
                 db.add(item)
-                ticket.total_amount += ext_price * guest_count
-            ticket.extension_count = new_period_count
         elif diff < 0:
             # 超過期分をキャンセル（新しい順に）
             ext_items = [
@@ -1295,8 +1302,6 @@ def patch_ticket(
             cancel_count = min(abs(diff), len(ext_items))
             for item in ext_items[-cancel_count:]:
                 item.canceled_at = datetime.utcnow()
-                ticket.total_amount = max(0, ticket.total_amount - item.amount)
-            ticket.extension_count = new_period_count
 
     if data.guest_count is not None:
         new_guest_count = max(1, data.guest_count)
@@ -1393,12 +1398,11 @@ def patch_ticket(
             None
         )
         if set_item:
-            old_total = set_item.amount
             set_item.quantity = final_guest
             set_item.unit_price = new_unit
             set_item.amount = new_total
-            ticket.total_amount += (new_total - old_total)
 
+    _sync_ticket_totals(ticket, db)
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
@@ -1425,7 +1429,7 @@ def close_ticket(
     ticket.card_amount = data.card_amount
     ticket.code_amount = data.code_amount
     ticket.discount_amount = data.discount_amount
-    ticket.total_amount = max(0, ticket.total_amount - data.discount_amount)
+    _sync_ticket_totals(ticket, db)
 
     if ticket.customer_id:
         customer = db.query(models.Customer).filter(models.Customer.id == ticket.customer_id).first()
@@ -1611,13 +1615,15 @@ def add_post_close_discount(
         amount=data.amount,
     )
     db.add(item)
-    ticket.total_amount += item.amount
+    db.flush()
+
+    old_total = ticket.total_amount
+    _sync_ticket_totals(ticket, db)
     if ticket.customer_id:
         customer = db.query(models.Customer).filter(models.Customer.id == ticket.customer_id).first()
         if customer:
-            customer.total_spend = max(0, (customer.total_spend or 0) + item.amount)
+            customer.total_spend = max(0, (customer.total_spend or 0) + (ticket.total_amount - old_total))
             customer.ltv = customer.total_spend
-    db.flush()
 
     log = models.OrderItemLog(
         ticket_id=ticket_id,
@@ -1691,7 +1697,6 @@ def join_ticket(
         amount=amount,
     )
     db.add(item)
-    ticket.total_amount += amount
     ticket.guest_count = (ticket.guest_count or 1) + data.guest_count
 
     # n_count/r_count の加算
@@ -1707,6 +1712,7 @@ def join_ticket(
     ticket.n_count = (ticket.n_count or 0) + add_n
     ticket.r_count = (ticket.r_count or 0) + add_r
 
+    _sync_ticket_totals(ticket, db)
     db.commit()
     db.refresh(ticket)
     return _to_response(ticket)
@@ -1746,9 +1752,6 @@ def merge_ticket(
         if item.original_ticket_id is None:
             item.original_ticket_id = source.id
         item.ticket_id = data.target_ticket_id
-        target.total_amount += item.amount
-        if item.item_type in ("extension", "extension_prem"):
-            target.extension_count += 1
 
     target.guest_count = (target.guest_count or 1) + (source.guest_count or 1)
     target.n_count = (target.n_count or 0) + (source.n_count or 0)
@@ -1761,6 +1764,7 @@ def merge_ticket(
     source.total_amount = 0
     source.notes = (source.notes or "") + f" [合算→{data.target_ticket_id}]"
 
+    _sync_ticket_totals(target, db)
     db.commit()
     db.refresh(target)
     return _to_response(target)
@@ -1841,17 +1845,10 @@ def unmerge_ticket(
     if not moved_items:
         raise HTTPException(status_code=400, detail="解除対象の注文が見つかりません")
 
-    moved_total = 0
-    moved_extensions = 0
     for item in moved_items:
-        moved_total += item.amount or 0
-        if item.item_type in ("extension", "extension_prem"):
-            moved_extensions += 1
         item.ticket_id = source.id
         item.original_ticket_id = None
 
-    target.total_amount = max(0, (target.total_amount or 0) - moved_total)
-    target.extension_count = max(0, (target.extension_count or 0) - moved_extensions)
     target.guest_count = max(1, (target.guest_count or 1) - (source.guest_count or 1))
     target.n_count = max(0, (target.n_count or 0) - (source.n_count or 0))
     target.r_count = max(0, (target.r_count or 0) - (source.r_count or 0))
@@ -1860,11 +1857,13 @@ def unmerge_ticket(
     source.is_closed = False
     source.ended_at = None
     source.payment_method = None
-    source.total_amount = moved_total
+    source.discount_amount = 0
     # notes から合算タグを削除
     if source.notes:
         source.notes = source.notes.replace(f" [合算→{ticket_id}]", "").strip() or None
 
+    _sync_ticket_totals(target, db)
+    _sync_ticket_totals(source, db)
     db.commit()
     db.refresh(target)
     return _to_response(target)
@@ -1911,7 +1910,6 @@ def warikan_ticket(
             amount=-p.amount,
         )
         db.add(item)
-        ticket.total_amount -= p.amount
         if p.method == "cash":
             cash_paid += p.amount
         elif p.method == "card":
@@ -1919,7 +1917,7 @@ def warikan_ticket(
         elif p.method == "code":
             code_paid += p.amount
 
-    db.flush()
+    _sync_ticket_totals(ticket, db)
 
     # 合計が0になったら自動的に会計済みにする
     if _calc_grand_total(ticket) <= 0:

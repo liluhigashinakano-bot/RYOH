@@ -1,5 +1,16 @@
 # TRUST 作業ログ
 
+## 2026-04-27
+
+### バグ修正: 伝票金額(total_amount)と延長件数(extension_count)のドリフト問題
+- **根本原因**: total_amount を各エンドポイントで増分更新（+= / -=）していたため、延長の追加・削除・数量変更・合算・解除など複数パスで不整合が蓄積していた
+- **修正内容**:
+  - `_sync_ticket_totals()` 関数を新設。order_items の実合計から total_amount と extension_count を毎回再計算する仕組みに変更
+  - 注文追加(add_order)、数量変更(update_order)、キャンセル(_do_cancel)、グループ数量削減(reduce_group_quantity)、入店時間変更(patch_ticket)、会計(close_ticket)、会計後値引き(post_discount)、合流(join)、合算(merge)、合算解除(unmerge)、割り勘(warikan) の全11エンドポイントに適用
+  - reduce_group_quantity の extension_count バグ修正（item.quantity=ゲスト数 を期数として引いていた）
+- **テスト**: 32パターンのユニットテスト追加（tests/test_ticket_totals.py）、全95テストパス
+- **対象ファイル**: backend/app/routers/tickets.py, backend/tests/test_ticket_totals.py
+
 ## 2026-04-17
 
 ### DB操作
