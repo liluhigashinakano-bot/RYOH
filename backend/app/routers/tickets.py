@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func as sa_func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -11,6 +11,7 @@ from ..services.incentive import (
     build_incentive_map,
     build_custom_menu_label_map,
     calc_incentive_snapshot,
+    strip_cast_suffix,
 )
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -105,7 +106,6 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         featured_ids = [ticket.featured_cast_id]
     featured_names: list = []
     if featured_ids:
-        from sqlalchemy.orm import object_session
         session = object_session(ticket)
         by_id: dict = {}
         if session is not None:
@@ -128,6 +128,8 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
     # 構造: { "drink_l": [{...}], ..., "champagne": [...], ... }
     drink_clears = getattr(ticket, 'drink_clears', None) or {}
     last_drink_times: dict = {dt: [] for dt in CAST_DRINK_TYPES}
+    session = object_session(ticket)
+    custom_incentive_labels = set(build_custom_menu_label_map(session, ticket.store_id).keys()) if session else set()
 
     # 1キャストの最新ドリンク（シャンパン以外）を求める
     latest_per_cast: dict = {}  # cid -> {drink_type, cast_name, last_at, item_name}
@@ -142,12 +144,16 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
             continue
         cur = latest_per_cast.get(cid)
         if cur is None or last_at_iso > cur["last_at"]:
+            is_counter_incentive = item.item_type in {"drink_l", "drink_mg"}
+            if item.item_type == "custom_menu":
+                is_counter_incentive = bool(item.incentive_snapshot) or strip_cast_suffix(item.item_name or "") in custom_incentive_labels
             latest_per_cast[cid] = {
                 "drink_type": item.item_type,
                 "cast_id": cid,
                 "cast_name": item.cast.stage_name if item.cast else f"Cast{cid}",
                 "last_at": last_at_iso,
                 "item_name": item.item_name,
+                "has_incentive": is_counter_incentive,
             }
 
     for entry in latest_per_cast.values():
@@ -165,6 +171,7 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
             "cast_name": entry["cast_name"],
             "last_at": entry["last_at"],
             "item_name": entry["item_name"],
+            "has_incentive": entry["has_incentive"],
         })
 
     # シャンパンは従来通り（item_name 別、cast_id 別に並べる）

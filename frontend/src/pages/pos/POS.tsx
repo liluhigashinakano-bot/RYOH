@@ -63,6 +63,11 @@ const DRINK_COLORS: Record<string, { label: string; color: string; bg: string }>
   custom_menu: { label: 'CM',  color: 'text-orange-400', bg: 'bg-orange-900/40' },
 }
 
+function shouldHideCastOrderCounter(type: string, entry: any, hideCastOrderCounters?: boolean) {
+  if (!hideCastOrderCounters) return false
+  return type === 'drink_l' || type === 'drink_mg' || (type === 'custom_menu' && entry?.has_incentive === true)
+}
+
 const TABLE_NOS = [
   ...['A1','A2','A3','A4','A5','A6'],
   ...['B1','B2','B3','B4','B5','B6'],
@@ -387,6 +392,7 @@ export default function POS() {
     },
   })
   const extensionPrice: number = storeInfo?.extension_price || 2700
+  const hideCastOrderCounters = storeInfo?.cast_order_counter_enabled === false
 
   // 本日の来店予定（JST日付）
   const todayJst = (() => { const d = new Date(Date.now() + 9 * 3600 * 1000); return d.toISOString().slice(0, 10) })()
@@ -620,7 +626,7 @@ export default function POS() {
       ))}
 
       {view === 'open' ? (
-        <CrossTicketTimerContext tickets={tickets}>
+        <CrossTicketTimerContext tickets={tickets} hideCastOrderCounters={hideCastOrderCounters}>
         {(castLatestMap) => (
         /* 伝票カード一覧：残り高さを全部使う */
         <div
@@ -670,6 +676,7 @@ export default function POS() {
             >
               <TicketCard ticket={ticket} storeId={selectedStoreId} onClick={() => setSelectedTicketId(ticket.id)}
                 castLatestMap={castLatestMap}
+                hideCastOrderCounters={hideCastOrderCounters}
                 onOpenCustomerModal={t => setCustomerModalTicket(t)}
                 onOpenCastModal={t => setCastModalTicket(t)}
                 onOpenActiveCastsModal={t => setActiveCastsModalTicket(t)}
@@ -1856,8 +1863,9 @@ function BusinessCloseModal({ storeId, session, openTicketCount, salesTotal, cas
 
 // D時間: 種別×キャストごとに色分けして表示
 // 全卓を横断してキャスト最新ドリンク時刻を集計（シャンパン除外）
-function CrossTicketTimerContext({ tickets, children }: {
+function CrossTicketTimerContext({ tickets, hideCastOrderCounters, children }: {
   tickets: any[]
+  hideCastOrderCounters?: boolean
   children: (map: Record<number, { ticketId: number; lastAt: string }>) => React.ReactNode
 }) {
   const map = useMemo(() => {
@@ -1868,6 +1876,7 @@ function CrossTicketTimerContext({ tickets, children }: {
         if (type === 'champagne') continue
         if (!Array.isArray(arr)) continue
         for (const c of arr) {
+          if (shouldHideCastOrderCounter(type, c, hideCastOrderCounters)) continue
           if (!c || c.cast_id == null || !c.last_at) continue
           const cur = out[c.cast_id]
           if (!cur || c.last_at > cur.lastAt) out[c.cast_id] = { ticketId: t.id, lastAt: c.last_at }
@@ -1875,16 +1884,17 @@ function CrossTicketTimerContext({ tickets, children }: {
       }
     }
     return out
-  }, [tickets])
+  }, [tickets, hideCastOrderCounters])
   return <>{children(map)}</>
 }
 
 
-function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, currentCastIds, onCastRemove }: {
+function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, currentCastIds, onCastRemove, hideCastOrderCounters }: {
   lastDrinkTimes: any; now: number; ticketId?: number; onCleared?: () => void
   castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
   currentCastIds?: number[]
   onCastRemove?: (castId: number) => void
+  hideCastOrderCounters?: boolean
 }) {
   const [confirming, setConfirming] = useState<string | null>(null) // key
   // key -> clearedAt (ms)。last_at がクリア時刻より新しければ再表示する
@@ -1899,6 +1909,7 @@ function DrinkTimers({ lastDrinkTimes, now, ticketId, onCleared, castLatestMap, 
     const raw = lastDrinkTimes[type]
     if (!Array.isArray(raw) || raw.length === 0) continue
     for (const c of raw) {
+      if (shouldHideCastOrderCounter(type, c, hideCastOrderCounters)) continue
       if (!c || typeof c !== 'object' || !c.last_at) continue
       const typeLabel = type === 'custom_menu' && c.item_name
         ? c.item_name.replace(/\[.*?\]/g, '').trim().charAt(0)
@@ -2217,12 +2228,13 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
   )
 }
 
-function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal, onOpenActiveCastsModal, castLatestMap }: {
+function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastModal, onOpenActiveCastsModal, castLatestMap, hideCastOrderCounters }: {
   ticket: any; storeId: number; onClick: () => void
   onOpenCustomerModal: (ticket: any) => void
   onOpenCastModal: (ticket: any) => void
   onOpenActiveCastsModal: (ticket: any) => void
   castLatestMap?: Record<number, { ticketId: number; lastAt: string }>
+  hideCastOrderCounters?: boolean
 }) {
   const qc = useQueryClient()
   const now = useNow()
@@ -2340,6 +2352,7 @@ function TicketCard({ ticket, storeId, onClick, onOpenCustomerModal, onOpenCastM
         <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticket.id}
           castLatestMap={castLatestMap}
           currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
+          hideCastOrderCounters={hideCastOrderCounters}
           onCleared={() => { qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }}
           onCastRemove={(castId) => {
             const remaining = (ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null && id !== castId)
@@ -3377,6 +3390,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
     queryKey: ['store', storeId],
     queryFn: () => apiClient.get(`/api/stores/${storeId}`).then(r => r.data),
   })
+  const hideCastOrderCounters = (detailStoreInfo as any)?.cast_order_counter_enabled === false
 
   const { data: ticket, isLoading } = useQuery({
     queryKey: ['ticket', ticketId],
@@ -3400,6 +3414,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
         if (type === 'champagne') continue
         if (!Array.isArray(arr)) continue
         for (const c of arr) {
+          if (shouldHideCastOrderCounter(type, c, hideCastOrderCounters)) continue
           if (!c || c.cast_id == null || !c.last_at) continue
           const cur = out[c.cast_id]
           if (!cur || c.last_at > cur.lastAt) out[c.cast_id] = { ticketId: t.id, lastAt: c.last_at }
@@ -3407,7 +3422,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
       }
     }
     return out
-  }, [openTicketsForTimers])
+  }, [openTicketsForTimers, hideCastOrderCounters])
 
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
@@ -3922,6 +3937,7 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
             <DrinkTimers lastDrinkTimes={ticket.last_drink_times} now={now} ticketId={ticketId}
               castLatestMap={detailCastLatestMap}
               currentCastIds={(ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null)}
+              hideCastOrderCounters={hideCastOrderCounters}
               onCleared={() => { qc.invalidateQueries({ queryKey: ['ticket', ticketId] }); qc.invalidateQueries({ queryKey: ['tickets', storeId, 'open'] }) }}
               onCastRemove={(castId) => {
                 const remaining = (ticket.current_casts || []).map((c: any) => c.cast_id).filter((id: any) => id != null && id !== castId)

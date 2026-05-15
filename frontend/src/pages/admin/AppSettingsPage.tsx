@@ -46,6 +46,7 @@ function StoreSettings({ store }: { store: any }) {
 
   const aiEnabled = storeDetail?.ai_advisor_enabled ?? true
   const manualSetStart = storeDetail?.manual_set_start ?? true
+  const castOrderCounterEnabled = storeDetail?.cast_order_counter_enabled ?? true
 
   return (
     <div className="card space-y-3">
@@ -69,6 +70,22 @@ function StoreSettings({ store }: { store: any }) {
           </div>
         </div>
         <Toggle enabled={manualSetStart} onToggle={() => mutation.mutate({ manual_set_start: !manualSetStart })} disabled={mutation.isPending} />
+      </div>
+
+      <div className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
+        <div>
+          <div className="text-white text-sm">キャストオーダーカウンター機能</div>
+          <div className="text-gray-500 text-xs">
+            {castOrderCounterEnabled
+              ? 'ON: L・MG・インセンティブ付きその他メニューのカウンターを表示'
+              : 'OFF: L・MG・インセンティブ付きその他メニューのカウンターを非表示'}
+          </div>
+        </div>
+        <Toggle
+          enabled={castOrderCounterEnabled}
+          onToggle={() => mutation.mutate({ cast_order_counter_enabled: !castOrderCounterEnabled })}
+          disabled={mutation.isPending}
+        />
       </div>
     </div>
   )

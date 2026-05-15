@@ -84,6 +84,7 @@ class Store(Base):
     last_train_routes = Column(JSON, nullable=True)       # 終電ルート [{"from":"東中野","to":"新宿"}, ...]
     ai_advisor_enabled = Column(Boolean, default=True)    # AI付け回しエージェント ON/OFF
     manual_set_start = Column(Boolean, default=True)      # 伝票開始ボタン ON=手動 / OFF=自動開始
+    cast_order_counter_enabled = Column(Boolean, default=True)  # キャストオーダーカウンター ON/OFF
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
