@@ -25,7 +25,7 @@ const CHAMPAGNE_MENU = [
   { name: 'ヴーヴイエロー', price: 26000 },
   { name: 'ヴーヴホワイト', price: 28000 },
   { name: 'ヴーヴリッチ', price: 37000 },
-  { name: 'ヴーヴリッチロゼ', price: 35000 },
+  { name: 'ヴーヴリッチロゼ', price: 40000 },
   { name: 'モエアイス', price: 30000 },
   { name: 'モエアイスロゼ', price: 35000 },
   { name: 'ペリエジュエベルエポック', price: 80000 },
