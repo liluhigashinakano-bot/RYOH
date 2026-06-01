@@ -2,10 +2,11 @@ import os
 import time
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from ..database import get_db
 from .. import models
 from ..auth import get_current_user
@@ -15,6 +16,56 @@ UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "uploa
 router = APIRouter(prefix="/api/casts", tags=["casts"])
 
 MANAGER_ROLES = {models.UserRole.administrator, models.UserRole.superadmin, models.UserRole.manager, models.UserRole.editor}
+
+
+def _get_transfer_lineage_cast_ids(db: Session, cast: models.Cast) -> list[int]:
+    """Return every cast id connected by transfer links, including old/new records."""
+    found: set[int] = set()
+    stack = [cast.id]
+
+    while stack:
+        current_id = stack.pop()
+        if current_id in found:
+            continue
+        found.add(current_id)
+
+        current = cast if current_id == cast.id else db.query(models.Cast).filter(models.Cast.id == current_id).first()
+        if current:
+            for linked_id in (
+                getattr(current, "transferred_from_cast_id", None),
+                getattr(current, "transferred_to_cast_id", None),
+            ):
+                if linked_id and linked_id not in found:
+                    stack.append(linked_id)
+
+        linked_rows = db.query(models.Cast.id).filter(
+            or_(
+                models.Cast.transferred_from_cast_id == current_id,
+                models.Cast.transferred_to_cast_id == current_id,
+            )
+        ).all()
+        for (linked_id,) in linked_rows:
+            if linked_id and linked_id not in found:
+                stack.append(linked_id)
+
+    return sorted(found)
+
+
+def _get_transfer_lineage_casts(db: Session, cast: models.Cast) -> list[models.Cast]:
+    ids = _get_transfer_lineage_cast_ids(db, cast)
+    if not ids:
+        return [cast]
+    return db.query(models.Cast).filter(models.Cast.id.in_(ids)).all()
+
+
+def _current_business_date() -> date:
+    now_jst = datetime.utcnow() + timedelta(hours=9)
+    return now_jst.date() - timedelta(days=1) if now_jst.hour < 12 else now_jst.date()
+
+
+def _attendance_lookup_dates() -> list[date]:
+    # 既存データにはサーバーの暦日で作られた出勤が混ざるため、移行期間は両方を見る。
+    return sorted({_current_business_date(), date.today()})
 
 
 def _bar_hhmm_to_utc(hhmm: str, base_date: date) -> datetime:
@@ -91,6 +142,10 @@ class CastUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class CastTransferRequest(BaseModel):
+    target_store_id: int
+
+
 class CastResponse(BaseModel):
     id: int
     store_id: int
@@ -111,6 +166,9 @@ class CastResponse(BaseModel):
     is_active: bool
     is_retired: bool = False
     retired_at: Optional[date] = None
+    transferred_from_cast_id: Optional[int] = None
+    transferred_to_cast_id: Optional[int] = None
+    transferred_at: Optional[datetime] = None
     taiken_status: Optional[str] = None
     help_from_store_name: Optional[str] = None
 
@@ -147,6 +205,9 @@ class CastResponse(BaseModel):
             is_active=cast.is_active,
             is_retired=bool(getattr(cast, 'is_retired', False)),
             retired_at=getattr(cast, 'retired_at', None),
+            transferred_from_cast_id=getattr(cast, 'transferred_from_cast_id', None),
+            transferred_to_cast_id=getattr(cast, 'transferred_to_cast_id', None),
+            transferred_at=getattr(cast, 'transferred_at', None),
             help_from_store_name=help_store_name,
         )
 
@@ -327,6 +388,119 @@ def retire_cast(
     return {"message": "退店しました"}
 
 
+@router.post("/{store_id}/{cast_id}/transfer", response_model=CastResponse)
+def transfer_cast(
+    store_id: int,
+    cast_id: int,
+    data: CastTransferRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Move a cast to another store by creating a new active cast and linking history."""
+    if current_user.role not in MANAGER_ROLES:
+        raise HTTPException(status_code=403, detail="移籍は管理者・編集者のみ実行できます")
+    if data.target_store_id == store_id:
+        raise HTTPException(status_code=400, detail="移籍先は現在と別の店舗を選択してください")
+
+    source = db.query(models.Cast).filter(
+        models.Cast.id == cast_id,
+        models.Cast.store_id == store_id,
+        models.Cast.is_active == True,
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="キャストが見つかりません")
+
+    target_store = db.query(models.Store).filter(
+        models.Store.id == data.target_store_id,
+        models.Store.is_active == True,
+    ).first()
+    if not target_store:
+        raise HTTPException(status_code=404, detail="移籍先店舗が見つかりません")
+
+    active_shift = db.query(models.ConfirmedShift).filter(
+        models.ConfirmedShift.cast_id == source.id,
+        models.ConfirmedShift.actual_start.isnot(None),
+        models.ConfirmedShift.actual_end.is_(None),
+        models.ConfirmedShift.is_absent == False,
+    ).first()
+    if active_shift:
+        raise HTTPException(status_code=400, detail="出勤中のキャストは退勤後に移籍してください")
+
+    active_assignment = db.query(models.CastAssignment).filter(
+        models.CastAssignment.cast_id == source.id,
+        models.CastAssignment.ended_at.is_(None),
+    ).first()
+    if active_assignment:
+        raise HTTPException(status_code=400, detail="接客中のキャストは担当終了後に移籍してください")
+
+    now = datetime.utcnow()
+    today_label = date.today().isoformat()
+    source_store_name = source.store.name if source.store else str(store_id)
+    source_code = source.cast_code or str(source.id)
+    original_notes = source.notes or ""
+
+    new_cast = models.Cast(
+        store_id=target_store.id,
+        user_id=source.user_id,
+        cast_code=generate_cast_code(db, target_store.id),
+        stage_name=source.stage_name,
+        real_name=source.real_name,
+        rank=source.rank,
+        hourly_rate=source.hourly_rate,
+        help_hourly_rate=source.help_hourly_rate,
+        alcohol_tolerance=source.alcohol_tolerance,
+        main_time_slot=source.main_time_slot,
+        transport_need=source.transport_need,
+        nearest_station=source.nearest_station,
+        notes="\n".join(
+            part for part in [
+                original_notes,
+                f"移籍元: {source_store_name} / 旧キャストID: {source_code} / {today_label}",
+            ] if part
+        ),
+        photo_path=source.photo_path,
+        birthday=source.birthday,
+        employment_start_date=source.employment_start_date,
+        last_rate_change_date=source.last_rate_change_date,
+        is_active=True,
+        is_retired=False,
+        retired_at=None,
+        transferred_from_cast_id=source.id,
+        transferred_at=now,
+        taiken_status=source.taiken_status,
+    )
+    db.add(new_cast)
+    db.flush()
+
+    source.user_id = None
+    source.is_active = False
+    source.is_retired = True
+    source.retired_at = date.today()
+    source.transferred_to_cast_id = new_cast.id
+    source.transferred_at = now
+    source.notes = "\n".join(
+        part for part in [
+            original_notes,
+            f"移籍先: {target_store.name} / 新キャストID: {new_cast.cast_code} / {today_label}",
+        ] if part
+    )
+
+    if new_cast.user_id:
+        linked_user = db.query(models.User).filter(models.User.id == new_cast.user_id).first()
+        if linked_user and linked_user.store_id == store_id:
+            linked_user.store_id = target_store.id
+
+    db.add(models.OrderItemLog(
+        store_id=store_id,
+        action="cast_transfer",
+        item_name=f"移籍: {source.stage_name} {source_store_name} -> {target_store.name}",
+        changed_by=current_user.id,
+    ))
+    db.commit()
+    db.refresh(new_cast)
+    return CastResponse.from_orm_cast(new_cast)
+
+
 @router.post("/{store_id}/{cast_id}/photo")
 async def upload_cast_photo(
     store_id: int,
@@ -369,22 +543,27 @@ def get_cast_stats(
     if not cast:
         raise HTTPException(status_code=404, detail="キャストが見つかりません")
 
-    # 自店のシフト
+    lineage_casts = _get_transfer_lineage_casts(db, cast)
+    lineage_cast_ids = [c.id for c in lineage_casts]
+
+    # 移籍前後のキャストIDに紐づくシフトをまとめて集計する
     own_shifts = db.query(models.ConfirmedShift).filter(
-        models.ConfirmedShift.cast_id == cast_id,
-        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.cast_id.in_(lineage_cast_ids),
     ).all()
 
-    # ヘルプ先（他店）のシフトも集約: このキャストの名前で他店にヘルプ出勤した記録
-    help_shifts = []
-    if cast.stage_name and not cast.stage_name.startswith("[ヘルプ]"):
-        help_shifts = db.query(models.ConfirmedShift).filter(
-            models.ConfirmedShift.help_from_store_id == store_id,
-            models.ConfirmedShift.help_cast_name == cast.stage_name,
-            models.ConfirmedShift.store_id != store_id,
-        ).all()
+    # ヘルプ先（他店）のシフトも集約: 各所属時点の名前・店舗でヘルプ出勤した記録
+    shifts_by_id = {s.id: s for s in own_shifts}
+    for lineage_cast in lineage_casts:
+        if lineage_cast.stage_name and not lineage_cast.stage_name.startswith("[ヘルプ]"):
+            help_shifts = db.query(models.ConfirmedShift).filter(
+                models.ConfirmedShift.help_from_store_id == lineage_cast.store_id,
+                models.ConfirmedShift.help_cast_name == lineage_cast.stage_name,
+                models.ConfirmedShift.store_id != lineage_cast.store_id,
+            ).all()
+            for help_shift in help_shifts:
+                shifts_by_id[help_shift.id] = help_shift
 
-    shifts = own_shifts + help_shifts
+    shifts = list(shifts_by_id.values())
 
     total_minutes = 0.0
     weekday_minutes: dict[int, list[float]] = defaultdict(list)
@@ -444,16 +623,17 @@ def get_cast_stats(
 
     # POSオーダー（OrderItem）からドリンク実績を集計
     # このキャストに紐づく全オーダー（自店 + ヘルプ先の[ヘルプ]キャスト分）
-    pos_cast_ids = [cast_id]
-    if not cast.stage_name.startswith("[ヘルプ]"):
-        # ヘルプ先で作られた[ヘルプ]cast_idも集約
-        help_cast_ids = [
-            c.id for c in db.query(models.Cast.id).filter(
-                models.Cast.stage_name == f"[ヘルプ]{cast.stage_name}",
-                models.Cast.is_active == True,
-            ).all()
-        ]
-        pos_cast_ids.extend(help_cast_ids)
+    pos_cast_ids = set(lineage_cast_ids)
+    for lineage_cast in lineage_casts:
+        if lineage_cast.stage_name and not lineage_cast.stage_name.startswith("[ヘルプ]"):
+            # ヘルプ先で作られた[ヘルプ]cast_idも集約
+            help_cast_ids = [
+                c.id for c in db.query(models.Cast.id).filter(
+                    models.Cast.stage_name == f"[ヘルプ]{lineage_cast.stage_name}",
+                    models.Cast.is_active == True,
+                ).all()
+            ]
+            pos_cast_ids.update(help_cast_ids)
 
     from sqlalchemy import func as sqlfunc
     pos_items = db.query(
@@ -461,7 +641,7 @@ def get_cast_stats(
         sqlfunc.sum(models.OrderItem.quantity),
         sqlfunc.sum(models.OrderItem.amount),
     ).filter(
-        models.OrderItem.cast_id.in_(pos_cast_ids),
+        models.OrderItem.cast_id.in_(list(pos_cast_ids)),
         models.OrderItem.canceled_at.is_(None),
     ).group_by(models.OrderItem.item_type).all()
 
@@ -570,24 +750,31 @@ def get_cast_shift_detail(
     current_user: models.User = Depends(get_current_user),
 ):
     """出勤履歴1件の詳細: 日報スナップショットの cast_block と担当伝票一覧"""
+    request_cast = db.query(models.Cast).filter(
+        models.Cast.id == cast_id,
+        models.Cast.store_id == store_id,
+    ).first()
+    lineage_cast_ids = _get_transfer_lineage_cast_ids(db, request_cast) if request_cast else [cast_id]
+
     shift = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.id == shift_id,
-        models.ConfirmedShift.cast_id == cast_id,
-        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.cast_id.in_(lineage_cast_ids),
     ).first()
     if not shift:
         raise HTTPException(status_code=404, detail="シフトが見つかりません")
+    detail_store_id = shift.store_id
+    detail_cast_id = shift.cast_id or cast_id
 
     # スナップショット（最新バージョン）
     snap = db.query(models.DailyReportSnapshot).filter(
-        models.DailyReportSnapshot.store_id == store_id,
+        models.DailyReportSnapshot.store_id == detail_store_id,
         models.DailyReportSnapshot.business_date == shift.date,
     ).order_by(models.DailyReportSnapshot.version.desc()).first()
 
     cast_block = None
     if snap and snap.payload:
         for b in snap.payload.get("cast_attendance", []):
-            if b.get("cast_id") == cast_id:
+            if b.get("cast_id") == detail_cast_id:
                 cast_block = b
                 break
 
@@ -598,7 +785,7 @@ def get_cast_shift_detail(
 
     # その日の全伝票（OrderItem 集計用・CastAssignment とは別に、シャンパン分配もカバー）
     day_tickets = db.query(models.Ticket).filter(
-        models.Ticket.store_id == store_id,
+        models.Ticket.store_id == detail_store_id,
         models.Ticket.deleted_at.is_(None),
         models.Ticket.started_at >= day_start_utc,
         models.Ticket.started_at < day_end_utc,
@@ -606,7 +793,7 @@ def get_cast_shift_detail(
 
     # 対応した伝票（CastAssignment のある伝票）
     assigned_tids = set(r[0] for r in db.query(models.CastAssignment.ticket_id).filter(
-        models.CastAssignment.cast_id == cast_id,
+        models.CastAssignment.cast_id == detail_cast_id,
         models.CastAssignment.started_at >= day_start_utc,
         models.CastAssignment.started_at < day_end_utc,
     ).distinct().all())
@@ -633,7 +820,7 @@ def get_cast_shift_detail(
         for o in (t.order_items or []):
             if o.canceled_at:
                 continue
-            if o.cast_id == cast_id:
+            if o.cast_id == detail_cast_id:
                 if o.item_type == "drink_s": t_s += (o.quantity or 0)
                 elif o.item_type == "drink_l": t_l += (o.quantity or 0)
                 elif o.item_type == "drink_mg": t_mg += (o.quantity or 0)
@@ -641,13 +828,13 @@ def get_cast_shift_detail(
             if o.item_type == "champagne":
                 dist = o.cast_distribution or []
                 if not dist:
-                    if o.cast_id == cast_id:
+                    if o.cast_id == detail_cast_id:
                         t_champ += (o.quantity or 0)
                         t_champ_amount += (o.incentive_amount or 0)
                 else:
                     if (o.amount or 0) > 0:
                         for e in dist:
-                            if e.get("cast_id") == cast_id:
+                            if e.get("cast_id") == detail_cast_id:
                                 t_champ += 1
                                 t_champ_amount += int((o.incentive_amount or 0) * e.get("ratio", 0) / 100)
                                 break
@@ -677,7 +864,7 @@ def get_cast_shift_detail(
             if o.canceled_at:
                 continue
             # 非シャンパンドリンク: cast_id 完全一致で集計
-            if o.cast_id == cast_id and o.item_type in drink_counts:
+            if o.cast_id == detail_cast_id and o.item_type in drink_counts:
                 drink_counts[o.item_type] += (o.quantity or 0)
             # シャンパン: cast_distribution の按分
             if o.item_type == "champagne":
@@ -686,13 +873,13 @@ def get_cast_shift_detail(
                 # dist を持つ「本体」行のみ採用
                 if not dist:
                     # cast_id 完全一致(キャスト指定なし×キャスト選択シャンパン)
-                    if o.cast_id == cast_id:
+                    if o.cast_id == detail_cast_id:
                         champagne_count += (o.quantity or 0)
                         champagne_sales += (o.amount or 0)
                         champagne_incentive += (o.incentive_amount or 0)
                     continue
                 for entry in dist:
-                    if entry.get("cast_id") == cast_id:
+                    if entry.get("cast_id") == detail_cast_id:
                         ratio = entry.get("ratio", 0)
                         # dist は同グループの全注文に同じJSONが入るため、amount>0 の行だけ集計
                         if (o.amount or 0) > 0:
@@ -718,33 +905,42 @@ def get_cast_shifts(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    cast = db.query(models.Cast).filter(
+        models.Cast.id == cast_id,
+        models.Cast.store_id == store_id,
+    ).first()
+    if not cast:
+        raise HTTPException(status_code=404, detail="キャストが見つかりません")
+
+    lineage_cast_ids = _get_transfer_lineage_cast_ids(db, cast)
     shifts = db.query(models.ConfirmedShift).filter(
-        models.ConfirmedShift.cast_id == cast_id,
-        models.ConfirmedShift.store_id == store_id,
+        models.ConfirmedShift.cast_id.in_(lineage_cast_ids),
     ).order_by(models.ConfirmedShift.date.desc()).limit(60).all()
 
     # 日報スナップショットから cast_id × date での cast_block を事前取得
     # （営業締めで actual_start/end がクリアされたシフトの実勤務時間復元用）
     dates = list({s.date for s in shifts})
-    snapshot_blocks: dict = {}  # (cast_id, date) -> cast_block
+    shift_store_ids = list({s.store_id for s in shifts})
+    snapshot_blocks: dict = {}  # (store_id, cast_id, date) -> cast_block
     if dates:
         snaps = db.query(models.DailyReportSnapshot).filter(
-            models.DailyReportSnapshot.store_id == store_id,
+            models.DailyReportSnapshot.store_id.in_(shift_store_ids),
             models.DailyReportSnapshot.business_date.in_(dates),
         ).all()
         # 各日付で最新バージョンのみ採用
         best_by_date: dict = {}
         for sn in snaps:
-            cur = best_by_date.get(sn.business_date)
+            best_key = (sn.store_id, sn.business_date)
+            cur = best_by_date.get(best_key)
             if cur is None or (sn.version or 0) > (cur.version or 0):
-                best_by_date[sn.business_date] = sn
-        for d, sn in best_by_date.items():
+                best_by_date[best_key] = sn
+        for (snap_store_id, d), sn in best_by_date.items():
             payload = sn.payload or {}
             for b in payload.get("cast_attendance", []):
                 cid = b.get("cast_id")
                 if cid is None:
                     continue
-                key = (int(cid), d)
+                key = (snap_store_id, int(cid), d)
                 if key not in snapshot_blocks:
                     snapshot_blocks[key] = b
 
@@ -764,7 +960,7 @@ def get_cast_shifts(
             return iso_str
 
     for s in shifts:
-        snap = snapshot_blocks.get((cast_id, s.date)) if cast_id else None
+        snap = snapshot_blocks.get((s.store_id, s.cast_id, s.date)) if s.cast_id else None
         actual_start_iso = s.actual_start.isoformat() if s.actual_start else None
         actual_end_iso = s.actual_end.isoformat() if s.actual_end else None
         if actual_start_iso is None and snap:
@@ -791,6 +987,8 @@ def get_cast_shifts(
             champagne_back = champagne_back if champagne_back is not None else int(snap.get("champagne_amount") or 0)
         result.append({
             "id": s.id,
+            "store_id": s.store_id,
+            "cast_id": s.cast_id,
             "date": s.date.isoformat(),
             "planned_start": s.planned_start,
             "planned_end": s.planned_end,
@@ -830,14 +1028,14 @@ class AttendanceTimeUpdate(BaseModel):
 @router.get("/attendance/working/{store_id}")
 def get_attendance(store_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """本日勤務中のキャスト一覧（actual_start あり・actual_end なし）"""
-    today = date.today()
+    lookup_dates = _attendance_lookup_dates()
     from sqlalchemy import or_
     # 当欠（is_absent=True）または出勤済み（actual_start あり）を取得
     shifts = (
         db.query(models.ConfirmedShift)
         .filter(
             models.ConfirmedShift.store_id == store_id,
-            models.ConfirmedShift.date == today,
+            models.ConfirmedShift.date.in_(lookup_dates),
             or_(
                 models.ConfirmedShift.actual_start.isnot(None),
                 models.ConfirmedShift.is_absent == True,
@@ -904,8 +1102,7 @@ class HelpClockInRequest(BaseModel):
 @router.post("/attendance/help-clock-in")
 def help_clock_in(data: HelpClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """ヘルプ出勤打刻: Castレコードを作成(または再利用)して紐付け"""
-    from datetime import timedelta
-    today = date.today()
+    today = _current_business_date()
 
     now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
@@ -953,7 +1150,7 @@ class TaikenClockInRequest(BaseModel):
 @router.post("/attendance/taiken-clock-in")
 def taiken_clock_in(data: TaikenClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """体験入店打刻: Castレコード「[体入]名前」を作成 or 再利用して紐付け"""
-    today = date.today()
+    today = _current_business_date()
     now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
     taiken_name = f"[体入]{data.cast_name}"
@@ -1027,8 +1224,8 @@ def update_taiken_status(
 @router.post("/attendance/clock-in")
 def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     """出勤打刻: 本日のシフトに actual_start をセット。シフトがなければ当日分を新規作成"""
-    today = date.today()
-    from datetime import timedelta
+    today = _current_business_date()
+    lookup_dates = _attendance_lookup_dates()
 
     now = _bar_hhmm_to_utc(data.actual_start, today) if data.actual_start else datetime.utcnow()
 
@@ -1036,7 +1233,7 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
     already = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.cast_id == data.cast_id,
         models.ConfirmedShift.store_id == data.store_id,
-        models.ConfirmedShift.date == today,
+        models.ConfirmedShift.date.in_(lookup_dates),
         models.ConfirmedShift.actual_start.isnot(None),
         models.ConfirmedShift.actual_end.is_(None),
     ).first()
@@ -1049,7 +1246,7 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
         shift = db.query(models.ConfirmedShift).filter(
             models.ConfirmedShift.cast_id == data.cast_id,
             models.ConfirmedShift.store_id == data.store_id,
-            models.ConfirmedShift.date == today,
+            models.ConfirmedShift.date.in_(lookup_dates),
             models.ConfirmedShift.actual_start.is_(None),
         ).first()
         if shift:
@@ -1072,7 +1269,7 @@ def clock_in(data: ClockInRequest, db: Session = Depends(get_db), current_user: 
     empty_shift = db.query(models.ConfirmedShift).filter(
         models.ConfirmedShift.cast_id == data.cast_id,
         models.ConfirmedShift.store_id == data.store_id,
-        models.ConfirmedShift.date == today,
+        models.ConfirmedShift.date.in_(lookup_dates),
         models.ConfirmedShift.actual_start.is_(None),
     ).first()
     if empty_shift:

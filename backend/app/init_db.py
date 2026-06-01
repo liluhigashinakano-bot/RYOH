@@ -1,6 +1,49 @@
+import re
+
+from sqlalchemy import text
+
 from .database import engine, SessionLocal
 from . import models
 from .auth import get_password_hash
+
+
+def _sqlite_columns(conn, table_name: str) -> set[str]:
+    rows = conn.execute(text(f'PRAGMA table_info("{table_name}")')).fetchall()
+    return {row[1] for row in rows}
+
+
+def _run_sqlite_compat_migration(conn, sql: str) -> bool:
+    normalized = " ".join(sql.split())
+
+    add_column = re.match(
+        r"ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)\s+(.+)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if add_column:
+        table_name, column_name, definition = add_column.groups()
+        if column_name not in _sqlite_columns(conn, table_name):
+            conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {definition}'))
+        return True
+
+    rename_column = re.match(
+        r"ALTER TABLE\s+(\w+)\s+RENAME COLUMN\s+(\w+)\s+TO\s+(\w+)$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if rename_column:
+        table_name, old_name, new_name = rename_column.groups()
+        columns = _sqlite_columns(conn, table_name)
+        if old_name in columns and new_name not in columns:
+            conn.execute(text(f'ALTER TABLE "{table_name}" RENAME COLUMN "{old_name}" TO "{new_name}"'))
+        return True
+
+    if re.match(r"ALTER TABLE\s+\w+\s+ALTER COLUMN\s+", normalized, re.IGNORECASE):
+        return True
+    if normalized.upper().startswith("ALTER TYPE "):
+        return True
+
+    return False
 
 
 def _run_migrations(engine):
@@ -18,6 +61,9 @@ def _run_migrations(engine):
         # Cast: 退店フラグ追加
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS is_retired BOOLEAN DEFAULT false",
         "ALTER TABLE casts ADD COLUMN IF NOT EXISTS retired_at DATE",
+        "ALTER TABLE casts ADD COLUMN IF NOT EXISTS transferred_from_cast_id INTEGER REFERENCES casts(id)",
+        "ALTER TABLE casts ADD COLUMN IF NOT EXISTS transferred_to_cast_id INTEGER REFERENCES casts(id)",
+        "ALTER TABLE casts ADD COLUMN IF NOT EXISTS transferred_at TIMESTAMP",
         # ConfirmedShift: cast_id をnullable化・ヘルプキャスト名追加
         "ALTER TABLE confirmed_shifts ALTER COLUMN cast_id DROP NOT NULL",
         "ALTER TABLE confirmed_shifts ADD COLUMN IF NOT EXISTS help_cast_name VARCHAR(100)",
@@ -74,14 +120,26 @@ def _run_migrations(engine):
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS nearest_station VARCHAR(50)",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS related_lines JSON",
         "ALTER TABLE stores ADD COLUMN IF NOT EXISTS last_train_routes JSON",
+        # POS read-path indexes
+        "CREATE INDEX IF NOT EXISTS ix_tickets_store_closed_deleted_started ON tickets (store_id, is_closed, deleted_at, started_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_tickets_store_closed_deleted_ended ON tickets (store_id, is_closed, deleted_at, ended_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_tickets_store_closed_deleted_display ON tickets (store_id, is_closed, deleted_at, display_order)",
+        "CREATE INDEX IF NOT EXISTS ix_order_items_ticket_canceled ON order_items (ticket_id, canceled_at)",
+        "CREATE INDEX IF NOT EXISTS ix_order_items_ticket_type_canceled ON order_items (ticket_id, item_type, canceled_at)",
+        "CREATE INDEX IF NOT EXISTS ix_cast_assignments_ticket_ended ON cast_assignments (ticket_id, ended_at)",
+        "CREATE INDEX IF NOT EXISTS ix_order_item_logs_store_changed ON order_item_logs (store_id, changed_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_order_item_logs_ticket_changed ON order_item_logs (ticket_id, changed_at DESC)",
         # User: email → username リネーム
         "ALTER TABLE users RENAME COLUMN email TO username",
     ]
     # 各マイグレーションを個別トランザクションで実行（1つ失敗しても他に影響しない）
+    is_sqlite = engine.dialect.name == "sqlite"
     for sql in migrations:
         try:
             with engine.begin() as conn:
-                conn.execute(__import__('sqlalchemy').text(sql))
+                if is_sqlite and _run_sqlite_compat_migration(conn, sql):
+                    continue
+                conn.execute(text(sql))
         except Exception as e:
             print(f"[MIGRATION SKIP] {sql[:60]}... → {e}")
 

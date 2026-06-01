@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func as sa_func
-from sqlalchemy.orm import Session, object_session
+from sqlalchemy.orm import Session, object_session, selectinload
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -15,6 +15,47 @@ from ..services.incentive import (
 )
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
+
+
+def _ticket_load_options():
+    return (
+        selectinload(models.Ticket.customer),
+        selectinload(models.Ticket.motivation_cast),
+        selectinload(models.Ticket.featured_cast),
+        selectinload(models.Ticket.order_items).selectinload(models.OrderItem.cast),
+        selectinload(models.Ticket.assignments).selectinload(models.CastAssignment.cast),
+    )
+
+
+def _parse_date_param(value: Optional[str], *, end: bool = False) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date parameter")
+    if end and len(value) == 10:
+        dt += timedelta(days=1)
+    return dt
+
+
+def _coerce_int(value) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _collect_cast_name_map(db: Session, tickets: List[models.Ticket]) -> dict[int, str]:
+    cast_ids: set[int] = set()
+    for ticket in tickets:
+        cast_ids.update(cid for cid in (_coerce_int(v) for v in (ticket.featured_cast_ids or [])) if cid is not None)
+        cast_ids.update(cid for cid in (_coerce_int(v) for v in (ticket.motivation_cast_ids or [])) if cid is not None)
+    if not cast_ids:
+        return {}
+    rows = db.query(models.Cast.id, models.Cast.stage_name).filter(models.Cast.id.in_(cast_ids)).all()
+    return {cid: name for cid, name in rows}
 
 
 _ITEM_TYPE_LABELS = {
@@ -49,7 +90,7 @@ def _sync_ticket_totals(ticket: models.Ticket, db: Session) -> None:
     ).count()
 
 
-def _resolve_motivation_cast_names(ticket: models.Ticket) -> list[str]:
+def _resolve_motivation_cast_names(ticket: models.Ticket, cast_name_map: Optional[dict[int, str]] = None) -> list[str]:
     """motivation_cast_ids からキャスト名リストを取得"""
     ids = ticket.motivation_cast_ids or []
     if not ids:
@@ -57,15 +98,14 @@ def _resolve_motivation_cast_names(ticket: models.Ticket) -> list[str]:
         if ticket.motivation_cast_id and getattr(ticket, 'motivation_cast', None):
             return [ticket.motivation_cast.stage_name]
         return []
-    from sqlalchemy.orm import Session as _S
-    from ..database import SessionLocal
-    db = SessionLocal()
-    try:
-        casts = db.query(models.Cast).filter(models.Cast.id.in_(ids)).all()
+    if cast_name_map is not None:
+        return [cast_name_map.get(_coerce_int(cid), f"ID{cid}") for cid in ids]
+    session = object_session(ticket)
+    if session is not None:
+        casts = session.query(models.Cast).filter(models.Cast.id.in_(ids)).all()
         name_map = {c.id: c.stage_name for c in casts}
         return [name_map.get(cid, f"ID{cid}") for cid in ids]
-    finally:
-        db.close()
+    return [f"ID{cid}" for cid in ids]
 
 
 def _to_bar_time(utc_dt: Optional[datetime]) -> str:
@@ -81,7 +121,7 @@ def _to_bar_time(utc_dt: Optional[datetime]) -> str:
 CAST_DRINK_TYPES = {"drink_s", "drink_l", "drink_mg", "champagne", "custom_menu"}
 
 
-def _ticket_extra(ticket: models.Ticket) -> dict:
+def _ticket_extra(ticket: models.Ticket, cast_name_map: Optional[dict[int, str]] = None) -> dict:
     """伝票の追加情報（キャスト名・E開始時刻・最終キャストドリンク時刻）を返す"""
     # 接客中キャスト（CastAssignment の ended_at が null の active 全部）
     current_casts: list = []
@@ -106,17 +146,18 @@ def _ticket_extra(ticket: models.Ticket) -> dict:
         featured_ids = [ticket.featured_cast_id]
     featured_names: list = []
     if featured_ids:
-        session = object_session(ticket)
-        by_id: dict = {}
-        if session is not None:
-            rows = session.query(models.Cast).filter(models.Cast.id.in_(featured_ids)).all()
-            by_id = {c.id: c for c in rows}
         for cid in featured_ids:
-            c = by_id.get(cid)
-            if c is None and ticket.featured_cast and ticket.featured_cast.id == cid:
-                c = ticket.featured_cast
-            if c is not None:
-                featured_names.append(c.stage_name)
+            cid_int = _coerce_int(cid)
+            name = cast_name_map.get(cid_int) if cast_name_map is not None else None
+            if name is None and cid_int is not None and ticket.featured_cast and ticket.featured_cast.id == cid_int:
+                name = ticket.featured_cast.stage_name
+            if name is None:
+                session = object_session(ticket)
+                if session is not None and cid_int is not None:
+                    c = session.query(models.Cast).filter(models.Cast.id == cid_int).first()
+                    name = c.stage_name if c else None
+            if name is not None:
+                featured_names.append(name)
     featured_cast_name = featured_names[0] if featured_names else None
     # 後方互換: current_cast_name は推しキャスト先頭名（既存表示用）
     current_cast_name = featured_cast_name
@@ -319,8 +360,8 @@ class TicketDetailResponse(TicketResponse):
     order_items: list[OrderItemResponse] = []
 
 
-def _to_response(ticket: models.Ticket) -> dict:
-    extra = _ticket_extra(ticket)
+def _to_response(ticket: models.Ticket, cast_name_map: Optional[dict[int, str]] = None) -> dict:
+    extra = _ticket_extra(ticket, cast_name_map)
     data = {
         "id": ticket.id,
         "store_id": ticket.store_id,
@@ -357,7 +398,7 @@ def _to_response(ticket: models.Ticket) -> dict:
         "customer_name": extra["customer_name"],
         "motivation_cast_name": ticket.motivation_cast.stage_name if getattr(ticket, 'motivation_cast', None) else None,
         "motivation_cast_ids": ticket.motivation_cast_ids or [],
-        "motivation_cast_names": _resolve_motivation_cast_names(ticket),
+        "motivation_cast_names": _resolve_motivation_cast_names(ticket, cast_name_map),
         "payment_method": ticket.payment_method.value if ticket.payment_method else None,
         "cash_amount": ticket.cash_amount or 0,
         "card_amount": ticket.card_amount or 0,
@@ -376,6 +417,10 @@ def get_order_logs(
     from sqlalchemy import or_
     logs = (
         db.query(models.OrderItemLog)
+        .options(
+            selectinload(models.OrderItemLog.ticket),
+            selectinload(models.OrderItemLog.changed_by_user),
+        )
         .outerjoin(models.Ticket, models.OrderItemLog.ticket_id == models.Ticket.id)
         .filter(
             or_(
@@ -389,7 +434,7 @@ def get_order_logs(
     )
     result = []
     for log in logs:
-        ticket = db.query(models.Ticket).filter(models.Ticket.id == log.ticket_id).first() if log.ticket_id else None
+        ticket = log.ticket
         result.append({
             "id": log.id,
             "changed_at": log.changed_at,
@@ -414,10 +459,15 @@ def get_ticket(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    ticket = (
+        db.query(models.Ticket)
+        .options(*_ticket_load_options())
+        .filter(models.Ticket.id == ticket_id)
+        .first()
+    )
     if not ticket:
         raise HTTPException(status_code=404, detail="伝票が見つかりません")
-    data = _to_response(ticket)
+    data = _to_response(ticket, _collect_cast_name_map(db, [ticket]))
     data["order_items"] = [
         OrderItemResponse.model_validate(i)
         for i in ticket.order_items
@@ -429,16 +479,30 @@ def get_ticket(
 def get_tickets(
     store_id: int,
     is_closed: Optional[bool] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    query = db.query(models.Ticket).filter(
+    query = db.query(models.Ticket).options(*_ticket_load_options()).filter(
         models.Ticket.store_id == store_id,
         models.Ticket.deleted_at.is_(None),
     )
     if is_closed is not None:
         query = query.filter(models.Ticket.is_closed == is_closed)
-    tickets = query.order_by(models.Ticket.started_at.desc()).all()
+    start_dt = _parse_date_param(date_from)
+    end_dt = _parse_date_param(date_to, end=True)
+    date_column = models.Ticket.ended_at if is_closed is True else models.Ticket.started_at
+    if start_dt is not None:
+        query = query.filter(date_column >= start_dt)
+    if end_dt is not None:
+        query = query.filter(date_column < end_dt)
+    query = query.order_by((models.Ticket.ended_at if is_closed is True else models.Ticket.started_at).desc())
+    if limit is not None:
+        limit = max(1, min(limit, 1000))
+        query = query.limit(limit)
+    tickets = query.all()
     # オープン中は display_order ASC → 卓番号自然順
     if is_closed is False:
         import re
@@ -451,8 +515,9 @@ def get_tickets(
             return (order, tn, 0, tn)
         tickets.sort(key=_sort_key)
     result = []
+    cast_name_map = _collect_cast_name_map(db, tickets)
     for t in tickets:
-        data = _to_response(t)
+        data = _to_response(t, cast_name_map)
         data["order_items"] = [
             {"id": i.id, "item_type": i.item_type, "item_name": _item_label(i.item_name, i.item_type), "quantity": i.quantity, "unit_price": i.unit_price, "amount": i.amount,
              "created_at": i.created_at.isoformat() if i.created_at else None}

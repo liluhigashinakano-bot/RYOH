@@ -151,6 +151,9 @@ class Cast(Base):
     is_active = Column(Boolean, default=True)
     is_retired = Column(Boolean, default=False)
     retired_at = Column(Date, nullable=True)
+    transferred_from_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)
+    transferred_to_cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)
+    transferred_at = Column(DateTime, nullable=True)
     taiken_status = Column(String(20), nullable=True)  # null=通常 / taiken=体入中 / honnyuu=本入 / fusaiyou=不採用 / sai_taiken=再体入
     created_at = Column(DateTime, default=datetime.utcnow)
 

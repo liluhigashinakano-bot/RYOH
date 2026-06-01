@@ -68,6 +68,31 @@ function shouldHideCastOrderCounter(type: string, entry: any, hideCastOrderCount
   return type === 'drink_l' || type === 'drink_mg' || (type === 'custom_menu' && entry?.has_incentive === true)
 }
 
+function buildWorkingCastOptions(castsAll: any[], workingAttendance: any[]) {
+  const castsById = new Map<number, any>()
+  for (const cast of castsAll || []) {
+    const id = Number(cast?.id)
+    if (Number.isFinite(id)) castsById.set(id, cast)
+  }
+
+  const seen = new Set<number>()
+  const result: any[] = []
+  for (const row of workingAttendance || []) {
+    const id = Number(row?.cast_id)
+    if (!Number.isFinite(id) || row?.actual_end || row?.is_absent || seen.has(id)) continue
+    const cast = castsById.get(id)
+    if (cast?.is_active === false) continue
+    result.push({
+      ...(cast || {}),
+      id,
+      stage_name: cast?.stage_name || row?.cast_name || `Cast${id}`,
+      is_active: cast?.is_active ?? true,
+    })
+    seen.add(id)
+  }
+  return result
+}
+
 const TABLE_NOS = [
   ...['A1','A2','A3','A4','A5','A6'],
   ...['B1','B2','B3','B4','B5','B6'],
@@ -2116,7 +2141,9 @@ function ClosedTicketHistory({ storeId, onDetail }: { storeId: number; onDetail:
 
   const { data: closed = [], isLoading } = useQuery({
     queryKey: ['tickets', storeId, 'closed', dateFrom, dateTo],
-    queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: true } }).then(r => r.data),
+    queryFn: () => apiClient.get('/api/tickets', {
+      params: { store_id: storeId, is_closed: true, date_from: dateFrom, date_to: dateTo },
+    }).then(r => r.data),
     enabled: !!storeId,
   })
 
@@ -3046,6 +3073,8 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
 }) {
   const [q, setQ] = useState('')
   const [selected, setSelected] = useState<number[]>(currentCastIds)
+  const qc = useQueryClient()
+  const openTicketsQueryKey = ['tickets', storeId, 'open'] as const
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
@@ -3061,9 +3090,10 @@ function ActiveCastsModal({ storeId, currentCastIds, ticketId, onSubmit, onClose
       .map((a: any) => a.cast_id)
   )
   const { data: openTickets = [] } = useQuery({
-    queryKey: ['tickets', storeId, 'open'],
+    queryKey: openTicketsQueryKey,
     queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
-    staleTime: 5000,
+    staleTime: 15000,
+    initialData: () => qc.getQueryData(openTicketsQueryKey),
   })
   const castOnOtherTable: Record<number, string> = {}
   for (const t of (openTickets as any[])) {
@@ -3170,18 +3200,16 @@ function CastSelectModal({ itemType, itemLabel, itemPrice, storeId, onSubmit, on
   const { data: castsAll = [] } = useQuery({
     queryKey: ['casts', storeId],
     queryFn: () => apiClient.get(`/api/casts/${storeId}`).then(r => r.data),
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   const { data: workingAttendance = [] } = useQuery({
     queryKey: ['attendance', storeId],
     queryFn: () => apiClient.get(`/api/casts/attendance/working/${storeId}`).then(r => r.data),
-    staleTime: 30000,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
-  const workingCastIds = new Set(
-    (workingAttendance as any[])
-      .filter((a: any) => a.cast_id != null && !a.actual_end && !a.is_absent)
-      .map((a: any) => a.cast_id)
-  )
-  const casts = (castsAll as any[]).filter((c: any) => c.is_active && workingCastIds.has(c.id))
+  const casts = buildWorkingCastOptions(castsAll as any[], workingAttendance as any[])
   const isChampagne = itemType === 'champagne'
 
   // 単一選択
@@ -3400,10 +3428,13 @@ function TicketDetailModal({ ticketId, storeId, onClose }: { ticketId: number; s
   })
 
   // 横断キャスト最新ドリンク用（オープン中伝票）
+  const openTicketsQueryKey = ['tickets', storeId, 'open'] as const
+
   const { data: openTicketsForTimers = [] } = useQuery({
-    queryKey: ['tickets', storeId, 'open'],
+    queryKey: openTicketsQueryKey,
     queryFn: () => apiClient.get('/api/tickets', { params: { store_id: storeId, is_closed: false } }).then(r => r.data),
-    staleTime: 5000,
+    staleTime: 15000,
+    initialData: () => qc.getQueryData(openTicketsQueryKey),
     enabled: !!storeId,
   })
   const detailCastLatestMap = useMemo(() => {
@@ -6653,6 +6684,7 @@ function CastAttendanceView({ storeId }: { storeId: number }) {
       }).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['attendance', storeId] })
+      qc.invalidateQueries({ queryKey: ['casts', storeId] })
       setShowClockIn(false)
       setHelpCastName('')
       setHelpStoreId('')

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Camera, User, X, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, Camera, User, X, Trash2 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import apiClient from '../../api/client'
 
@@ -50,12 +50,19 @@ export default function CastDetail() {
   const photoInputRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('info')
   const [showEdit, setShowEdit] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
   const [shiftDetail, setShiftDetail] = useState<any | null>(null)
 
   const isManager = user && ['administrator', 'superadmin', 'manager', 'editor'].includes(user.role)
 
   // storeId はキャストの store_id から取得するため、まずどの店舗か検索
   const storeIds = stores.map(s => s.id)
+
+  const { data: allStores = [] } = useQuery({
+    queryKey: ['stores-all'],
+    queryFn: () => apiClient.get('/api/stores', { params: { all: true } }).then(r => r.data),
+    enabled: !!user,
+  })
 
   // 全店舗からキャストを探す（簡易実装：URLにstoreIdを含めないパターン）
   const { data: cast, isLoading } = useQuery({
@@ -112,6 +119,17 @@ export default function CastDetail() {
     },
   })
 
+  const transferCast = useMutation({
+    mutationFn: (targetStoreId: number) =>
+      apiClient.post(`/api/casts/${storeId}/${id}/transfer`, { target_store_id: targetStoreId }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['casts'] })
+      qc.invalidateQueries({ queryKey: ['cast-detail', id] })
+      setShowTransfer(false)
+      navigate(`/casts/${res.data.id}`)
+    },
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -123,6 +141,7 @@ export default function CastDetail() {
   if (!cast) return <div className="text-gray-500 text-center py-20">キャストが見つかりません</div>
 
   const storeName = stores.find(s => s.id === storeId)?.name || ''
+  const transferStores = (allStores.length ? allStores : stores).filter((s: any) => s.id !== storeId)
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
@@ -168,6 +187,18 @@ export default function CastDetail() {
           {cast.main_time_slot && <p className="text-gray-500 text-xs mt-1">{cast.main_time_slot}</p>}
         </div>
         <div className="ml-auto flex gap-2">
+          {isManager && (
+            <button
+              onClick={() => {
+                transferCast.reset()
+                setShowTransfer(true)
+              }}
+              className="btn-secondary text-sm px-3 py-1.5 flex items-center gap-1.5"
+            >
+              <ArrowLeftRight className="w-4 h-4" />
+              移籍
+            </button>
+          )}
           <button
             onClick={() => setShowEdit(true)}
             className="btn-secondary text-sm px-3 py-1.5"
@@ -342,7 +373,12 @@ export default function CastDetail() {
 
       {/* 出勤履歴の詳細モーダル */}
       {shiftDetail && (
-        <ShiftDetailModal shift={shiftDetail} storeId={storeId} castId={id} onClose={() => setShiftDetail(null)} />
+        <ShiftDetailModal
+          shift={shiftDetail}
+          storeId={shiftDetail.store_id ?? storeId}
+          castId={String(shiftDetail.cast_id ?? id)}
+          onClose={() => setShiftDetail(null)}
+        />
       )}
 
       {/* 編集モーダル */}
@@ -355,6 +391,98 @@ export default function CastDetail() {
           isSaving={updateCast.isPending}
         />
       )}
+
+      {/* 移籍モーダル */}
+      {showTransfer && (
+        <TransferCastModal
+          cast={cast}
+          currentStoreName={storeName}
+          stores={transferStores}
+          onClose={() => {
+            transferCast.reset()
+            setShowTransfer(false)
+          }}
+          onTransfer={(targetStoreId) => transferCast.mutate(targetStoreId)}
+          isSaving={transferCast.isPending}
+          error={transferCast.error as any}
+        />
+      )}
+    </div>
+  )
+}
+
+function TransferCastModal({
+  cast,
+  currentStoreName,
+  stores,
+  onClose,
+  onTransfer,
+  isSaving,
+  error,
+}: {
+  cast: any
+  currentStoreName: string
+  stores: any[]
+  onClose: () => void
+  onTransfer: (targetStoreId: number) => void
+  isSaving: boolean
+  error?: any
+}) {
+  const [targetStoreId, setTargetStoreId] = useState('')
+  const effectiveTargetStoreId = targetStoreId || (stores[0]?.id ? String(stores[0].id) : '')
+  const targetStore = stores.find(s => String(s.id) === effectiveTargetStoreId)
+  const errorMessage = error?.response?.data?.detail || error?.message
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-night-800 border border-night-600 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center p-4 border-b border-night-600 sticky top-0 bg-night-800">
+          <h3 className="font-bold text-white">キャスト移籍</h3>
+          <button onClick={onClose}><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="bg-night-900/60 border border-night-700 rounded-xl p-3">
+            <p className="text-white font-bold">{cast.stage_name}</p>
+            <p className="text-sm text-gray-400 mt-1">{currentStoreName} / {cast.cast_code}</p>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-400 block mb-1">移籍先店舗</label>
+            <select
+              value={effectiveTargetStoreId}
+              onChange={e => setTargetStoreId(e.target.value)}
+              className="input-field w-full"
+              disabled={stores.length === 0 || isSaving}
+            >
+              {stores.map(store => (
+                <option key={store.id} value={store.id}>{store.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="text-sm text-gray-400 leading-relaxed">
+            {targetStore
+              ? `${targetStore.name} に新しいキャストIDで登録します。`
+              : '移籍できる店舗がありません。'}
+          </div>
+
+          {errorMessage && (
+            <div className="text-sm text-red-300 bg-red-900/20 border border-red-800/40 rounded-xl p-3">
+              {errorMessage}
+            </div>
+          )}
+        </div>
+        <div className="flex gap-3 p-4 border-t border-night-600">
+          <button onClick={onClose} className="btn-secondary flex-1" disabled={isSaving}>キャンセル</button>
+          <button
+            onClick={() => onTransfer(Number(effectiveTargetStoreId))}
+            disabled={!effectiveTargetStoreId || isSaving}
+            className="btn-primary flex-1"
+          >
+            {isSaving ? '移籍中...' : '決定'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -367,7 +495,7 @@ function ShiftDetailModal({ shift, storeId, castId, onClose }: {
 }) {
   // 日報スナップショットから当該シフト日のキャストブロックと伝票詳細を取得
   const { data: dayDetail } = useQuery({
-    queryKey: ['cast-shift-detail', storeId, castId, shift.date],
+    queryKey: ['cast-shift-detail', storeId, castId, shift.id],
     queryFn: () => apiClient.get(`/api/casts/${storeId}/${castId}/shifts/${shift.id}/detail`).then(r => r.data),
     enabled: !!storeId && !!castId && !!shift?.id,
   })
